@@ -1,0 +1,96 @@
+{
+  "version": "2026.11.1",
+  "rules": [
+    {
+      "code": "CF-ASSEMBLY",
+      "xpath": "//*[local-name()='CodeModule']",
+      "bucket": "Blocked",
+      "message": "References a custom assembly, which cannot be migrated.",
+      "article": "https://support.boldreports.com/kb/custom-assemblies"
+    },
+    {
+      "code": "CF-CODE-NET",
+      "xpath": "//*[local-name()='Code'][contains(., 'System.')]",
+      "bucket": "NeedsReview",
+      "message": "Contains embedded code that calls a framework type.",
+      "article": "https://support.boldreports.com/kb/embedded-code-net"
+    },
+    {
+      "code": "CF-CODE-SIMPLE",
+      "xpath": "//*[local-name()='Code']",
+      "bucket": "AutoFixed",
+      "message": "Contains simple embedded code, carried over as is.",
+      "article": "https://support.boldreports.com/kb/embedded-code-simple"
+    },
+    {
+      "code": "CF-SUBREPORT",
+      "xpath": "//*[local-name()='Subreport']",
+      "bucket": "NeedsReview",
+      "message": "Contains a subreport, so check navigation after upload.",
+      "article": "https://support.boldreports.com/kb/subreports"
+    },
+    {
+      "code": "CF-LOOKUP",
+      "xpath": "//*[local-name()='Value'][contains(., 'Lookup(') or contains(., 'LookupSet(') or contains(., 'RunningValue(') or contains(., 'Previous(') or contains(., 'Aggregate(')]",
+      "bucket": "NeedsReview",
+      "message": "Uses a scoped aggregate function.",
+      "article": "https://support.boldreports.com/kb/scoped-aggregates"
+    },
+    {
+      "code": "CF-MAP",
+      "xpath": "//*[local-name()='Map']",
+      "bucket": "NeedsReview",
+      "message": "Uses a map.",
+      "article": "https://support.boldreports.com/kb/maps"
+    },
+    {
+      "code": "CF-GAUGE",
+      "xpath": "//*[local-name()='GaugePanel']",
+      "bucket": "NeedsReview",
+      "message": "Uses a gauge.",
+      "article": "https://support.boldreports.com/kb/gauges"
+    },
+    {
+      "code": "CF-INTERACTIVE-SORT",
+      "xpath": "//*[local-name()='UserSort']",
+      "bucket": "NeedsReview",
+      "message": "Uses interactive sorting.",
+      "article": "https://support.boldreports.com/kb/interactive-sort"
+    },
+    {
+      "code": "CF-RICHTEXT",
+      "xpath": "//*[local-name()='MarkupType'][text()='HTML']",
+      "bucket": "NeedsReview",
+      "message": "Uses rich text inside a text box.",
+      "article": "https://support.boldreports.com/kb/rich-text"
+    },
+    {
+      "code": "CF-SHARED-DSET",
+      "xpath": "//*[local-name()='SharedDataSet']",
+      "bucket": "AutoFixed",
+      "message": "Uses a shared dataset.",
+      "article": "https://support.boldreports.com/kb/shared-datasets"
+    },
+    {
+      "code": "CF-SHARED-DS",
+      "xpath": "//*[local-name()='DataSourceReference']",
+      "bucket": "AutoFixed",
+      "message": "Uses a shared data source.",
+      "article": "https://support.boldreports.com/kb/shared-datasources"
+    },
+    {
+      "code": "CF-DOCMAP",
+      "xpath": "//*[local-name()='DocumentMapLabel']",
+      "bucket": "NeedsReview",
+      "message": "Uses a document map.",
+      "article": "https://support.boldreports.com/kb/document-maps"
+    },
+    {
+      "code": "CF-UNSUPPORTED-TYPE",
+      "xpath": "",
+      "bucket": "Blocked",
+      "message": "This item type is not migrated.",
+      "article": "https://support.boldreports.com/kb/unsupported-types"
+    }
+  ]
+}

@@ -1,0 +1,1043 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Bold Migrate — Complete Migration Workflow & Supported Features Guide</title>
+  <link rel="stylesheet" href="/css/tokens.css">
+  <style>
+    :root {
+      --bg: #0B0F19;
+      --card-bg: #111827;
+      --card-border: #1F2937;
+      --card-hover: #1E293B;
+      --text: #F3F4F6;
+      --text-muted: #9CA3AF;
+      --primary: #3B82F6;
+      --primary-hover: #2563EB;
+      --accent: #06B6D4;
+      --success: #10B981;
+      --warning: #F59E0B;
+      --danger: #EF4444;
+      --code-bg: #0F172A;
+      --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      --font-mono: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
+    }
+
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      background-color: var(--bg);
+      color: var(--text);
+      font-family: var(--font-sans);
+      line-height: 1.6;
+      font-size: 14.5px;
+      -webkit-font-smoothing: antialiased;
+    }
+
+    /* Top Navigation */
+    header.header {
+      position: sticky;
+      top: 0;
+      z-index: 100;
+      background: rgba(17, 24, 39, 0.92);
+      backdrop-filter: blur(12px);
+      border-bottom: 1px solid var(--card-border);
+      padding: 12px 28px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      text-decoration: none;
+      color: #fff;
+      font-weight: 700;
+      font-size: 17px;
+    }
+    .badge-enterprise {
+      background: rgba(59, 130, 246, 0.18);
+      color: #60A5FA;
+      border: 1px solid rgba(59, 130, 246, 0.35);
+      border-radius: 9999px;
+      font-size: 11px;
+      font-weight: 600;
+      padding: 2px 8px;
+    }
+    .nav-links {
+      display: flex;
+      gap: 20px;
+      align-items: center;
+    }
+    .nav-links a {
+      color: var(--text-muted);
+      text-decoration: none;
+      font-size: 13.5px;
+      font-weight: 500;
+      transition: color 0.15s;
+    }
+    .nav-links a:hover { color: #fff; }
+    .btn-console {
+      background: var(--primary);
+      color: #fff;
+      padding: 7px 16px;
+      border-radius: 6px;
+      font-weight: 600;
+      font-size: 13px;
+      text-decoration: none;
+      transition: background 0.15s;
+    }
+    .btn-console:hover { background: var(--primary-hover); }
+
+    /* Layout */
+    .container {
+      max-width: 1260px;
+      margin: 0 auto;
+      padding: 32px 24px 80px;
+    }
+
+    /* Hero Banner */
+    .hero {
+      text-align: center;
+      padding: 40px 16px 48px;
+      border-bottom: 1px solid var(--card-border);
+      margin-bottom: 40px;
+    }
+    .hero-tag {
+      display: inline-block;
+      font-size: 12px;
+      font-weight: 700;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      color: var(--accent);
+      background: rgba(6, 182, 212, 0.12);
+      border: 1px solid rgba(6, 182, 212, 0.25);
+      padding: 4px 12px;
+      border-radius: 9999px;
+      margin-bottom: 16px;
+    }
+    .hero h1 {
+      font-size: 38px;
+      font-weight: 800;
+      letter-spacing: -0.02em;
+      color: #fff;
+      margin-bottom: 14px;
+      line-height: 1.25;
+    }
+    .hero h1 span {
+      background: linear-gradient(135deg, #60A5FA 0%, #06B6D4 100%);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+    }
+    .hero p {
+      font-size: 16.5px;
+      color: var(--text-muted);
+      max-width: 780px;
+      margin: 0 auto 24px;
+    }
+
+    /* Quick Stats */
+    .stats-row {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+      gap: 16px;
+      margin-bottom: 40px;
+    }
+    .stat-card {
+      background: var(--card-bg);
+      border: 1px solid var(--card-border);
+      border-radius: 10px;
+      padding: 20px;
+      text-align: center;
+    }
+    .stat-val {
+      font-size: 28px;
+      font-weight: 800;
+      color: #fff;
+      margin-bottom: 4px;
+    }
+    .stat-label {
+      font-size: 12px;
+      color: var(--text-muted);
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+    }
+
+    /* Section Styling */
+    .section-title {
+      font-size: 24px;
+      font-weight: 700;
+      color: #fff;
+      margin-bottom: 8px;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+    .section-desc {
+      color: var(--text-muted);
+      font-size: 14.5px;
+      margin-bottom: 24px;
+    }
+
+    /* Architecture Visual Diagram */
+    .arch-diagram-wrapper {
+      background: var(--card-bg);
+      border: 1px solid var(--card-border);
+      border-radius: 12px;
+      padding: 28px;
+      margin-bottom: 48px;
+      overflow-x: auto;
+    }
+    .diagram-flow {
+      display: flex;
+      align-items: stretch;
+      justify-content: space-between;
+      gap: 14px;
+      min-width: 900px;
+    }
+    .diag-col {
+      flex: 1;
+      background: #0B0F19;
+      border: 1px solid var(--card-border);
+      border-radius: 8px;
+      padding: 16px;
+      display: flex;
+      flex-direction: column;
+    }
+    .diag-col.active {
+      border-color: rgba(59, 130, 246, 0.5);
+      background: rgba(59, 130, 246, 0.04);
+    }
+    .diag-head {
+      font-weight: 700;
+      font-size: 13.5px;
+      color: #fff;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin-bottom: 12px;
+      padding-bottom: 8px;
+      border-bottom: 1px solid var(--card-border);
+    }
+    .diag-pill {
+      font-size: 10px;
+      font-weight: 700;
+      padding: 2px 6px;
+      border-radius: 4px;
+      text-transform: uppercase;
+    }
+    .pill-blue { background: #1E3A8A; color: #93C5FD; }
+    .pill-green { background: #064E3B; color: #6EE7B7; }
+    .pill-purple { background: #581C87; color: #D8B4FE; }
+    .diag-items {
+      list-style: none;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      font-size: 12px;
+      color: #CBD5E1;
+    }
+    .diag-item {
+      background: #111827;
+      border: 1px solid #1F2937;
+      padding: 8px 10px;
+      border-radius: 6px;
+    }
+    .diag-arrow {
+      display: flex;
+      align-items: center;
+      color: var(--accent);
+      font-size: 20px;
+      font-weight: 800;
+      user-select: none;
+    }
+
+    /* Workflow Stepper Grid */
+    .steps-container {
+      display: flex;
+      flex-direction: column;
+      gap: 24px;
+      margin-bottom: 56px;
+    }
+    .step-card {
+      background: var(--card-bg);
+      border: 1px solid var(--card-border);
+      border-radius: 12px;
+      padding: 24px;
+      transition: border-color 0.2s, box-shadow 0.2s;
+    }
+    .step-card:hover {
+      border-color: rgba(59, 130, 246, 0.4);
+      box-shadow: 0 4px 20px rgba(0,0,0,0.25);
+    }
+    .step-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 14px;
+    }
+    .step-num-title {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+    .step-badge {
+      width: 32px;
+      height: 32px;
+      border-radius: 50%;
+      background: var(--primary);
+      color: #fff;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-weight: 800;
+      font-size: 14px;
+      flex-shrink: 0;
+    }
+    .step-title-text {
+      font-size: 18px;
+      font-weight: 700;
+      color: #fff;
+    }
+    .step-sub-text {
+      font-size: 13px;
+      color: var(--text-muted);
+    }
+    .step-chips {
+      display: flex;
+      gap: 6px;
+      flex-wrap: wrap;
+    }
+    .step-chip {
+      font-size: 11px;
+      font-weight: 600;
+      background: #1F2937;
+      color: #CBD5E1;
+      padding: 3px 9px;
+      border-radius: 9999px;
+      border: 1px solid #374151;
+    }
+    .step-content-grid {
+      display: grid;
+      grid-template-columns: 1.4fr 1fr;
+      gap: 20px;
+    }
+    @media (max-width: 860px) {
+      .step-content-grid { grid-template-columns: 1fr; }
+    }
+    .step-desc p {
+      color: #CBD5E1;
+      margin-bottom: 12px;
+      font-size: 13.5px;
+    }
+    .feature-list {
+      list-style: none;
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+    }
+    .feature-list li {
+      font-size: 13px;
+      color: #E2E8F0;
+      display: flex;
+      align-items: flex-start;
+      gap: 8px;
+    }
+    .feature-list li::before {
+      content: "✓";
+      color: var(--success);
+      font-weight: 700;
+      flex-shrink: 0;
+    }
+    .step-side-card {
+      background: #0B0F19;
+      border: 1px solid var(--card-border);
+      border-radius: 8px;
+      padding: 16px;
+      font-size: 12.5px;
+    }
+    .step-side-card h4 {
+      color: var(--accent);
+      font-size: 12px;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      margin-bottom: 8px;
+    }
+
+    /* Comparison Table / Matrix */
+    .table-wrapper {
+      background: var(--card-bg);
+      border: 1px solid var(--card-border);
+      border-radius: 12px;
+      overflow-x: auto;
+      margin-bottom: 56px;
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      text-align: left;
+      font-size: 13.5px;
+    }
+    th {
+      background: #0B0F19;
+      color: var(--text-muted);
+      font-weight: 600;
+      font-size: 12px;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+      padding: 12px 18px;
+      border-bottom: 1px solid var(--card-border);
+    }
+    td {
+      padding: 14px 18px;
+      border-bottom: 1px solid #1F2937;
+      color: #CBD5E1;
+      vertical-align: top;
+    }
+    tr:last-child td { border-bottom: none; }
+    tr:hover td { background: rgba(255,255,255,0.015); }
+    .badge-ok {
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      color: #34D399;
+      font-weight: 600;
+      background: rgba(16, 185, 129, 0.12);
+      border: 1px solid rgba(16, 185, 129, 0.25);
+      border-radius: 4px;
+      padding: 2px 8px;
+      font-size: 11.5px;
+    }
+    .badge-auto {
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      color: #60A5FA;
+      font-weight: 600;
+      background: rgba(59, 130, 246, 0.12);
+      border: 1px solid rgba(59, 130, 246, 0.25);
+      border-radius: 4px;
+      padding: 2px 8px;
+      font-size: 11.5px;
+    }
+
+    /* Code Snippet Box */
+    pre, code {
+      font-family: var(--font-mono);
+    }
+    .code-box {
+      background: var(--code-bg);
+      border: 1px solid #1E293B;
+      border-radius: 6px;
+      padding: 12px;
+      font-size: 12px;
+      color: #E2E8F0;
+      overflow-x: auto;
+      margin-top: 8px;
+    }
+
+    /* Footer */
+    footer.footer {
+      border-top: 1px solid var(--card-border);
+      padding: 32px 24px;
+      text-align: center;
+      color: var(--text-muted);
+      font-size: 13px;
+    }
+    footer.footer a {
+      color: var(--primary);
+      text-decoration: none;
+    }
+  </style>
+</head>
+<body>
+
+  <!-- Top Header Navigation -->
+  <header class="header">
+    <a href="/" class="brand">
+      <div style="background:var(--primary);color:#fff;border-radius:6px;width:28px;height:28px;display:flex;align-items:center;justify-content:center;font-weight:800;font-size:13px;">BM</div>
+      <span>Bold Migrate</span>
+      <span class="badge-enterprise">Enterprise</span>
+    </a>
+    <nav class="nav-links">
+      <a href="#overview">Architecture</a>
+      <a href="#workflow">6-Step Workflow</a>
+      <a href="#matrix">Supported Features</a>
+      <a href="#designer">Web Designer</a>
+      <a href="#shim">URL Shim Proxy</a>
+      <a href="/" class="btn-console">Open Migration Console →</a>
+    </nav>
+  </header>
+
+  <div class="container">
+
+    <!-- Hero Title -->
+    <section class="hero" id="overview">
+      <div class="hero-tag">Enterprise System Architecture & Workflow Reference</div>
+      <h1>Complete Migration Workflow & <br><span>Supported Features Guide</span></h1>
+      <p>
+        Bold Migrate delivers an automated, zero-downtime pipeline to migrate report catalogs from Microsoft SQL Server Reporting Services (SSRS) and Power BI Report Server (PBIRS) to Syncfusion Bold Reports Enterprise Server.
+      </p>
+
+      <!-- Stats Bar -->
+      <div class="stats-row">
+        <div class="stat-card">
+          <div class="stat-val" style="color:#60A5FA;">6 Stages</div>
+          <div class="stat-label">End-to-End Migration Flow</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-val" style="color:#34D399;">100% Automated</div>
+          <div class="stat-label">Topological Dependency Sort</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-val" style="color:#FBBF24;">RDL 2005–2016</div>
+          <div class="stat-label">Auto Schema & XML Rewriting</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-val" style="color:#A78BFA;">Zero Downtime</div>
+          <div class="stat-label">Cutover URL Reverse Proxy Shim</div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Architecture Visual Flow -->
+    <div style="margin-bottom: 24px;">
+      <h2 class="section-title">System Architecture & Pipeline Flow</h2>
+      <p class="section-desc">How Bold Migrate connects source servers, stages artifacts, transforms RDL schemas, and loads to Bold Reports.</p>
+    </div>
+
+    <div class="arch-diagram-wrapper">
+      <div class="diagram-flow">
+        
+        <!-- Column 1: Source Ingestion -->
+        <div class="diag-col">
+          <div class="diag-head">
+            <span>1. Ingestion Layer</span>
+            <span class="diag-pill pill-blue">Source</span>
+          </div>
+          <ul class="diag-items">
+            <li class="diag-item">
+              <strong>SSRS / PBIRS (Live API)</strong><br>
+              SOAP <code>ReportingService2010</code> &amp; REST v2.0
+            </li>
+            <li class="diag-item">
+              <strong>Offline Local Folder</strong><br>
+              Recursive <code>.rdl</code>, <code>.rds</code>, <code>.rsd</code> scan
+            </li>
+            <li class="diag-item">
+              <strong>Auth Adapters</strong><br>
+              NTLM, Windows Integrated, Basic
+            </li>
+          </ul>
+        </div>
+
+        <div class="diag-arrow">➔</div>
+
+        <!-- Column 2: Engine & Transformation -->
+        <div class="diag-col active">
+          <div class="diag-head">
+            <span>2. BoldMigrate Engine</span>
+            <span class="diag-pill pill-purple">Core</span>
+          </div>
+          <ul class="diag-items">
+            <li class="diag-item">
+              <strong>Topological Sort (DAG)</strong><br>
+              Folder ➔ DataSource ➔ DataSet ➔ Report
+            </li>
+            <li class="diag-item">
+              <strong>XML Schema Upgrader</strong><br>
+              2005 / 2008 / 2010 / 2016 ➔ Bold RDL
+            </li>
+            <li class="diag-item">
+              <strong>Re-binding &amp; Redactor</strong><br>
+              Shared DS re-linking, secret masking
+            </li>
+            <li class="diag-item">
+              <strong>Local Staging DB</strong><br>
+              SQLite catalog cache &amp; state tracking
+            </li>
+          </ul>
+        </div>
+
+        <div class="diag-arrow">➔</div>
+
+        <!-- Column 3: Upload & Bold Reports -->
+        <div class="diag-col">
+          <div class="diag-head">
+            <span>3. Destination Layer</span>
+            <span class="diag-pill pill-green">Destination</span>
+          </div>
+          <ul class="diag-items">
+            <li class="diag-item">
+              <strong>OAuth2 Authentication</strong><br>
+              <code>/token</code> with Bearer tokens
+            </li>
+            <li class="diag-item">
+              <strong>Bold Reports REST API</strong><br>
+              Multi-tenant <code>/reporting/api/site/{tenant}</code>
+            </li>
+            <li class="diag-item">
+              <strong>Server Integration</strong><br>
+              Embedded Web Designer &amp; Viewer
+            </li>
+            <li class="diag-item">
+              <strong>Bulk Cleanup Service</strong><br>
+              Remote scan, section &amp; report deletion
+            </li>
+          </ul>
+        </div>
+
+        <div class="diag-arrow">➔</div>
+
+        <!-- Column 4: Cutover & Proxy -->
+        <div class="diag-col">
+          <div class="diag-head">
+            <span>4. Production Cutover</span>
+            <span class="diag-pill pill-blue">Cutover</span>
+          </div>
+          <ul class="diag-items">
+            <li class="diag-item">
+              <strong>Transparent URL Shim</strong><br>
+              Reverse proxy for <code>/ReportServer</code>
+            </li>
+            <li class="diag-item">
+              <strong>Zero App Downtime</strong><br>
+              Existing bookmarks &amp; apps continue working
+            </li>
+            <li class="diag-item">
+              <strong>Audit &amp; Compliance</strong><br>
+              PDF, CSV &amp; JSON sign-off package
+            </li>
+          </ul>
+        </div>
+
+      </div>
+    </div>
+
+
+    <!-- 6-Stage Workflow Deep Dive -->
+    <div style="margin-bottom: 24px;" id="workflow">
+      <h2 class="section-title">The 6-Step Migration Workflow</h2>
+      <p class="section-desc">Step-by-step walkthrough of each stage in the migration console.</p>
+    </div>
+
+    <div class="steps-container">
+
+      <!-- Step 1 -->
+      <div class="step-card">
+        <div class="step-header">
+          <div class="step-num-title">
+            <div class="step-badge">1</div>
+            <div>
+              <div class="step-title-text">Connect &amp; Discover</div>
+              <div class="step-sub-text">Source and Destination Environment Configuration</div>
+            </div>
+          </div>
+          <div class="step-chips">
+            <span class="step-chip">SOAP / REST API</span>
+            <span class="step-chip">NTLM / Windows Auth</span>
+            <span class="step-chip">OAuth2 Token</span>
+            <span class="step-chip">Local Folder Mode</span>
+          </div>
+        </div>
+        <div class="step-content-grid">
+          <div class="step-desc">
+            <p>
+              Establishes secure connectivity to both the legacy SSRS/PBIRS server and the target Bold Reports Enterprise instance. For offline or air-gapped setups, the <strong>Local Folder Import</strong> mode allows picking a local folder containing <code>.rdl</code> files and automatically extracting shared data sources and data sets without live network access.
+            </p>
+            <ul class="feature-list">
+              <li><strong>Source Live Connection:</strong> Supports SSRS 2008 R2, 2012, 2014, 2016, 2017, 2019, and Power BI Report Server via SOAP Web Services and modern REST APIs.</li>
+              <li><strong>Destination Live Connection:</strong> Connects to Bold Reports Enterprise Server (Docker container, on-premises Windows/Linux, or Bold Reports Cloud) via OAuth2 Bearer token authentication.</li>
+              <li><strong>Health Probing:</strong> Live ping with roundtrip latency measurement before proceeding.</li>
+            </ul>
+          </div>
+          <div class="step-side-card">
+            <h4>Technical Flow</h4>
+            <div class="code-box">
+POST /api/migration/runs
+{
+  "sourceUrl": "http://ssrs-server/ReportServer",
+  "sourceAuthType": "Ntlm",
+  "destinationUrl": "http://boldreports:8090",
+  "destinationTenantId": "site1"
+}
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Step 2 -->
+      <div class="step-card">
+        <div class="step-header">
+          <div class="step-num-title">
+            <div class="step-badge">2</div>
+            <div>
+              <div class="step-title-text">Inventory &amp; Automated Compatibility Assessment</div>
+              <div class="step-sub-text">Catalog Discovery, Complexity Scoring &amp; Classification</div>
+            </div>
+          </div>
+          <div class="step-chips">
+            <span class="step-chip">Catalog Crawl</span>
+            <span class="step-chip">Rules Engine</span>
+            <span class="step-chip">CSV / JSON Export</span>
+          </div>
+        </div>
+        <div class="step-content-grid">
+          <div class="step-desc">
+            <p>
+              Crawls the entire catalog hierarchy (Folders, Data Sources, Data Sets, Reports). The static analyzer evaluates each RDL element against the Bold Reports engine specification and places reports into four actionable buckets:
+            </p>
+            <ul class="feature-list">
+              <li><strong style="color:#34D399;">Clean:</strong> 100% compatible standard controls (Tablix, Charts, Gauges, Textboxes, Subreports) requiring no manual intervention.</li>
+              <li><strong style="color:#60A5FA;">Auto-Fixed:</strong> Transformed automatically (namespace migration, connection string redaction, expression adjustments).</li>
+              <li><strong style="color:#FBBF24;">Needs Review:</strong> Custom assemblies (e.g. <code>System.Web</code>), complex VB.NET script blocks, or custom security extensions.</li>
+              <li><strong style="color:#F87171;">Blocked:</strong> Missing shared data source references, broken circular dependencies, or corrupt XML.</li>
+            </ul>
+          </div>
+          <div class="step-side-card">
+            <h4>Report Estate Export</h4>
+            <p style="color:#CBD5E1;margin-bottom:8px;">Export the complete assessed catalog with category tags, compatibility scores, and dependency trees to CSV or JSON for stakeholder review.</p>
+            <div class="code-box">GET /api/migration/estate/export?format=csv</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Step 3 -->
+      <div class="step-card">
+        <div class="step-header">
+          <div class="step-num-title">
+            <div class="step-badge">3</div>
+            <div>
+              <div class="step-title-text">Dependency Resolution &amp; RDL Transformation</div>
+              <div class="step-sub-text">Topological Sort DAG &amp; Semantic XML Rewriting</div>
+            </div>
+          </div>
+          <div class="step-chips">
+            <span class="step-chip">Topological Sort DAG</span>
+            <span class="step-chip">XML Namespace Rewrite</span>
+            <span class="step-chip">Shared DS Rebinding</span>
+            <span class="step-chip">Expression Tester</span>
+          </div>
+        </div>
+        <div class="step-content-grid">
+          <div class="step-desc">
+            <p>
+              Prevents upload failures by executing a Directed Acyclic Graph (DAG) topological sort. Items are strictly sequenced so prerequisites exist before dependents are created.
+            </p>
+            <ul class="feature-list">
+              <li><strong>Dependency Order:</strong> Folders ➔ Shared Data Sources ➔ Shared Data Sets ➔ Dependent Reports &amp; Subreports.</li>
+              <li><strong>Schema Rewriting:</strong> Migrates Microsoft RDL schemas (<code>2005/01</code>, <code>2008/01</code>, <code>2010/01</code>, <code>2016/01</code>) to the Bold Reports specification.</li>
+              <li><strong>Data Source Re-binding:</strong> Re-maps legacy connection strings and binds shared data sources to their new Bold Reports IDs.</li>
+              <li><strong>Expression Sandbox:</strong> In-browser VB.NET expression tester to evaluate conditional formulas and string formatting expressions against sample data.</li>
+            </ul>
+          </div>
+          <div class="step-side-card">
+            <h4>DAG Pipeline Sequence</h4>
+            <div style="font-family:var(--font-mono);font-size:12px;color:#93C5FD;line-height:1.7;">
+              Stage 1: Folder Hierarchy<br>
+              Stage 2: Shared DataSources (RDS)<br>
+              Stage 3: Shared DataSets (RSD)<br>
+              Stage 4: Transformed RDL Reports
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Step 4 -->
+      <div class="step-card">
+        <div class="step-header">
+          <div class="step-num-title">
+            <div class="step-badge">4</div>
+            <div>
+              <div class="step-title-text">Batch Upload &amp; Live Execution Engine</div>
+              <div class="step-sub-text">Streaming Progress, Live Logging &amp; Bulk Destination Cleanup</div>
+            </div>
+          </div>
+          <div class="step-chips">
+            <span class="step-chip">Pause / Resume</span>
+            <span class="step-chip">Retry Mechanism</span>
+            <span class="step-chip">Live Console Log</span>
+            <span class="step-chip">Bulk Delete Option</span>
+          </div>
+        </div>
+        <div class="step-content-grid">
+          <div class="step-desc">
+            <p>
+              Executes the multi-stage upload into Bold Reports with idempotency guarantees, progress streaming, and administrative server cleanup tools:
+            </p>
+            <ul class="feature-list">
+              <li><strong>Real-Time Execution Log:</strong> Live formatted logs with timestamp, event code (e.g. <code>[UP-001]</code>), and color-coded level badges (<span style="color:#34D399;">[INFO]</span>, <span style="color:#FBBF24;">[WARN]</span>, <span style="color:#F87171;">[ERROR]</span>).</li>
+              <li><strong>Pipeline Controls:</strong> Start, Pause, Resume, or Retry Failed items without starting from scratch.</li>
+              <li><strong>Bulk Delete &amp; Destination Reset:</strong> Clean up test runs directly from the UI:
+                <ul style="margin-left:20px;margin-top:4px;">
+                  <li><strong>Delete All:</strong> Direct live scan of all reports on Bold Reports Server with complete reset.</li>
+                  <li><strong>Delete by Section / Category:</strong> Select specific category folders to wipe and rebuild.</li>
+                  <li><strong>Delete Selected:</strong> Delete specific reports by item ID or name.</li>
+                </ul>
+              </li>
+            </ul>
+          </div>
+          <div class="step-side-card">
+            <h4>Live Log &amp; API Controls</h4>
+            <div class="code-box">
+POST /api/migration/runs/{id}/upload
+GET  /api/migration/runs/{id}/log
+POST /api/migration/runs/{id}/delete-destination
+{
+  "deleteAll": true,
+  "deleteCategories": true
+}
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Step 5 -->
+      <div class="step-card" id="designer">
+        <div class="step-header">
+          <div class="step-num-title">
+            <div class="step-badge">5</div>
+            <div>
+              <div class="step-title-text">Automated Validation &amp; Official Web Report Designer</div>
+              <div class="step-sub-text">Data Parity, Pixel Diff &amp; Live In-Browser Report Designer</div>
+            </div>
+          </div>
+          <div class="step-chips">
+            <span class="step-chip">Data Parity Check</span>
+            <span class="step-chip">XML Diff Viewer</span>
+            <span class="step-chip">Embedded Designer</span>
+            <span class="step-chip">Sign-off Workflow</span>
+          </div>
+        </div>
+        <div class="step-content-grid">
+          <div class="step-desc">
+            <p>
+              Validates migrated reports using multi-tier comparative analysis and provides four specialized review tools:
+            </p>
+            <ul class="feature-list">
+              <li><strong>Automated Data Parity:</strong> Compares row counts, column structures, and cell value fingerprints between SSRS and Bold Reports.</li>
+              <li><strong>XML Diff Viewer:</strong> Side-by-side view showing original SSRS RDL vs transformed Bold Reports RDL with line-by-line additions and modifications highlighted.</li>
+              <li><strong>Visual Comparison:</strong> Pixel-by-pixel rendering diff detecting layout shifts, margin inconsistencies, and font discrepancies.</li>
+              <li><strong>Official Bold Reports Web Report Designer (Server-Integrated):</strong>
+                Full visual report designer embedded directly in the application using official Syncfusion CDN scripts. Connects via live OAuth2 token to open, preview, edit, and save reports directly back to Bold Reports Server!
+              </li>
+            </ul>
+          </div>
+          <div class="step-side-card">
+            <h4>Designer Integration Config</h4>
+            <div class="code-box">
+serviceUrl: "/reporting/reportservice/api/Designer"
+reportServerUrl: "/reporting/api/site/{tenant}"
+serviceAuthorizationToken: "bearer &lt;token&gt;"
+reportPath: "/Finance/QuarterlyRevenue"
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Step 6 -->
+      <div class="step-card" id="shim">
+        <div class="step-header">
+          <div class="step-num-title">
+            <div class="step-badge">6</div>
+            <div>
+              <div class="step-title-text">Production Cutover &amp; Transparent URL Shim Proxy</div>
+              <div class="step-sub-text">Zero Downtime, Pre-Flight Gates &amp; URL Redirection Shim</div>
+            </div>
+          </div>
+          <div class="step-chips">
+            <span class="step-chip">Reverse Proxy Shim</span>
+            <span class="step-chip">Pre-Flight Gates</span>
+            <span class="step-chip">Zero App Downtime</span>
+            <span class="step-chip">Sign-Off Audit Package</span>
+          </div>
+        </div>
+        <div class="step-content-grid">
+          <div class="step-desc">
+            <p>
+              Activates the cutover without requiring immediate changes to downstream applications, ERP systems, scheduled bookmarks, or emails:
+            </p>
+            <ul class="feature-list">
+              <li><strong>Pre-Flight Gate Validation:</strong> Verifies that all reports are approved, shared data sources are online, and no orphan references exist before authorizing cutover.</li>
+              <li><strong>Transparent URL Shim (Reverse Proxy):</strong> Intercepts requests sent to legacy SSRS URL formats:
+                <div class="code-box" style="margin-top:6px;margin-bottom:6px;">
+                  Legacy: http://ssrs-host/ReportServer?/Finance/MonthlySales&amp;rs:Format=PDF<br>
+                  Shim Proxy ➔ http://bold-host/reporting/site/site1/reports/view/Finance/MonthlySales
+                </div>
+              </li>
+              <li><strong>Sign-Off Package:</strong> Automatically exports a signed audit package containing diff summaries, validation scores, and execution timestamps for compliance.</li>
+            </ul>
+          </div>
+          <div class="step-side-card">
+            <h4>Cutover Pre-Flight Status</h4>
+            <div style="font-family:var(--font-mono);font-size:12px;color:#34D399;line-height:1.7;">
+              [PASS] 100% Reports Uploaded<br>
+              [PASS] Shared DataSources Bound<br>
+              [PASS] Validation Threshold Met (&gt;95%)<br>
+              [READY] Shim Proxy Route Activated
+            </div>
+          </div>
+        </div>
+      </div>
+
+    </div>
+
+
+    <!-- Supported Features & Capabilities Matrix -->
+    <div style="margin-bottom: 24px;" id="matrix">
+      <h2 class="section-title">Supported Features &amp; Compatibility Matrix</h2>
+      <p class="section-desc">Comprehensive reference of supported systems, protocols, RDL elements, and migration capabilities.</p>
+    </div>
+
+    <div class="table-wrapper">
+      <table>
+        <thead>
+          <tr>
+            <th style="width:24%;">Feature Category</th>
+            <th style="width:36%;">Supported Capabilities</th>
+            <th style="width:20%;">Compatibility Level</th>
+            <th style="width:20%;">Transformation Behavior</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><strong>Source Platforms</strong></td>
+            <td>
+              • Microsoft SQL Server Reporting Services (SSRS) 2008 R2, 2012, 2014, 2016, 2017, 2019, 2022<br>
+              • Power BI Report Server (PBIRS)<br>
+              • Offline Local Folder directory of <code>.rdl</code>, <code>.rds</code>, <code>.rsd</code> files
+            </td>
+            <td><span class="badge-ok">Full Support</span></td>
+            <td>Auto-detects SOAP vs REST API v2 endpoints or crawls disk directory recursively.</td>
+          </tr>
+          <tr>
+            <td><strong>Destination Platforms</strong></td>
+            <td>
+              • Syncfusion Bold Reports Enterprise Server (Docker / Linux)<br>
+              • Bold Reports Server for Windows (IIS)<br>
+              • Bold Reports Cloud / Multi-Tenant Deployments
+            </td>
+            <td><span class="badge-ok">Full Support</span></td>
+            <td>OAuth2 Bearer token authentication via <code>/token</code> with tenant site routing.</td>
+          </tr>
+          <tr>
+            <td><strong>Authentication Protocols</strong></td>
+            <td>
+              • Windows Integrated Authentication (Kerberos)<br>
+              • NTLM Authentication<br>
+              • HTTP Basic Authentication<br>
+              • Bold Reports OAuth2 Token Authentication
+            </td>
+            <td><span class="badge-ok">Full Support</span></td>
+            <td>Negotiates handshake and securely holds credentials in-memory during migration.</td>
+          </tr>
+          <tr>
+            <td><strong>Catalog Items</strong></td>
+            <td>
+              • Folder hierarchies &amp; nested category paths<br>
+              • Shared Data Sources (<code>.rds</code>, <code>.rsds</code>)<br>
+              • Shared Data Sets (<code>.rsd</code>)<br>
+              • Standard RDL Reports &amp; Subreports
+            </td>
+            <td><span class="badge-ok">Full Support</span></td>
+            <td>Topological DAG sort creates folders and data sources first, then links data sets and reports.</td>
+          </tr>
+          <tr>
+            <td><strong>RDL Schema Formats</strong></td>
+            <td>
+              • Microsoft RDL 2005 (<code>http://schemas.microsoft.com/sqlserver/reporting/2005/01/reportdefinition</code>)<br>
+              • Microsoft RDL 2008 (<code>.../2008/01/...</code>)<br>
+              • Microsoft RDL 2010 (<code>.../2010/01/...</code>)<br>
+              • Microsoft RDL 2016 (<code>.../2016/01/...</code>)
+            </td>
+            <td><span class="badge-auto">Auto-Converted</span></td>
+            <td>XML parser transforms namespace references and aligns schema nodes to Bold Reports standard.</td>
+          </tr>
+          <tr>
+            <td><strong>Data Sources &amp; Connectors</strong></td>
+            <td>
+              • Microsoft SQL Server / Azure SQL<br>
+              • Oracle Database<br>
+              • PostgreSQL, MySQL<br>
+              • ODBC, OLE DB<br>
+              • XML / Web API Data Sources
+            </td>
+            <td><span class="badge-ok">Full Support</span></td>
+            <td>Connection strings sanitized and shared data source references rebound to target IDs.</td>
+          </tr>
+          <tr>
+            <td><strong>Report Controls</strong></td>
+            <td>
+              • Tablix, Tables, Matrices, Lists<br>
+              • Charts (Bar, Column, Line, Pie, Area, Scatter)<br>
+              • Gauges, Indicators &amp; Sparklines<br>
+              • Textboxes, Images, Subreports<br>
+              • Cascading &amp; Multi-Value Parameters
+            </td>
+            <td><span class="badge-ok">Full Support</span></td>
+            <td>Preserves formatting, group hierarchies, parameters, and drill-through links.</td>
+          </tr>
+          <tr>
+            <td><strong>Expressions &amp; Scripts</strong></td>
+            <td>
+              • Standard VB.NET functions (<code>IIf</code>, <code>Format</code>, <code>Sum</code>, <code>Avg</code>, etc.)<br>
+              • Parameter expressions (<code>Parameters!X.Value</code>)<br>
+              • Custom Assemblies / 3rd-party code blocks
+            </td>
+            <td><span class="badge-auto">Auto / Flagged</span></td>
+            <td>Built-in Expression Sandbox evaluates syntax; custom code blocks flagged for review.</td>
+          </tr>
+          <tr>
+            <td><strong>Web Report Designer</strong></td>
+            <td>
+              • Syncfusion Bold Reports Web Report Designer<br>
+              • In-browser report editing, property inspection<br>
+              • Live Server Integration (load, preview, save back)
+            </td>
+            <td><span class="badge-ok">Full Support</span></td>
+            <td>Loaded via official Syncfusion CDN scripts; automatically wired to server token &amp; designer API.</td>
+          </tr>
+          <tr>
+            <td><strong>Destination Management</strong></td>
+            <td>
+              • Bulk Delete All reports with direct server scan<br>
+              • Multi-section / category folder cleanup<br>
+              • Multi-selected report deletion<br>
+              • Reset SQLite catalog state to Analysed
+            </td>
+            <td><span class="badge-ok">Full Support</span></td>
+            <td>Direct REST API deletion with automatic reconciliation of local SQLite staging records.</td>
+          </tr>
+          <tr>
+            <td><strong>Cutover &amp; Redirection</strong></td>
+            <td>
+              • Transparent URL Shim reverse proxy<br>
+              • Intercepts <code>/ReportServer</code> and <code>/Reports</code><br>
+              • Zero app downtime cutover
+            </td>
+            <td><span class="badge-ok">Full Support</span></td>
+            <td>Directs incoming requests to destination Bold Reports viewer paths without code changes.</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <!-- Quick Navigation to Console -->
+    <div style="background:var(--card-bg);border:1px solid var(--card-border);border-radius:12px;padding:32px;text-align:center;">
+      <h3 style="font-size:20px;font-weight:700;color:#fff;margin-bottom:8px;">Ready to run your migration?</h3>
+      <p style="color:var(--text-muted);font-size:14px;max-width:600px;margin:0 auto 20px;">
+        Open the live interactive migration console to connect your servers, inspect your reports, run the batch upload, and launch the embedded Bold Reports designer.
+      </p>
+      <a href="/" class="btn-console" style="padding:10px 24px;font-size:14px;">Open Bold Migrate Console →</a>
+    </div>
+
+  </div>
+
+  <footer class="footer">
+    <p>Bold Migrate Enterprise Edition · Automated SSRS &amp; PBIRS to Bold Reports Migration Pipeline</p>
+    <p style="margin-top:6px;font-size:12px;">Documentation &amp; Workflow Guide · Generated for Bold Reports Enterprise Server Integration</p>
+  </footer>
+
+</body>
+</html>

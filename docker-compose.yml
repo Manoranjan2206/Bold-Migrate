@@ -1,0 +1,26 @@
+services:
+  bold-migrate:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: bold-migrate
+    restart: unless-stopped
+    ports:
+      - "5050:8080"
+    environment:
+      - ASPNETCORE_URLS=http://+:8080
+      - ASPNETCORE_ENVIRONMENT=Production
+      - BoldMigrate__StagingRootPath=/app/staging
+    volumes:
+      - boldmigrate_data:/app/data
+      - boldmigrate_staging:/app/staging
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:8080/health || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 5s
+
+volumes:
+  boldmigrate_data:
+  boldmigrate_staging:

@@ -1,0 +1,12 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/BoldMigrate.Api/BoldMigrate.Api.csproj" />
+    <Project Path="src/BoldMigrate.Core/BoldMigrate.Core.csproj" />
+    <Project Path="src/BoldMigrate.Engine/BoldMigrate.Engine.csproj" />
+    <Project Path="src/BoldMigrate.Infrastructure/BoldMigrate.Infrastructure.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/BoldMigrate.Core.Tests/BoldMigrate.Core.Tests.csproj" />
+    <Project Path="tests/BoldMigrate.Engine.Tests/BoldMigrate.Engine.Tests.csproj" />
+  </Folder>
+</Solution>

@@ -1,0 +1,45 @@
+# Multi-stage Dockerfile for Bold Migrate (.NET 10 ASP.NET Core single service)
+
+# Stage 1: Build
+FROM mcr.microsoft.com/dotnet/sdk:10.0 AS build
+WORKDIR /source
+
+# Copy solution and project files first to leverage Docker layer caching
+COPY BoldMigrate.slnx ./
+COPY src/BoldMigrate.Core/BoldMigrate.Core.csproj src/BoldMigrate.Core/
+COPY src/BoldMigrate.Infrastructure/BoldMigrate.Infrastructure.csproj src/BoldMigrate.Infrastructure/
+COPY src/BoldMigrate.Engine/BoldMigrate.Engine.csproj src/BoldMigrate.Engine/
+COPY src/BoldMigrate.Api/BoldMigrate.Api.csproj src/BoldMigrate.Api/
+COPY tests/BoldMigrate.Core.Tests/BoldMigrate.Core.Tests.csproj tests/BoldMigrate.Core.Tests/
+COPY tests/BoldMigrate.Engine.Tests/BoldMigrate.Engine.Tests.csproj tests/BoldMigrate.Engine.Tests/
+
+# Restore dependencies
+RUN dotnet restore src/BoldMigrate.Api/BoldMigrate.Api.csproj
+
+# Copy all source files and data
+COPY src/ src/
+COPY data/ data/
+
+# Publish single service release
+WORKDIR /source/src/BoldMigrate.Api
+RUN dotnet publish -c Release -o /app/publish /p:UseAppHost=false
+
+# Stage 2: Runtime
+FROM mcr.microsoft.com/dotnet/aspnet:10.0 AS runtime
+WORKDIR /app
+
+# Ensure data and staging directories exist with write permissions
+RUN mkdir -p /app/data /app/staging
+
+# Copy published application from build stage
+COPY --from=build /app/publish ./
+COPY data/compatibility-rules.json ./data/
+
+# Environment settings
+ENV ASPNETCORE_URLS=http://+:8080
+ENV ASPNETCORE_ENVIRONMENT=Production
+ENV BoldMigrate__StagingRootPath=/app/staging
+
+EXPOSE 8080
+
+ENTRYPOINT ["dotnet", "BoldMigrate.dll"]

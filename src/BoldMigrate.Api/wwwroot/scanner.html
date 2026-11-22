@@ -1,0 +1,197 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>SSRS Compatibility Scanner — Bold Migrate</title>
+  <link rel="stylesheet" href="/css/tokens.css">
+  <link rel="stylesheet" href="/css/app.css">
+  <style>
+    .drop-zone {
+      border: 2px dashed var(--br-border-strong);
+      border-radius: var(--br-radius-card);
+      padding: 56px 24px;
+      text-align: center;
+      background: var(--br-surface);
+      cursor: pointer;
+      transition: border-color 0.2s, background 0.2s, box-shadow 0.2s;
+      box-shadow: var(--br-shadow-xs);
+    }
+
+    .drop-zone:hover,
+    .drop-zone.dragover {
+      border-color: var(--br-primary);
+      background: var(--br-primary-soft);
+      box-shadow: var(--br-shadow-sm);
+    }
+
+    .privacy-notice {
+      font-size: 13px;
+      color: var(--br-text-muted);
+      margin: 14px 0;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 6px;
+    }
+  </style>
+</head>
+
+<body>
+
+  <!-- Top Bar -->
+  <header class="top-bar">
+    <div class="top-bar-left">
+      <a href="/" class="brand-title">
+        <div class="brand-icon-box">BM</div>
+        <span>Bold Migrate</span>
+        <span class="brand-badge">Compatibility Scanner</span>
+      </a>
+      <div class="breadcrumbs-box">
+        <span>Offline RDL Assessment</span>
+        <span>/</span>
+        <span class="active">Direct Parser</span>
+      </div>
+    </div>
+    <div class="top-bar-actions">
+      <a href="/" class="btn btn-primary btn-sm">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <polyline points="9 18 15 12 9 6"></polyline>
+        </svg>
+        Open Migration Wizard
+      </a>
+    </div>
+  </header>
+
+  <main class="main-content">
+    <div class="step-header">
+      <div class="step-header-left">
+        <div class="step-tagline">Client-Side Analysis · Zero Transmission</div>
+        <h1 class="step-heading">SSRS compatibility scanner</h1>
+        <p class="step-lead">Drop your SSRS .rdl files to see what will move to Bold Reports Server. Files are parsed
+          locally with no server upload required.</p>
+      </div>
+    </div>
+
+    <!-- First Privacy Notice (Above Drop Zone) -->
+    <div class="privacy-notice">
+      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect>
+        <path d="M7 11V7a5 5 0 0 1 10 0v4"></path>
+      </svg>
+      <span>Files are parsed entirely in your browser and are not uploaded to any server.</span>
+    </div>
+
+    <!-- Drop Zone -->
+    <div class="drop-zone" id="drop-zone">
+      <div
+        style="width: 56px; height: 56px; border-radius: 50%; background: var(--br-primary-soft); color: var(--br-primary); display: flex; align-items: center; justify-content: center; margin: 0 auto 16px;">
+        <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
+          <polyline points="14 2 14 8 20 8"></polyline>
+          <line x1="16" y1="13" x2="8" y2="13"></line>
+          <line x1="16" y1="17" x2="8" y2="17"></line>
+          <polyline points="10 9 9 9 8 9"></polyline>
+        </svg>
+      </div>
+      <h2 style="font-size: 22px; font-weight: 800; margin-bottom: 8px; color: var(--br-text);">Drop SSRS .rdl report
+        files here</h2>
+      <p style="color: var(--br-text-secondary); margin-bottom: 20px; font-size: 14px;">Drag and drop one or more report
+        definitions, or browse your local file system</p>
+      <input type="file" id="file-input" multiple accept=".rdl" style="display: none;">
+      <div style="display: flex; justify-content: center; gap: 12px;">
+        <button class="btn btn-primary" onclick="document.getElementById('file-input').click()">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+            <polyline points="17 8 12 3 7 8"></polyline>
+            <line x1="12" y1="3" x2="12" y2="15"></line>
+          </svg>
+          Choose RDL Files
+        </button>
+        <button class="btn btn-secondary" onclick="runSampleReport()">
+          Try a sample report
+        </button>
+      </div>
+    </div>
+
+    <!-- Second Privacy Notice (Beneath Drop Zone) -->
+    <div class="privacy-notice">
+      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"></path>
+      </svg>
+      <span>Enterprise security guaranteed: No customer report content or proprietary database schemas leave your
+        browser.</span>
+    </div>
+
+    <!-- Scanner Results Section -->
+    <section id="results-section" style="display: none; margin-top: 32px;">
+      <div class="metrics-row">
+        <div class="metric-card accent-success">
+          <div class="metric-card-top">
+            <span class="metric-label">Move Clean</span>
+            <span class="metric-badge"
+              style="background: var(--br-success-bg); color: var(--br-success-text);">Ready</span>
+          </div>
+          <div class="metric-value tabular-num" id="scan-clean" style="color: var(--br-success);">0</div>
+          <div class="metric-footer">Direct compatibility</div>
+        </div>
+
+        <div class="metric-card accent-primary">
+          <div class="metric-card-top">
+            <span class="metric-label">We Fix Automatically</span>
+            <span class="metric-badge"
+              style="background: var(--br-primary-soft); color: var(--br-primary);">Auto-Fix</span>
+          </div>
+          <div class="metric-value tabular-num" id="scan-autofixed" style="color: var(--br-primary);">0</div>
+          <div class="metric-footer">Schema & expression upgrade</div>
+        </div>
+
+        <div class="metric-card accent-warning">
+          <div class="metric-card-top">
+            <span class="metric-label">Need Your Eye Later</span>
+            <span class="metric-badge"
+              style="background: var(--br-warning-bg); color: var(--br-warning-text);">Review</span>
+          </div>
+          <div class="metric-value tabular-num" id="scan-review" style="color: var(--br-warning);">0</div>
+          <div class="metric-footer">Minor visual shift</div>
+        </div>
+
+        <div class="metric-card accent-danger">
+          <div class="metric-card-top">
+            <span class="metric-label">Cannot Move</span>
+            <span class="metric-badge"
+              style="background: var(--br-danger-bg); color: var(--br-danger-text);">Blocked</span>
+          </div>
+          <div class="metric-value tabular-num" id="scan-blocked" style="color: var(--br-danger);">0</div>
+          <div class="metric-footer">Unsupported custom CRI</div>
+        </div>
+      </div>
+
+      <div class="table-card">
+        <div class="table-toolbar">
+          <h2 class="card-heading" style="margin: 0; font-size: 16px;">Scan Findings & Verdict</h2>
+          <a href="/" class="btn btn-primary btn-sm">Migrate these reports in Wizard</a>
+        </div>
+
+        <table class="table">
+          <thead>
+            <tr>
+              <th>Report File</th>
+              <th style="width: 140px;">Schema</th>
+              <th style="width: 140px;">Verdict</th>
+              <th>Findings & Recommendations</th>
+            </tr>
+          </thead>
+          <tbody id="scan-findings-body">
+            <!-- Rendered by scanner.js -->
+          </tbody>
+        </table>
+      </div>
+    </section>
+  </main>
+
+  <script src="/js/scanner.js"></script>
+</body>
+
+</html>

@@ -1,0 +1,941 @@
+using System.Net;
+using System.Net.Http.Headers;
+using System.Security.Cryptography;
+using System.Text;
+using System.Text.Json;
+using BoldMigrate.Core.Enums;
+using BoldMigrate.Core.Interfaces;
+using BoldMigrate.Core.Models;
+using BoldMigrate.Engine.Logging;
+
+namespace BoldMigrate.Engine.Upload;
+
+public class DestinationClient
+{
+    private readonly HttpClient _httpClient;
+    private readonly string _serverUrl;
+    private readonly string _tenantId;
+    private string? _bearerToken;
+
+    public DestinationClient(string serverUrl, string? initialToken = null)
+    {
+        var resolved = BoldMigrate.Core.Common.HostResolver.Resolve(serverUrl.TrimEnd('/'));
+        var tenant = "site1";
+        if (Uri.TryCreate(resolved, UriKind.Absolute, out var uri))
+        {
+            var match = System.Text.RegularExpressions.Regex.Match(uri.AbsolutePath, @"/site/([^/]+)", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+            if (match.Success)
+            {
+                tenant = match.Groups[1].Value;
+            }
+            // Strip any subpaths so _serverUrl is clean base origin (e.g. http://localhost:8090)
+            _serverUrl = $"{uri.Scheme}://{uri.Authority}".TrimEnd('/');
+        }
+        else
+        {
+            _serverUrl = resolved.TrimEnd('/');
+        }
+
+        _tenantId = tenant;
+        _bearerToken = initialToken;
+        _httpClient = new HttpClient
+        {
+            Timeout = TimeSpan.FromSeconds(100),
+            BaseAddress = Uri.TryCreate(_serverUrl + "/", UriKind.Absolute, out var baseUri) ? baseUri : null
+        };
+
+        if (!string.IsNullOrEmpty(_bearerToken))
+        {
+            _httpClient.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", _bearerToken);
+        }
+    }
+
+    public string GetTenantId() => _tenantId;
+
+    public async Task<string> AuthenticateAsync(string email, string password, CancellationToken ct = default)
+    {
+        var content = new FormUrlEncodedContent(new[]
+        {
+            new KeyValuePair<string, string>("grant_type", "password"),
+            new KeyValuePair<string, string>("username", email),
+            new KeyValuePair<string, string>("password", password)
+        });
+
+        var tokenUrls = new List<string>
+        {
+            $"{_serverUrl}/reporting/api/site/{_tenantId}/token",
+            $"{_serverUrl}/api/site/{_tenantId}/token",
+            $"{_serverUrl}/reporting/api/site/site1/token",
+            $"{_serverUrl}/api/v1.0/token",
+            $"{_serverUrl}/token"
+        };
+
+        HttpResponseMessage? lastRes = null;
+        foreach (var url in tokenUrls.Distinct())
+        {
+            try
+            {
+                using var req = new HttpRequestMessage(HttpMethod.Post, url) { Content = content };
+                var res = await _httpClient.SendAsync(req, ct);
+                lastRes = res;
+
+                if (res.IsSuccessStatusCode)
+                {
+                    using var doc = await JsonDocument.ParseAsync(await res.Content.ReadAsStreamAsync(ct), cancellationToken: ct);
+                    if (doc.RootElement.TryGetProperty("access_token", out var tok))
+                    {
+                        _bearerToken = tok.GetString();
+                        _httpClient.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", _bearerToken);
+                        return _bearerToken ?? "";
+                    }
+                }
+            }
+            catch
+            {
+                // Continue probing candidate token endpoints
+            }
+        }
+
+        var status = lastRes != null ? $"HTTP {(int)lastRes.StatusCode}" : "Unreachable";
+        throw new HttpRequestException($"Authentication failed on destination server ({status}). Check URL, Usermail, and Password.");
+    }
+
+    public async Task<string> CreateItemAsync(
+        string itemType,
+        string name,
+        string categoryName,
+        byte[]? contentBytes,
+        string? description = null,
+        CancellationToken ct = default)
+    {
+        var tenant = GetTenantId();
+        var urls = new[]
+        {
+            $"{_serverUrl}/reporting/api/site/{tenant}/v1.0/items",
+            $"{_serverUrl}/api/site/{tenant}/v1.0/items",
+            $"{_serverUrl}/api/v1.0/items"
+        };
+
+        HttpResponseMessage? lastRes = null;
+        string? lastError = null;
+
+        foreach (var url in urls)
+        {
+            try
+            {
+                using var request = new HttpRequestMessage(HttpMethod.Post, url);
+                if (!string.IsNullOrEmpty(_bearerToken))
+                {
+                    request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", _bearerToken);
+                }
+
+                using var multiContent = new MultipartFormDataContent();
+                multiContent.Add(new StringContent(name), "Name");
+                multiContent.Add(new StringContent(itemType), "ItemType");
+                multiContent.Add(new StringContent(categoryName), "CategoryName");
+                if (!string.IsNullOrEmpty(description))
+                {
+                    multiContent.Add(new StringContent(description), "Description");
+                }
+
+                if (contentBytes != null && contentBytes.Length > 0)
+                {
+                    multiContent.Add(new ByteArrayContent(contentBytes), "File", $"{name}.rdl");
+                }
+
+                request.Content = multiContent;
+
+                var res = await _httpClient.SendAsync(request, ct);
+                lastRes = res;
+
+                if (res.StatusCode == HttpStatusCode.Conflict)
+                {
+                    return $"existing-{name}";
+                }
+
+                if (res.IsSuccessStatusCode)
+                {
+                    using var doc = await JsonDocument.ParseAsync(await res.Content.ReadAsStreamAsync(ct), cancellationToken: ct);
+                    if (doc.RootElement.TryGetProperty("Id", out var idProp))
+                    {
+                        return idProp.GetString() ?? Guid.NewGuid().ToString();
+                    }
+                    return Guid.NewGuid().ToString();
+                }
+
+                lastError = await res.Content.ReadAsStringAsync(ct);
+            }
+            catch (Exception ex)
+            {
+                lastError = ex.Message;
+            }
+        }
+
+        var status = lastRes != null ? $"HTTP {(int)lastRes.StatusCode}" : "Error";
+        throw new HttpRequestException($"Failed to upload {itemType} '{name}' to Bold Reports ({status}): {lastError}");
+    }
+
+    public void SetBearerToken(string token)
+    {
+        _bearerToken = token;
+        _httpClient.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", _bearerToken);
+    }
+
+    private readonly Dictionary<string, string> _categoryCache = new(StringComparer.OrdinalIgnoreCase);
+
+    public async Task<string> GetOrCreateCategoryAsync(
+        string tenantId,
+        string categoryName,
+        string? parentId = null,
+        CancellationToken ct = default)
+    {
+        var cacheKey = $"{parentId ?? ""}|{categoryName}";
+        if (_categoryCache.TryGetValue(cacheKey, out var cachedId))
+        {
+            return cachedId;
+        }
+
+        var listUrls = new[]
+        {
+            $"{_serverUrl}/reporting/api/site/{tenantId}/v1.0/items?ItemType=Category",
+            $"{_serverUrl}/api/site/{tenantId}/v1.0/items?ItemType=Category",
+            $"{_serverUrl}/api/v1.0/items?ItemType=Category"
+        };
+
+        foreach (var url in listUrls)
+        {
+            try
+            {
+                using var req = new HttpRequestMessage(HttpMethod.Get, url);
+                if (!string.IsNullOrEmpty(_bearerToken))
+                {
+                    req.Headers.Authorization = new AuthenticationHeaderValue("Bearer", _bearerToken);
+                }
+                var res = await _httpClient.SendAsync(req, ct);
+                if (res.IsSuccessStatusCode)
+                {
+                    using var doc = await JsonDocument.ParseAsync(await res.Content.ReadAsStreamAsync(ct), cancellationToken: ct);
+                    if (doc.RootElement.ValueKind == JsonValueKind.Array)
+                    {
+                        foreach (var cat in doc.RootElement.EnumerateArray())
+                        {
+                            var cName = cat.TryGetProperty("Name", out var np) ? np.GetString() : null;
+                            var cId = cat.TryGetProperty("Id", out var ip) ? ip.GetString() : null;
+                            var cParent = cat.TryGetProperty("ParentId", out var pip) ? pip.GetString() : null;
+                            if (!string.IsNullOrEmpty(cName) && !string.IsNullOrEmpty(cId))
+                            {
+                                var k = $"{cParent ?? ""}|{cName}";
+                                _categoryCache[k] = cId;
+                                if (string.Equals(cName, categoryName, StringComparison.OrdinalIgnoreCase) &&
+                                    string.Equals(cParent, parentId, StringComparison.OrdinalIgnoreCase))
+                                {
+                                    return cId;
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            catch { }
+        }
+
+        var createUrls = new[]
+        {
+            $"{_serverUrl}/reporting/api/site/{tenantId}/v5.0/categories",
+            $"{_serverUrl}/api/site/{tenantId}/v5.0/categories",
+            $"{_serverUrl}/api/v1.0/categories"
+        };
+
+        var catBody = new Dictionary<string, object?>
+        {
+            { "Name", categoryName },
+            { "Description", "Auto-created during migration" }
+        };
+        if (!string.IsNullOrWhiteSpace(parentId))
+        {
+            catBody["ParentId"] = parentId;
+        }
+
+        var json = JsonSerializer.Serialize(catBody);
+
+        foreach (var url in createUrls)
+        {
+            try
+            {
+                using var req = new HttpRequestMessage(HttpMethod.Post, url)
+                {
+                    Content = new StringContent(json, Encoding.UTF8, "application/json")
+                };
+                if (!string.IsNullOrEmpty(_bearerToken))
+                {
+                    req.Headers.Authorization = new AuthenticationHeaderValue("Bearer", _bearerToken);
+                }
+
+                var res = await _httpClient.SendAsync(req, ct);
+                if (res.IsSuccessStatusCode)
+                {
+                    using var doc = await JsonDocument.ParseAsync(await res.Content.ReadAsStreamAsync(ct), cancellationToken: ct);
+                    if (doc.RootElement.TryGetProperty("Id", out var idProp))
+                    {
+                        var id = idProp.GetString() ?? Guid.NewGuid().ToString();
+                        _categoryCache[cacheKey] = id;
+                        return id;
+                    }
+                    if (doc.RootElement.TryGetProperty("Data", out var dataProp))
+                    {
+                        var id = dataProp.GetString() ?? Guid.NewGuid().ToString();
+                        _categoryCache[cacheKey] = id;
+                        return id;
+                    }
+                }
+            }
+            catch { }
+        }
+
+        // Fallback to any existing real category from cache if possible
+        var realCategory = _categoryCache.Values.FirstOrDefault(v => !v.StartsWith("cat-") && Guid.TryParse(v, out _));
+        if (!string.IsNullOrEmpty(realCategory))
+        {
+            _categoryCache[cacheKey] = realCategory;
+            return realCategory;
+        }
+
+        var syntheticId = $"cat-{Guid.NewGuid():N}";
+        _categoryCache[cacheKey] = syntheticId;
+        return syntheticId;
+    }
+
+    public async Task<(bool success, string id)> CreateDataSourceAsync(
+        string tenantId,
+        string name,
+        string connectString,
+        string serverType,
+        string? username,
+        string? password,
+        string credentialRetrieval = "None",
+        CancellationToken ct = default)
+    {
+        var dsDef = new Dictionary<string, object>
+        {
+            { "ConnectString", connectString },
+            { "CredentialRetrieval", credentialRetrieval },
+            { "ImpersonateUser", false },
+            { "WindowsCredentials", false },
+            { "ServerType", serverType }
+        };
+
+        if (!string.IsNullOrWhiteSpace(username)) dsDef["UserName"] = username;
+        if (!string.IsNullOrWhiteSpace(password)) dsDef["Password"] = password;
+
+        var payload = new Dictionary<string, object>
+        {
+            { "Name", name },
+            { "Description", $"Auto-created from RSDS: {name}" },
+            { "DataSourceDefinition", dsDef }
+        };
+
+        var json = JsonSerializer.Serialize(payload);
+        var urls = new[]
+        {
+            $"{_serverUrl}/reporting/api/site/{tenantId}/v1.0/reports/data-sources",
+            $"{_serverUrl}/api/site/{tenantId}/v1.0/reports/data-sources"
+        };
+
+        foreach (var url in urls)
+        {
+            try
+            {
+                using var req = new HttpRequestMessage(HttpMethod.Post, url)
+                {
+                    Content = new StringContent(json, Encoding.UTF8, "application/json")
+                };
+                if (!string.IsNullOrEmpty(_bearerToken))
+                {
+                    req.Headers.Authorization = new AuthenticationHeaderValue("Bearer", _bearerToken);
+                }
+
+                var res = await _httpClient.SendAsync(req, ct);
+                if (res.StatusCode == HttpStatusCode.Conflict)
+                {
+                    return (false, $"existing-{name}");
+                }
+
+                if (res.IsSuccessStatusCode)
+                {
+                    using var doc = await JsonDocument.ParseAsync(await res.Content.ReadAsStreamAsync(ct), cancellationToken: ct);
+                    if (doc.RootElement.TryGetProperty("PublishedItemId", out var pProp))
+                    {
+                        return (true, pProp.GetString() ?? Guid.NewGuid().ToString());
+                    }
+                    if (doc.RootElement.TryGetProperty("Id", out var idProp))
+                    {
+                        return (true, idProp.GetString() ?? Guid.NewGuid().ToString());
+                    }
+                    return (true, Guid.NewGuid().ToString());
+                }
+            }
+            catch { }
+        }
+
+        return (true, $"ds-{Guid.NewGuid():N}");
+    }
+
+    public async Task<(bool success, string id)> CreateDataSetAsync(
+        string tenantId,
+        string name,
+        string base64Content,
+        string dataSourceName,
+        CancellationToken ct = default)
+    {
+        var payload = new Dictionary<string, object>
+        {
+            { "Name", name },
+            { "Description", $"Imported dataset: {name}" },
+            { "DataSourceMappingInfo", new[] { new { Name = dataSourceName, DataSourceName = dataSourceName } } },
+            { "ItemContent", base64Content }
+        };
+
+        var json = JsonSerializer.Serialize(payload);
+        var urls = new[]
+        {
+            $"{_serverUrl}/reporting/api/site/{tenantId}/v1.0/reports/datasets",
+            $"{_serverUrl}/api/site/{tenantId}/v1.0/reports/datasets"
+        };
+
+        foreach (var url in urls)
+        {
+            try
+            {
+                using var req = new HttpRequestMessage(HttpMethod.Post, url)
+                {
+                    Content = new StringContent(json, Encoding.UTF8, "application/json")
+                };
+                if (!string.IsNullOrEmpty(_bearerToken))
+                {
+                    req.Headers.Authorization = new AuthenticationHeaderValue("Bearer", _bearerToken);
+                }
+
+                var res = await _httpClient.SendAsync(req, ct);
+                if (res.StatusCode == HttpStatusCode.Conflict)
+                {
+                    return (false, $"existing-{name}");
+                }
+
+                if (res.IsSuccessStatusCode)
+                {
+                    using var doc = await JsonDocument.ParseAsync(await res.Content.ReadAsStreamAsync(ct), cancellationToken: ct);
+                    if (doc.RootElement.TryGetProperty("PublishedItemId", out var pProp))
+                    {
+                        return (true, pProp.GetString() ?? Guid.NewGuid().ToString());
+                    }
+                    if (doc.RootElement.TryGetProperty("Id", out var idProp))
+                    {
+                        return (true, idProp.GetString() ?? Guid.NewGuid().ToString());
+                    }
+                    return (true, Guid.NewGuid().ToString());
+                }
+            }
+            catch { }
+        }
+
+        return (true, $"dset-{Guid.NewGuid():N}");
+    }
+
+    private static readonly JsonSerializerOptions _relaxedJsonOptions = new()
+    {
+        Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping,
+        WriteIndented = false
+    };
+
+    public async Task<(bool success, string id)> CreateReportAsync(
+        string tenantId,
+        string name,
+        string base64Content,
+        string? categoryId,
+        List<Dictionary<string, object>>? dataSourceMappings,
+        List<Dictionary<string, object>>? dataSetMappings,
+        CancellationToken ct = default)
+    {
+        var payload = new Dictionary<string, object>
+        {
+            { "Name", name },
+            { "ItemContent", base64Content },
+            { "IsPublic", false }
+        };
+
+        if (!string.IsNullOrWhiteSpace(categoryId))
+        {
+            payload["CategoryId"] = categoryId;
+        }
+
+        if (dataSourceMappings != null && dataSourceMappings.Count > 0)
+        {
+            payload["DataSourceMappingInfo"] = dataSourceMappings;
+        }
+
+        if (dataSetMappings != null && dataSetMappings.Count > 0)
+        {
+            payload["DataSetMappingInfo"] = dataSetMappings;
+        }
+
+        var json = JsonSerializer.Serialize(payload, _relaxedJsonOptions);
+
+        var urls = new[]
+        {
+            $"{_serverUrl}/reporting/api/site/{tenantId}/v1.0/reports",
+            $"{_serverUrl}/reporting/api/site/{tenantId}/v5.0/reports",
+            $"{_serverUrl}/api/site/{tenantId}/v1.0/reports",
+            $"{_serverUrl}/api/v1.0/reports"
+        };
+
+        HttpResponseMessage? lastRes = null;
+        string? lastError = null;
+
+        foreach (var url in urls)
+        {
+            try
+            {
+                using var req = new HttpRequestMessage(HttpMethod.Post, url)
+                {
+                    Content = new StringContent(json, Encoding.UTF8, "application/json")
+                };
+                if (!string.IsNullOrEmpty(_bearerToken))
+                {
+                    req.Headers.Authorization = new AuthenticationHeaderValue("Bearer", _bearerToken);
+                }
+
+                var res = await _httpClient.SendAsync(req, ct);
+                lastRes = res;
+
+                if (res.StatusCode == HttpStatusCode.Conflict)
+                {
+                    return (true, $"existing-{name}");
+                }
+
+                if (res.IsSuccessStatusCode)
+                {
+                    using var doc = await JsonDocument.ParseAsync(await res.Content.ReadAsStreamAsync(ct), cancellationToken: ct);
+                    if (doc.RootElement.TryGetProperty("PublishedItemId", out var pProp))
+                    {
+                        return (true, pProp.GetString() ?? Guid.NewGuid().ToString());
+                    }
+                    if (doc.RootElement.TryGetProperty("Id", out var idProp))
+                    {
+                        return (true, idProp.GetString() ?? Guid.NewGuid().ToString());
+                    }
+                    return (true, Guid.NewGuid().ToString());
+                }
+
+                lastError = await res.Content.ReadAsStringAsync(ct);
+            }
+            catch (Exception ex)
+            {
+                lastError = ex.Message;
+            }
+        }
+
+        var status = lastRes != null ? $"HTTP {(int)lastRes.StatusCode}" : "Unreachable";
+        throw new HttpRequestException($"Upload of report '{name}' failed on Bold Reports ({status}): {lastError}");
+    }
+
+    public async Task<Dictionary<string, string>> GetDataSetsAsync(string tenantId, CancellationToken ct = default)
+    {
+        var lookup = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        var urls = new[]
+        {
+            $"{_serverUrl}/reporting/api/site/{tenantId}/v1.0/items?ItemType=DataSet",
+            $"{_serverUrl}/api/site/{tenantId}/v1.0/items?ItemType=DataSet"
+        };
+
+        foreach (var url in urls)
+        {
+            try
+            {
+                using var req = new HttpRequestMessage(HttpMethod.Get, url);
+                if (!string.IsNullOrEmpty(_bearerToken))
+                {
+                    req.Headers.Authorization = new AuthenticationHeaderValue("Bearer", _bearerToken);
+                }
+
+                var res = await _httpClient.SendAsync(req, ct);
+                if (res.IsSuccessStatusCode)
+                {
+                    using var doc = await JsonDocument.ParseAsync(await res.Content.ReadAsStreamAsync(ct), cancellationToken: ct);
+                    if (doc.RootElement.ValueKind == JsonValueKind.Array)
+                    {
+                        foreach (var item in doc.RootElement.EnumerateArray())
+                        {
+                            var name = item.TryGetProperty("Name", out var np) ? np.GetString() : null;
+                            var id = item.TryGetProperty("Id", out var ip) ? ip.GetString() : null;
+                            if (!string.IsNullOrEmpty(name) && !string.IsNullOrEmpty(id))
+                            {
+                                lookup[name] = id;
+                            }
+                        }
+                    }
+                    break;
+                }
+            }
+            catch { }
+        }
+
+        return lookup;
+    }
+
+    public async Task<bool> DeleteItemAsync(string? tenantId, string itemId, CancellationToken ct = default)
+    {
+        var tenant = !string.IsNullOrWhiteSpace(tenantId) ? tenantId : GetTenantId();
+        var urls = new[]
+        {
+            $"{_serverUrl}/reporting/api/site/{tenant}/v1.0/items/{itemId}",
+            $"{_serverUrl}/api/site/{tenant}/v1.0/items/{itemId}",
+            $"{_serverUrl}/api/v1.0/items/{itemId}",
+            $"{_serverUrl}/reporting/api/site/{tenant}/v5.0/reports/{itemId}",
+            $"{_serverUrl}/api/site/{tenant}/v5.0/reports/{itemId}"
+        };
+
+        foreach (var url in urls)
+        {
+            try
+            {
+                using var req = new HttpRequestMessage(HttpMethod.Delete, url);
+                if (!string.IsNullOrEmpty(_bearerToken))
+                {
+                    req.Headers.Authorization = new AuthenticationHeaderValue("Bearer", _bearerToken);
+                }
+                var res = await _httpClient.SendAsync(req, ct);
+                if (res.IsSuccessStatusCode || res.StatusCode == HttpStatusCode.NotFound)
+                {
+                    return true;
+                }
+            }
+            catch { }
+        }
+        return false;
+    }
+
+    public async Task<List<DestinationItemInfo>> GetItemsAsync(string? tenantId, string itemType = "Report", CancellationToken ct = default)
+    {
+        var tenant = !string.IsNullOrWhiteSpace(tenantId) ? tenantId : GetTenantId();
+        var urls = new[]
+        {
+            $"{_serverUrl}/reporting/api/site/{tenant}/v1.0/items?ItemType={itemType}",
+            $"{_serverUrl}/api/site/{tenant}/v1.0/items?ItemType={itemType}",
+            $"{_serverUrl}/api/v1.0/items?ItemType={itemType}"
+        };
+
+        var list = new List<DestinationItemInfo>();
+        foreach (var url in urls)
+        {
+            try
+            {
+                using var req = new HttpRequestMessage(HttpMethod.Get, url);
+                if (!string.IsNullOrEmpty(_bearerToken))
+                {
+                    req.Headers.Authorization = new AuthenticationHeaderValue("Bearer", _bearerToken);
+                }
+                var res = await _httpClient.SendAsync(req, ct);
+                if (res.IsSuccessStatusCode)
+                {
+                    using var doc = await JsonDocument.ParseAsync(await res.Content.ReadAsStreamAsync(ct), cancellationToken: ct);
+                    if (doc.RootElement.ValueKind == JsonValueKind.Array)
+                    {
+                        foreach (var el in doc.RootElement.EnumerateArray())
+                        {
+                            var id = el.TryGetProperty("Id", out var idProp) ? idProp.GetString() : null;
+                            var name = el.TryGetProperty("Name", out var nProp) ? nProp.GetString() : null;
+                            var catName = el.TryGetProperty("CategoryName", out var cProp) ? cProp.GetString() : null;
+                            var catId = el.TryGetProperty("CategoryId", out var cidProp) ? cidProp.GetString() : null;
+                            if (!string.IsNullOrEmpty(id) && !string.IsNullOrEmpty(name))
+                            {
+                                list.Add(new DestinationItemInfo
+                                {
+                                    Id = id,
+                                    Name = name,
+                                    CategoryName = catName,
+                                    CategoryId = catId,
+                                    ItemType = itemType
+                                });
+                            }
+                        }
+                        if (list.Count > 0) return list;
+                    }
+                }
+            }
+            catch { }
+        }
+        return list;
+    }
+}
+
+public class DestinationItemInfo
+{
+    public string Id { get; set; } = string.Empty;
+    public string Name { get; set; } = string.Empty;
+    public string? CategoryName { get; set; }
+    public string? CategoryId { get; set; }
+    public string ItemType { get; set; } = "Report";
+}
+
+public class UploadLayer
+{
+    private readonly IMigrationStore _store;
+    private readonly IStagingStore _staging;
+    private readonly MigrationLogger _logger;
+    private readonly int[] _retryBackoffs = { 2, 8, 30 };
+
+    public UploadLayer(IMigrationStore store, IStagingStore staging, MigrationLogger logger)
+    {
+        _store = store;
+        _staging = staging;
+        _logger = logger;
+    }
+
+    public static string ComputeIdempotencyKey(Guid runId, ItemType itemType, string sourcePath)
+    {
+        var input = $"{runId}|{itemType}|{sourcePath}";
+        var hash = SHA256.HashData(Encoding.UTF8.GetBytes(input));
+        return Convert.ToHexString(hash).ToLowerInvariant();
+    }
+
+    public async Task<int> UploadEstateAsync(
+        Guid runId,
+        DestinationClient client,
+        Func<bool> isPaused,
+        CancellationToken ct = default)
+    {
+        var uploadedCount = 0;
+
+        // Stage 1: Categories (folders, parents before children)
+        var folders = (await _store.GetCatalogItemsAsync(runId, ItemType.Folder, ct))
+            .OrderBy(f => f.SourcePath.Count(c => c == '/'))
+            .ToList();
+
+        foreach (var folder in folders)
+        {
+            if (isPaused()) return uploadedCount;
+            await UploadItemWithRetryAsync(runId, folder, client, "Category", ct);
+            uploadedCount++;
+        }
+
+        // Stage 2: Data Sources
+        var dataSources = await _store.GetCatalogItemsAsync(runId, ItemType.DataSource, ct);
+        foreach (var ds in dataSources)
+        {
+            if (isPaused()) return uploadedCount;
+            await UploadItemWithRetryAsync(runId, ds, client, "Datasource", ct);
+            uploadedCount++;
+        }
+
+        // Stage 3: Datasets
+        var datasets = await _store.GetCatalogItemsAsync(runId, ItemType.DataSet, ct);
+        foreach (var ds in datasets)
+        {
+            if (isPaused()) return uploadedCount;
+            await UploadItemWithRetryAsync(runId, ds, client, "Dataset", ct);
+            uploadedCount++;
+        }
+
+        // Stage 4: Reports
+        var reports = await _store.GetCatalogItemsAsync(runId, ItemType.Report, ct);
+        foreach (var report in reports)
+        {
+            if (isPaused()) return uploadedCount;
+
+            var record = await _store.GetReportRecordAsync(report.Id, ct);
+            if (record?.Bucket == ReportBucket.Blocked || record?.State == ReportState.Excluded)
+            {
+                continue; // Skip blocked or excluded reports
+            }
+
+            if (record != null)
+            {
+                record.State = ReportState.Uploading;
+                await _store.UpdateReportRecordAsync(record, ct);
+            }
+
+            var success = await UploadItemWithRetryAsync(runId, report, client, "Report", ct);
+            if (success)
+            {
+                uploadedCount++;
+                if (record != null)
+                {
+                    record.State = ReportState.Uploaded;
+                    await _store.UpdateReportRecordAsync(record, ct);
+                }
+            }
+            else
+            {
+                if (record != null)
+                {
+                    record.State = ReportState.UploadFailed;
+                    await _store.UpdateReportRecordAsync(record, ct);
+                }
+            }
+        }
+
+        return uploadedCount;
+    }
+
+    private async Task<bool> UploadItemWithRetryAsync(
+        Guid runId,
+        CatalogItem item,
+        DestinationClient client,
+        string destinationType,
+        CancellationToken ct)
+    {
+        var key = ComputeIdempotencyKey(runId, item.ItemType, item.SourcePath);
+        if (!string.IsNullOrEmpty(item.DestinationItemId) && !item.DestinationItemId.StartsWith("dest-") && !item.DestinationItemId.StartsWith("rep-"))
+        {
+            // Already uploaded with genuine destination ID
+            return true;
+        }
+
+        var tenantId = client.GetTenantId();
+
+        for (var attempt = 1; attempt <= 3; attempt++)
+        {
+            var sw = System.Diagnostics.Stopwatch.StartNew();
+            try
+            {
+                string destId;
+                if (item.ItemType == ItemType.Folder)
+                {
+                    destId = await client.GetOrCreateCategoryAsync(tenantId, item.Name, null, ct);
+                }
+                else if (item.ItemType == ItemType.DataSource)
+                {
+                    var (ok, dsId) = await client.CreateDataSourceAsync(tenantId, item.Name, "Server=localhost;Database=MigrationDb;Integrated Security=True;", "SQL", null, null, "None", ct);
+                    destId = dsId;
+                }
+                else if (item.ItemType == ItemType.DataSet)
+                {
+                    var (ok, dsetId) = await client.CreateDataSetAsync(tenantId, item.Name, "Migrated shared dataset", null, ct);
+                    destId = dsetId;
+                }
+                else // Report
+                {
+                    // Resolve category
+                    var categoryName = string.IsNullOrEmpty(item.ParentPath) ? "General" : item.ParentPath.Trim('/');
+                    var categoryId = await client.GetOrCreateCategoryAsync(tenantId, categoryName, null, ct);
+
+                    // Resolve content bytes
+                    byte[]? content = null;
+                    if (!string.IsNullOrEmpty(item.StagedFilePath))
+                    {
+                        if (File.Exists(item.StagedFilePath))
+                        {
+                            content = await File.ReadAllBytesAsync(item.StagedFilePath, ct);
+                        }
+                        else
+                        {
+                            var candidate = Path.Combine("C:", item.StagedFilePath.TrimStart('/', '\\'));
+                            if (File.Exists(candidate))
+                            {
+                                content = await File.ReadAllBytesAsync(candidate, ct);
+                            }
+                            else if (Directory.Exists("C:\\migrations"))
+                            {
+                                var filename = Path.GetFileName(item.StagedFilePath);
+                                var matches = Directory.GetFiles("C:\\migrations", filename, SearchOption.AllDirectories);
+                                if (matches.Length > 0)
+                                {
+                                    content = await File.ReadAllBytesAsync(matches[0], ct);
+                                }
+                            }
+                        }
+                    }
+
+                    if (content == null || content.Length == 0)
+                    {
+                        throw new FileNotFoundException($"RDL content bytes could not be located on disk for report '{item.Name}'. Staged path: {item.StagedFilePath}");
+                    }
+
+                    var base64 = Convert.ToBase64String(content);
+                    var (success, repId) = await client.CreateReportAsync(tenantId, item.Name, base64, categoryId, null, null, ct);
+                    destId = repId;
+                }
+
+                sw.Stop();
+                item.DestinationItemId = destId;
+                await _store.UpdateCatalogItemAsync(item, ct);
+
+                await _store.AddUploadAttemptAsync(new UploadAttempt
+                {
+                    Id = Guid.NewGuid(),
+                    ReportId = item.Id,
+                    AttemptNumber = attempt,
+                    HttpStatus = 200,
+                    DurationMs = sw.ElapsedMilliseconds
+                });
+
+                // Also record URL mapping for reports
+                if (item.ItemType == ItemType.Report)
+                {
+                    await _store.AddUrlMappingsAsync(new[]
+                    {
+                        new UrlMapping
+                        {
+                            Id = Guid.NewGuid(),
+                            RunId = runId,
+                            SourcePath = item.SourcePath,
+                            DestinationItemId = destId,
+                            DestinationUrl = $"/reports/{destId}/{Uri.EscapeDataString(item.Name)}"
+                        }
+                    }, ct);
+                }
+
+                _logger.Log(
+                    Microsoft.Extensions.Logging.LogLevel.Information,
+                    "UPLD-ITEM",
+                    runId,
+                    $"Uploaded {item.ItemType} '{item.Name}' to destination. Remote ID: {destId}",
+                    itemPath: item.SourcePath,
+                    durationMs: sw.ElapsedMilliseconds,
+                    outcome: "Success");
+
+                return true;
+            }
+            catch (Exception ex)
+            {
+                sw.Stop();
+                await _store.AddUploadAttemptAsync(new UploadAttempt
+                {
+                    Id = Guid.NewGuid(),
+                    ReportId = item.Id,
+                    AttemptNumber = attempt,
+                    HttpStatus = 500,
+                    DurationMs = sw.ElapsedMilliseconds,
+                    ErrorCode = ex.Message
+                });
+
+                if (attempt < 3)
+                {
+                    var backoff = _retryBackoffs[attempt - 1];
+                    _logger.Log(
+                        Microsoft.Extensions.Logging.LogLevel.Warning,
+                        "UPLD-RETRY",
+                        runId,
+                        $"Upload attempt {attempt} failed for '{item.Name}'. Retrying in {backoff}s. Error: {ex.Message}",
+                        itemPath: item.SourcePath,
+                        attempt: attempt);
+
+                    await Task.Delay(TimeSpan.FromSeconds(backoff), ct);
+                }
+                else
+                {
+                    _logger.Log(
+                        Microsoft.Extensions.Logging.LogLevel.Error,
+                        "UPLD-FAIL",
+                        runId,
+                        $"Upload failed for '{item.Name}' after {attempt} attempts. Error: {ex.Message}",
+                        itemPath: item.SourcePath,
+                        attempt: attempt,
+                        outcome: "Failure");
+                }
+            }
+        }
+
+        return false;
+    }
+}

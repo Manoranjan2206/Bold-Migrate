@@ -1,0 +1,27 @@
+## .NET and Build Artifacts
+[Bb]in/
+[Oo]bj/
+[Pp]ublish/
+*.user
+*.userosv
+*.suo
+*.userprefs
+.vs/
+.vscode/
+
+## Logs
+[Ll]og/
+[Ll]ogs/
+*.log
+
+## Databases & Staging
+*.db
+*.db-shm
+*.db-wal
+*.sqlite
+*.sqlite3
+
+## OS-generated files
+.DS_Store
+Thumbs.db
+desktop.ini
