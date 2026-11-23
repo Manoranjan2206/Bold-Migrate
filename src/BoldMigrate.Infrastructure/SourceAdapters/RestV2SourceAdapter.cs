@@ -350,21 +350,46 @@ public class RestV2SourceAdapter : ISourceCatalog
         return list;
     }
 
-    public async Task<byte[]> RenderAsync(string reportId, string format, IDictionary<string, string> parameters, CancellationToken ct = default)
+    /// <summary>
+    /// Renders a report through SSRS URL access. <paramref name="reportPathOrId"/> must be the
+    /// report's catalog PATH (for example "/Sales/Monthly") — URL access does not accept item
+    /// GUIDs. Throws when the server will not render, so callers can distinguish a failed
+    /// render from a report that legitimately returned no rows.
+    /// </summary>
+    public async Task<byte[]> RenderAsync(string reportPathOrId, string format, IDictionary<string, string> parameters, CancellationToken ct = default)
     {
-        // For SSRS execution: invoke the execution/render endpoint
         var query = string.Join("&", parameters.Select(kv => $"{Uri.EscapeDataString(kv.Key)}={Uri.EscapeDataString(kv.Value)}"));
-        var serverBase = _baseUrl.EndsWith("/Reports", StringComparison.OrdinalIgnoreCase)
-            ? _baseUrl[..^8] + "/ReportServer"
-            : _baseUrl;
-        var url = $"{serverBase}?/{reportId.TrimStart('/')}&rs:Format={format}&rs:Command=Render&{query}";
+
+        // URL access lives on the /ReportServer endpoint, not the /Reports web portal.
+        var trimmed = _baseUrl.TrimEnd('/');
+        string serverBase;
+        if (trimmed.EndsWith("/Reports", StringComparison.OrdinalIgnoreCase))
+        {
+            serverBase = trimmed[..^"/Reports".Length] + "/ReportServer";
+        }
+        else if (trimmed.EndsWith("/ReportServer", StringComparison.OrdinalIgnoreCase))
+        {
+            serverBase = trimmed;
+        }
+        else
+        {
+            serverBase = trimmed + "/ReportServer";
+        }
+
+        var path = "/" + reportPathOrId.TrimStart('/');
+        var url = $"{serverBase}?{Uri.EscapeDataString(path)}&rs:Format={Uri.EscapeDataString(format)}&rs:Command=Render";
+        if (!string.IsNullOrEmpty(query)) url += "&" + query;
+
         var res = await _httpClient.GetAsync(url, ct);
         if (res.IsSuccessStatusCode)
         {
             return await res.Content.ReadAsByteArrayAsync(ct);
         }
 
-        // Return empty or throw
-        return Array.Empty<byte>();
+        var body = "";
+        try { body = await res.Content.ReadAsStringAsync(ct); } catch { }
+        var detail = body.Length > 300 ? body[..300] : body;
+        throw new HttpRequestException(
+            $"SSRS refused to render '{path}' as {format} (HTTP {(int)res.StatusCode}). {detail}".Trim());
     }
 }

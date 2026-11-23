@@ -109,6 +109,59 @@ using (var scope = app.Services.CreateScope())
 {
     var db = scope.ServiceProvider.GetRequiredService<MigrationDbContext>();
     db.Database.EnsureCreated();
+
+    // EnsureCreated does not alter an existing schema. ValidationResults gained nullable
+    // page-count columns and VisualSimilarity became nullable, so a database created before
+    // that change is rebuilt here. Validation results are derived data — re-running validation
+    // reproduces them — so recreating the table is safe.
+    try
+    {
+        var conn = db.Database.GetDbConnection();
+        if (conn.State != System.Data.ConnectionState.Open) await conn.OpenAsync();
+
+        // The table is stale if VisualSimilarity is still NOT NULL, or if the page-count
+        // columns are missing. SQLite cannot relax a NOT NULL constraint in place, so the
+        // table is recreated.
+        var needsRebuild = false;
+        using (var probe = conn.CreateCommand())
+        {
+            probe.CommandText =
+                "SELECT COUNT(*) FROM pragma_table_info('ValidationResults') " +
+                "WHERE (name = 'VisualSimilarity' AND [notnull] = 1) " +
+                "   OR (name = 'VisualSimilarity' AND 0 = (SELECT COUNT(*) FROM pragma_table_info('ValidationResults') WHERE name = 'RenderSummary'));";
+            needsRebuild = Convert.ToInt64(await probe.ExecuteScalarAsync() ?? 0L) > 0;
+        }
+
+        if (needsRebuild)
+        {
+            app.Logger.LogWarning(
+                "Rebuilding ValidationResults for the updated schema. Previous validation scores are "
+                + "discarded; re-run validation to regenerate them.");
+
+            await db.Database.ExecuteSqlRawAsync("DROP TABLE ValidationResults;");
+            await db.Database.ExecuteSqlRawAsync(@"
+                CREATE TABLE ValidationResults (
+                    Id TEXT NOT NULL CONSTRAINT PK_ValidationResults PRIMARY KEY,
+                    ReportId TEXT NOT NULL,
+                    DataAccuracy TEXT NOT NULL,
+                    VisualSimilarity TEXT NULL,
+                    RowsSource INTEGER NOT NULL,
+                    RowsDestination INTEGER NOT NULL,
+                    LayoutShifts INTEGER NOT NULL,
+                    SourcePageCount INTEGER NULL,
+                    DestinationPageCount INTEGER NULL,
+                    RenderSummary TEXT NULL,
+                    ParameterSetHash TEXT NOT NULL,
+                    RunUtc TEXT NOT NULL
+                );");
+            await db.Database.ExecuteSqlRawAsync(
+                "CREATE INDEX IX_ValidationResults_ReportId ON ValidationResults (ReportId);");
+        }
+    }
+    catch (Exception ex)
+    {
+        app.Logger.LogError(ex, "Could not bring the ValidationResults schema up to date.");
+    }
 }
 
 app.UseCors("AllowAll");

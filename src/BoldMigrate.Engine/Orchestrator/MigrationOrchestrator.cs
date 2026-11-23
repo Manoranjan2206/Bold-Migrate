@@ -314,12 +314,27 @@ public class MigrationOrchestrator : BackgroundService, IMigrationOrchestrator
         var adapter = SourceAdapterFactory.Create(run.SourceServerUrl, run.SourceApi, cred);
         var reports = await store.GetCatalogItemsAsync(runId, ItemType.Report, ct);
 
+        // Validation renders each report on the destination too, so it needs an authenticated
+        // Bold Reports client. Without a token there is nothing to compare against.
+        var destToken = _credStore.GetDestinationToken();
+        DestinationClient? destClient = null;
+        if (!string.IsNullOrEmpty(run.DestinationServerUrl) && !string.IsNullOrEmpty(destToken))
+        {
+            destClient = new DestinationClient(run.DestinationServerUrl, destToken);
+        }
+        else
+        {
+            logger.Log(LogLevel.Warning, "VALD-NO-DEST", runId,
+                "No authenticated Bold Reports connection available. Reports will be flagged for manual "
+                + "review instead of validated. Re-connect the destination server in Step 1.", step: 5);
+        }
+
         foreach (var r in reports)
         {
             var record = await store.GetReportRecordAsync(r.Id, ct);
             if (record == null || record.State == ReportState.Blocked || record.State == ReportState.Excluded) continue;
 
-            await validation.ValidateReportAsync(runId, r, record, adapter, ct);
+            await validation.ValidateReportAsync(runId, r, record, adapter, destClient, ct);
         }
 
         run.Status = RunStatus.Validated;

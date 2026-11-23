@@ -231,11 +231,11 @@
       <div class="side-footer">
         <div class="side-status-item">
           <span class="status-dot" id="side-ssrs-dot"></span>
-          <span>SSRS: <strong id="side-ssrs-text">Connected</strong></span>
+          <span>SSRS: <strong id="side-ssrs-text">Not connected</strong></span>
         </div>
         <div class="side-status-item">
           <span class="status-dot" id="side-dest-dot"></span>
-          <span>Bold Reports: <strong id="side-dest-text">Token Valid</strong></span>
+          <span>Bold Reports: <strong id="side-dest-text">Not connected</strong></span>
         </div>
         <button class="btn2 btn-sm" style="margin-top:6px;width:100%;font-size:12px;" onclick="showLandingView()">
           Landing Overview
@@ -374,11 +374,11 @@
             <div id="conn-dest-creds-row" class="row2">
               <label class="f">
                 Admin email
-                <input type="text" id="conn-dest-email" value="test@gmail.com" placeholder="admin@example.com">
+                <input type="text" id="conn-dest-email" placeholder="admin@example.com" autocomplete="username">
               </label>
               <label class="f">
                 Password
-                <input type="password" id="conn-dest-pass" value="Admin@123" placeholder="••••••••">
+                <input type="password" id="conn-dest-pass" placeholder="••••••••" autocomplete="current-password">
               </label>
             </div>
             <div id="conn-dest-token-row" style="display:none;">
@@ -389,7 +389,7 @@
             </div>
             <div style="display:flex;align-items:center;gap:12px;margin-top:12px;">
               <button class="btn2 btn-sm" onclick="testDestConnection()">Test connection</button>
-              <span class="pill ok" id="conn-dest-status-pill">Token valid</span>
+              <span class="pill" id="conn-dest-status-pill">Not connected</span>
             </div>
           </div>
         </div>
@@ -497,37 +497,37 @@
               Delete in Bold Reports...
             </button>
             <button class="btn2" onclick="runAssessmentAndGoToDashboard()">Run Assessment</button>
-            <button class="btn" id="btn-header-migrate" onclick="startMigrationWithSelected()"><span id="btn-header-migrate-text">Migrate Selected (42) →</span></button>
+            <button class="btn" id="btn-header-migrate" onclick="startMigrationWithSelected()"><span id="btn-header-migrate-text">Migrate Selected (0) →</span></button>
           </div>
         </div>
 
         <!-- Multi-Select Batch Action Bar -->
         <div class="selection-bar" id="lib-selection-bar">
           <div class="selection-info">
-            <span class="selection-badge" id="lib-selected-count">42</span>
-            <span>of <strong id="lib-total-count">42</strong> reports selected for migration</span>
+            <span class="selection-badge" id="lib-selected-count">0</span>
+            <span>of <strong id="lib-total-count">0</strong> reports selected for migration</span>
           </div>
           <div class="selection-actions">
-            <button class="btn2 btn-sm" onclick="selectAllCleanAndAutoFix()">Select Clean & Auto-Fixed Only (32)</button>
+            <button class="btn2 btn-sm" onclick="selectAllCleanAndAutoFix()"><span id="btn-select-clean-text">Select Clean & Auto-Fixed Only</span></button>
             <button class="btn2 btn-sm" onclick="toggleSelectAllReports(true)">Select All</button>
             <button class="btn2 btn-sm" onclick="toggleSelectAllReports(false)">Deselect All</button>
             <button class="btn2 btn-danger btn-sm" onclick="openDeleteReportsModal('selected')" title="Delete selected reports from Bold Reports">
               <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="margin-right:4px;vertical-align:-1px;"><path d="M3 6h18M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg>
-              Delete Selected in Bold Reports (<span id="del-bar-count">42</span>)
+              Delete Selected in Bold Reports (<span id="del-bar-count">0</span>)
             </button>
             <button class="btn btn-sm" style="background:#059669;" onclick="startMigrationWithSelected()">
-              <span id="btn-bar-migrate-text">Start Migration (42) →</span>
+              <span id="btn-bar-migrate-text">Start Migration (0) →</span>
             </button>
           </div>
         </div>
 
         <!-- Filter Chips -->
         <div class="chips" id="library-filter-chips">
-          <span class="chip active" onclick="setLibraryFilter('all')">All (<span id="lib-count-all">0</span>)</span>
-          <span class="chip" onclick="setLibraryFilter('clean')">Clean (<span id="lib-count-clean">0</span>)</span>
-          <span class="chip" onclick="setLibraryFilter('autofix')">Auto-Fixed (<span id="lib-count-autofix">0</span>)</span>
-          <span class="chip" onclick="setLibraryFilter('review')">Needs Review (<span id="lib-count-review">0</span>)</span>
-          <span class="chip" onclick="setLibraryFilter('blocked')">Blocked (<span id="lib-count-blocked">0</span>)</span>
+          <span class="chip active" data-filter="all" onclick="setLibraryFilter('all', this)">All (<span id="lib-count-all">0</span>)</span>
+          <span class="chip" data-filter="clean" onclick="setLibraryFilter('clean', this)">Clean (<span id="lib-count-clean">0</span>)</span>
+          <span class="chip" data-filter="autofix" onclick="setLibraryFilter('autofix', this)">Auto-Fixed (<span id="lib-count-autofix">0</span>)</span>
+          <span class="chip" data-filter="review" onclick="setLibraryFilter('review', this)">Needs Review (<span id="lib-count-review">0</span>)</span>
+          <span class="chip" data-filter="blocked" onclick="setLibraryFilter('blocked', this)">Blocked (<span id="lib-count-blocked">0</span>)</span>
         </div>
 
         <!-- Real Table -->
@@ -559,12 +559,12 @@
         <div class="journey-nav-bar">
           <button class="btn2" onclick="switchTab('connections')">← Back to Connections</button>
           <div class="jnav-info">
-            <span id="lib-footer-status">42 reports cataloged across 4 folders.</span>
+            <span id="lib-footer-status">No reports cataloged yet.</span>
           </div>
           <div style="display:flex;gap:10px;">
             <button class="btn2" onclick="runAssessmentAndGoToDashboard()">Assessment Dashboard</button>
             <button class="btn" style="background:#059669;" onclick="startMigrationWithSelected()">
-              <span id="btn-footer-migrate-text">Start Migration (42) →</span>
+              <span id="btn-footer-migrate-text">Start Migration (0) →</span>
             </button>
           </div>
         </div>
@@ -616,26 +616,26 @@
           </div>
           <div style="display:flex;gap:10px;">
             <button class="btn2" onclick="recheckEstate()">Re-run Assessment</button>
-            <button class="btn" style="background:#059669;" onclick="startMigrationWithSelected()"><span id="btn-dash-migrate-text">Start Migration (42) →</span></button>
+            <button class="btn" style="background:#059669;" onclick="startMigrationWithSelected()"><span id="btn-dash-migrate-text">Start Migration (0) →</span></button>
           </div>
         </div>
 
         <!-- 4 Real Metric Tiles -->
         <div class="tiles">
           <div class="card tile">
-            <div class="n" id="dash-tile-found">42</div>
+            <div class="n" id="dash-tile-found">0</div>
             <div class="l">Reports Found</div>
           </div>
           <div class="card tile">
-            <div class="n" id="dash-tile-readiness" style="color:#059669;">76%</div>
+            <div class="n" id="dash-tile-readiness" style="color:#059669;">—</div>
             <div class="l">Migration Readiness</div>
           </div>
           <div class="card tile">
-            <div class="n" id="dash-tile-review" style="color:#D97706;">9</div>
+            <div class="n" id="dash-tile-review" style="color:#D97706;">0</div>
             <div class="l">Needs Review</div>
           </div>
           <div class="card tile">
-            <div class="n" id="dash-tile-blocked" style="color:#DC2626;">1</div>
+            <div class="n" id="dash-tile-blocked" style="color:#DC2626;">0</div>
             <div class="l">Blocked</div>
           </div>
         </div>
@@ -648,30 +648,30 @@
             <div style="margin-bottom:14px;font-size:13px">
               <div style="display:flex;justify-content:space-between;">
                 <span>Compatible as is (Clean)</span>
-                <strong id="comp-clean-pct">67%</strong>
+                <strong id="comp-clean-pct">0%</strong>
               </div>
-              <div class="bar"><i id="comp-clean-bar" style="width:67%;background:#15803D"></i></div>
+              <div class="bar"><i id="comp-clean-bar" style="width:0%;background:#15803D"></i></div>
             </div>
             <div style="margin-bottom:14px;font-size:13px">
               <div style="display:flex;justify-content:space-between;">
                 <span>Auto-fixed (shared datasets/paths inlined)</span>
-                <strong id="comp-autofix-pct">10%</strong>
+                <strong id="comp-autofix-pct">0%</strong>
               </div>
-              <div class="bar"><i id="comp-autofix-bar" style="width:10%;background:#2563EB"></i></div>
+              <div class="bar"><i id="comp-autofix-bar" style="width:0%;background:#2563EB"></i></div>
             </div>
             <div style="margin-bottom:14px;font-size:13px">
               <div style="display:flex;justify-content:space-between;">
                 <span>Needs manual review</span>
-                <strong id="comp-review-pct">21%</strong>
+                <strong id="comp-review-pct">0%</strong>
               </div>
-              <div class="bar"><i id="comp-review-bar" style="width:21%;background:#B45309"></i></div>
+              <div class="bar"><i id="comp-review-bar" style="width:0%;background:#B45309"></i></div>
             </div>
             <div style="margin-bottom:6px;font-size:13px">
               <div style="display:flex;justify-content:space-between;">
                 <span>Blocked (custom assemblies)</span>
-                <strong id="comp-blocked-pct">2%</strong>
+                <strong id="comp-blocked-pct">0%</strong>
               </div>
-              <div class="bar"><i id="comp-blocked-bar" style="width:2%;background:#DC2626"></i></div>
+              <div class="bar"><i id="comp-blocked-bar" style="width:0%;background:#DC2626"></i></div>
             </div>
           </div>
 
@@ -685,11 +685,11 @@
 
             <div style="margin-top:16px;padding-top:12px;border-top:1px solid #E2E8F0;display:flex;justify-content:space-between;align-items:center;">
               <div>
-                <span class="pill ok" id="dash-ssrs-pill">Connected</span>
-                <span style="font-size:12.5px;color:#64748B;margin-left:6px;">SSRS 2017+ (52 Items)</span>
+                <span class="pill" id="dash-ssrs-pill">Not connected</span>
+                <span style="font-size:12.5px;color:#64748B;margin-left:6px;" id="dash-ssrs-detail">Source server</span>
               </div>
               <div>
-                <span class="pill ok" id="dash-dest-pill">Connected</span>
+                <span class="pill" id="dash-dest-pill">Not connected</span>
                 <span style="font-size:12.5px;color:#64748B;margin-left:6px;">Bold Reports Server</span>
               </div>
             </div>
@@ -700,9 +700,9 @@
         <div class="journey-nav-bar">
           <button class="btn2" onclick="switchTab('library')">← Back to Report Library</button>
           <div class="jnav-info">
-            <span>Readiness score: <strong>76%</strong>. Ready for batch migration pipeline.</span>
+            <span id="dash-footer-readiness">Run the assessment to calculate a readiness score.</span>
           </div>
-          <button class="btn" style="background:#059669;" onclick="startMigrationWithSelected()"><span id="btn-dash-footer-migrate">Start Migration Pipeline (42) →</span></button>
+          <button class="btn" style="background:#059669;" onclick="startMigrationWithSelected()"><span id="btn-dash-footer-migrate">Start Migration Pipeline (0) →</span></button>
         </div>
       </section>
 
@@ -787,25 +787,25 @@
                 <tr>
                   <td>1. Folders</td>
                   <td>Category</td>
-                  <td><span id="stage-folders-count">4</span></td>
+                  <td><span id="stage-folders-count">0</span></td>
                   <td><span class="pill" id="stage-folders-pill">Ready</span></td>
                 </tr>
                 <tr>
                   <td>2. Data Sources</td>
                   <td>Datasource</td>
-                  <td><span id="stage-ds-count">3</span></td>
+                  <td><span id="stage-ds-count">0</span></td>
                   <td><span class="pill" id="stage-ds-pill">Ready</span></td>
                 </tr>
                 <tr>
                   <td>3. Datasets</td>
                   <td>Dataset</td>
-                  <td><span id="stage-dset-count">3</span></td>
+                  <td><span id="stage-dset-count">0</span></td>
                   <td><span class="pill" id="stage-dset-pill">Ready</span></td>
                 </tr>
                 <tr>
                   <td>4. Reports</td>
                   <td>Report</td>
-                  <td><span id="stage-rep-count">42</span></td>
+                  <td><span id="stage-rep-count">0 / 0</span></td>
                   <td><span class="pill" id="stage-rep-pill">Ready</span></td>
                 </tr>
               </tbody>
@@ -828,7 +828,7 @@
         <div class="journey-nav-bar">
           <button class="btn2" onclick="switchTab('dashboard')">← Back to Assessment</button>
           <div class="jnav-info">
-            <span id="migration-footer-info">Upload pipeline ready to execute 52 catalog items.</span>
+            <span id="migration-footer-info">Nothing discovered yet.</span>
           </div>
           <button class="btn" onclick="switchTab('validation')">Proceed to Validation & Diff →</button>
         </div>
@@ -879,6 +879,7 @@
             <p class="sub">Compare SSRS and Bold Reports output side-by-side with identical parameters.</p>
           </div>
           <div style="display:flex;align-items:center;gap:12px;">
+            <button class="btn" id="btn-run-validation" onclick="runValidationPass()">Run Validation</button>
             <select id="val-report-selector" style="height:38px;border:1px solid #CBD5E1;border-radius:6px;padding:0 12px;font-weight:600;" onchange="loadReportValidation(this.value)">
               <!-- Dynamically populated from real reports -->
             </select>
@@ -886,7 +887,7 @@
               <button class="sel" id="seg-side-by-side" onclick="setDiffView('side-by-side')">Side by side</button>
               <button id="seg-rdl-diff" onclick="setDiffView('rdl')">RDL Code Diff</button>
               <button id="seg-designer" onclick="setDiffView('designer')">Web Report Designer</button>
-              <button id="seg-pixel-diff" onclick="setDiffView('pixel')">Pixel diff</button>
+              <button id="seg-pixel-diff" onclick="setDiffView('pixel')">Layout</button>
               <button id="seg-data-diff" onclick="setDiffView('data')">Data diff</button>
             </div>
           </div>
@@ -894,30 +895,30 @@
 
         <!-- Selected Report Metadata Bar -->
         <div class="report-meta-bar" id="val-report-meta-bar">
-          <span>Folder: <code id="val-meta-folder">/MigrationTestSuite</code></span>
-          <span>Size: <strong id="val-meta-size">3.2 KB</strong></span>
-          <span>Parameters: <strong id="val-meta-params">0</strong></span>
-          <span>Bucket: <span class="pill ok" id="val-meta-bucket">Clean</span></span>
+          <span>Folder: <code id="val-meta-folder">—</code></span>
+          <span>Size: <strong id="val-meta-size">—</strong></span>
+          <span>Parameters: <strong id="val-meta-params">—</strong></span>
+          <span>Bucket: <span class="pill" id="val-meta-bucket">—</span></span>
           <span id="val-meta-blocker" style="color:#DC2626;font-weight:600;display:none;"></span>
         </div>
 
         <!-- 4 Metric Tiles -->
         <div class="tiles">
           <div class="card tile">
-            <div class="n" id="val-data-acc" style="color:#059669;">99.8%</div>
+            <div class="n" id="val-data-acc" style="color:#059669;">—</div>
             <div class="l">Data Accuracy</div>
           </div>
           <div class="card tile">
-            <div class="n" id="val-vis-sim" style="color:#2563EB;">96.4%</div>
-            <div class="l">Visual Similarity</div>
+            <div class="n" id="val-vis-sim" style="color:#2563EB;">—</div>
+            <div class="l">Pages (dest / source)</div>
           </div>
           <div class="card tile">
-            <div class="n" id="val-rows-matched">1,240 / 1,240</div>
+            <div class="n" id="val-rows-matched">—</div>
             <div class="l">Rows Matched</div>
           </div>
           <div class="card tile">
-            <div class="n" id="val-shifts-count">0</div>
-            <div class="l">Layout Shifts</div>
+            <div class="n" id="val-state" style="font-size:20px;">Not validated</div>
+            <div class="l">Validation State</div>
           </div>
         </div>
 
@@ -987,7 +988,7 @@
         <div class="main-header">
           <div>
             <h1>Step 6: Production Cutover & Audit</h1>
-            <p class="sub">Verify the 7 pre-flight gates, activate URL redirection shim, and export compliance audit reports.</p>
+            <p class="sub">Verify the pre-flight gates, activate URL redirection shim, and export compliance audit reports.</p>
           </div>
           <div style="display:flex;gap:10px;">
             <button class="btn2" onclick="downloadReportPdf()">Download Audit PDF</button>
@@ -1048,7 +1049,7 @@
         <div class="journey-nav-bar">
           <button class="btn2" onclick="switchTab('validation')">← Back to Validation</button>
           <div class="jnav-info">
-            <span style="color:#059669;font-weight:600;">✓ Ready for final cutover sign-off.</span>
+            <span id="cutover-footer-status">Checking cutover gates...</span>
           </div>
           <button class="btn" style="background:#059669;" onclick="handleConfirmCutover()">Confirm Production Cutover</button>
         </div>
@@ -1076,26 +1077,26 @@
             <h2>1. Local Estate Paths</h2>
             <label class="f">
               Report Folder (*.rdl - scanned recursively)
-              <input type="text" id="lf-report-folder" value="C:\Users\manor\Downloads\Migration Scripts\Migration Scripts\Export\Reports" placeholder="C:\SSRS_Export\Reports">
+              <input type="text" id="lf-report-folder" placeholder="C:\SSRS_Export\Reports">
             </label>
             <div class="row2">
               <label class="f">
                 DataSource Folder (*.rsds - optional)
-                <input type="text" id="lf-ds-folder" value="C:\Users\manor\Downloads\Migration Scripts\Migration Scripts\Export\Datasources" placeholder="C:\SSRS_Export\Datasources">
+                <input type="text" id="lf-ds-folder" placeholder="C:\SSRS_Export\Datasources">
               </label>
               <label class="f">
                 DataSet Folder (*.rsd - optional)
-                <input type="text" id="lf-dset-folder" value="C:\Users\manor\Downloads\Migration Scripts\Migration Scripts\Export\Datasets" placeholder="C:\SSRS_Export\Datasets">
+                <input type="text" id="lf-dset-folder" placeholder="C:\SSRS_Export\Datasets">
               </label>
             </div>
             <div class="row2">
               <label class="f">
                 Backup Folder (Original RDLs)
-                <input type="text" id="lf-backup-folder" value="C:\SSRS_Backup" placeholder="C:\SSRS_Backup">
+                <input type="text" id="lf-backup-folder" placeholder="C:\SSRS_Backup">
               </label>
               <label class="f">
                 Logs & Outputs Folder
-                <input type="text" id="lf-log-folder" value="C:\SSRS_Migration_Logs" placeholder="C:\SSRS_Migration_Logs">
+                <input type="text" id="lf-log-folder" placeholder="C:\SSRS_Migration_Logs">
               </label>
             </div>
             <label class="f">
@@ -1131,11 +1132,11 @@
             <div id="lf-creds-box" class="row2">
               <label class="f">
                 Username / Email
-                <input type="text" id="lf-user" value="test@gmail.com" placeholder="admin@example.com">
+                <input type="text" id="lf-user" placeholder="admin@example.com" autocomplete="username">
               </label>
               <label class="f">
                 Password
-                <input type="password" id="lf-pass" value="Admin@123" placeholder="••••••••">
+                <input type="password" id="lf-pass" placeholder="••••••••" autocomplete="current-password">
               </label>
             </div>
             <div id="lf-token-box" style="display:none;">
@@ -1353,7 +1354,7 @@
             <input type="radio" name="del-scope" value="all" id="del-scope-all" onchange="toggleDeleteScopeView()" checked style="margin-top:3px;">
             <div style="flex:1;">
               <strong style="display:block;font-size:13.5px;color:#0F172A;">All Reports in Bold Reports</strong>
-              <span style="font-size:12px;color:#64748B;">Delete all <span id="del-modal-total-count">42</span> reports across all folders from Bold Reports Server.</span>
+              <span style="font-size:12px;color:#64748B;">Delete all <span id="del-modal-total-count">0</span> reports across all folders from Bold Reports Server.</span>
             </div>
           </label>
 
@@ -1418,8 +1419,8 @@
   <script src="https://cdn.boldreports.com/13.1.26/scripts/v2.0/bold.report-viewer.min.js"></script>
   <script src="https://cdn.boldreports.com/13.1.26/scripts/v2.0/bold.report-designer.min.js"></script>
 
-  <script src="/js/api.js?v=2.1"></script>
-  <script src="/js/app.js?v=2.1"></script>
+  <script src="/js/api.js?v=2.3"></script>
+  <script src="/js/app.js?v=2.3"></script>
 </body>
 
 </html>
