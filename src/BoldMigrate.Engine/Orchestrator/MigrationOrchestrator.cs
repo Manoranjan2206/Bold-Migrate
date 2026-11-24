@@ -256,6 +256,7 @@ public class MigrationOrchestrator : BackgroundService, IMigrationOrchestrator
             record.Bucket = xfrm.Bucket;
             record.BlockReasonCode = xfrm.BlockReasonCode;
             record.RdlSchemaVersion = xfrm.SchemaVersion;
+            record.FeatureTags = xfrm.FeatureTags.Count > 0 ? string.Join(",", xfrm.FeatureTags) : null;
             record.State = xfrm.Bucket == ReportBucket.Blocked ? ReportState.Blocked : ReportState.Analysed;
 
             foreach (var act in xfrm.Actions)

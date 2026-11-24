@@ -209,7 +209,7 @@ function renderDataSourcesTable() {
   if (!dataSourcesCache || dataSourcesCache.length === 0) {
     tbody.innerHTML = `
       <tr>
-        <td colspan="6" style="text-align:center;color:#64748B;padding:20px;">
+        <td colspan="7" style="text-align:center;color:#64748B;padding:20px;">
           No data sources discovered yet. Click "Save & Discover Catalog" to scan SSRS.
         </td>
       </tr>
@@ -217,63 +217,118 @@ function renderDataSourcesTable() {
     return;
   }
 
-  tbody.innerHTML = dataSourcesCache.map(ds => `
+  tbody.innerHTML = dataSourcesCache.map(ds => {
+    const mode = ds.credentialRetrieval || (ds.hasCredentials ? "Store" : "Prompt");
+    const isStore = mode === "Store";
+    const isIntegrated = mode === "Integrated";
+    const isNone = mode === "None";
+    const isPrompt = mode === "Prompt";
+
+    return `
     <tr>
-      <td><strong>${escapeHtml(ds.name)}</strong></td>
-      <td><code>${escapeHtml(ds.sourcePath || ds.parentPath || "/")}</code></td>
-      <td><span class="pill" style="font-size:11px;">${escapeHtml(ds.itemType || "DataSource")}</span></td>
+      <td><strong>${escapeHtml(ds.name)}</strong><br><small style="color:#64748B;">${escapeHtml(ds.sourcePath || ds.parentPath || "/")}</small></td>
       <td>
-        <input id="ds-user-${ds.id}" data-ds-id="${ds.id}" class="ds-cred-user" placeholder="Not set"
+        <div style="display:flex;align-items:center;gap:4px;">
+          <input id="ds-conn-${ds.id}" class="ds-conn-str" value="${escapeHtml(ds.connectString || "")}"
+                 placeholder="Server=...;Database=..."
+                 style="width:220px;padding:4px 8px;border:1px solid #CBD5E1;border-radius:4px;font-family:monospace;font-size:12px;">
+          ${(ds.connectString && (ds.connectString.toLowerCase().includes("localhost") || ds.connectString.includes("127.0.0.1"))) ? `
+            <button type="button" class="btn2 btn-sm" style="font-size:10px;padding:2px 6px;white-space:nowrap;" title="Replace localhost with host.docker.internal for Bold Reports in Docker" onclick="replaceLocalhostWithDocker('${ds.id}')">Docker Fix</button>
+          ` : ''}
+        </div>
+      </td>
+      <td><span class="pill" style="font-size:11px;">${escapeHtml(ds.serverType || ds.itemType || "SQL")}</span></td>
+      <td>
+        <select id="ds-mode-${ds.id}" onchange="onDataSourceModeChange('${ds.id}')"
+                style="padding:4px 6px;border:1px solid #CBD5E1;border-radius:4px;font-size:12px;">
+          <option value="Integrated" ${isIntegrated ? "selected" : ""}>Integrated (Windows Login)</option>
+          <option value="Store" ${isStore ? "selected" : ""}>Store (Saved Account)</option>
+          <option value="Prompt" ${isPrompt ? "selected" : ""}>Prompt (At Runtime)</option>
+          <option value="None" ${isNone ? "selected" : ""}>None (In Connection String)</option>
+        </select>
+      </td>
+      <td>
+        <input id="ds-user-${ds.id}" data-ds-id="${ds.id}" class="ds-cred-user" placeholder="${isStore ? "e.g. sa or DOMAIN\\user" : "N/A"}"
                value="${escapeHtml(ds.userName || "")}" aria-label="User for ${escapeHtml(ds.name)}"
-               style="width:130px;padding:4px 8px;border:1px solid #CBD5E1;border-radius:4px;">
+               ${!isStore ? "disabled" : ""}
+               style="width:130px;padding:4px 8px;border:1px solid #CBD5E1;border-radius:4px;${!isStore ? "background:#F1F5F9;opacity:0.6;" : ""}">
       </td>
       <td>
         <input type="password" id="ds-pass-${ds.id}" data-ds-id="${ds.id}" class="ds-cred-pass"
-               placeholder="${ds.hasCredentials ? "Stored (unchanged)" : "Not set"}" aria-label="Password for ${escapeHtml(ds.name)}"
+               placeholder="${isStore ? (ds.hasCredentials ? "Stored (unchanged)" : "Password") : "N/A"}"
+               aria-label="Password for ${escapeHtml(ds.name)}"
                autocomplete="new-password"
-               style="width:130px;padding:4px 8px;border:1px solid #CBD5E1;border-radius:4px;">
+               ${!isStore ? "disabled" : ""}
+               style="width:120px;padding:4px 8px;border:1px solid #CBD5E1;border-radius:4px;${!isStore ? "background:#F1F5F9;opacity:0.6;" : ""}">
       </td>
       <td style="white-space:nowrap;">
-        <span class="pill ${ds.hasCredentials ? "ok" : ""}" id="ds-status-${ds.id}">${ds.hasCredentials ? "Stored" : "Credentials not set"}</span>
+        <span class="pill ${isIntegrated || ds.hasCredentials || isNone ? "ok" : ""}" id="ds-status-${ds.id}">
+          ${isIntegrated ? "Windows Auth" : (ds.hasCredentials ? "Stored" : (isNone ? "None" : "Prompt"))}
+        </span>
         <button class="btn2 btn-sm" style="margin-left:6px;" onclick="saveDataSourceCredentials('${ds.id}')">Save</button>
       </td>
     </tr>
-  `).join("");
+  `}).join("");
 }
 
-// Credentials stay in server memory for this session. The local Step 4 viewer/designer use
-// them; data sources without credentials prompt for them when a report runs.
+function onDataSourceModeChange(dsId) {
+  const mode = document.getElementById(`ds-mode-${dsId}`)?.value;
+  const userEl = document.getElementById(`ds-user-${dsId}`);
+  const passEl = document.getElementById(`ds-pass-${dsId}`);
+  const isStore = mode === "Store";
+
+  if (userEl) {
+    userEl.disabled = !isStore;
+    userEl.style.background = isStore ? "" : "#F1F5F9";
+    userEl.style.opacity = isStore ? "1" : "0.6";
+    userEl.placeholder = isStore ? "e.g. sa or DOMAIN\\user" : "N/A";
+  }
+  if (passEl) {
+    passEl.disabled = !isStore;
+    passEl.style.background = isStore ? "" : "#F1F5F9";
+    passEl.style.opacity = isStore ? "1" : "0.6";
+    passEl.placeholder = isStore ? "Password" : "N/A";
+  }
+}
+
+function replaceLocalhostWithDocker(dsId) {
+  const connEl = document.getElementById(`ds-conn-${dsId}`);
+  if (connEl && connEl.value) {
+    connEl.value = connEl.value.replace(/localhost/gi, "host.docker.internal").replace(/127\.0\.0\.1/g, "host.docker.internal");
+    showToast("Replaced localhost with host.docker.internal. Remember to click Save.");
+  }
+}
+
 async function saveDataSourceCredentials(dsId) {
   if (!currentRun) return;
+  const mode = document.getElementById(`ds-mode-${dsId}`)?.value || "Prompt";
   const user = document.getElementById(`ds-user-${dsId}`)?.value.trim() || "";
   const pass = document.getElementById(`ds-pass-${dsId}`)?.value || "";
+  const connectString = document.getElementById(`ds-conn-${dsId}`)?.value.trim() || "";
   const pill = document.getElementById(`ds-status-${dsId}`);
   const ds = dataSourcesCache.find(d => d.id === dsId);
 
-  // An empty password with an unchanged, already-stored user keeps the stored password.
-  if (user && !pass && ds?.hasCredentials && ds.userName === user) {
-    showToast("Credentials unchanged.");
-    return;
-  }
-
   try {
-    const res = await Api.setDataSourceCredentials(currentRun.id, dsId, user, pass);
+    const res = await Api.setDataSourceCredentials(currentRun.id, dsId, user, pass, mode, connectString);
     if (ds) {
+      ds.credentialRetrieval = mode;
+      if (connectString) ds.connectString = connectString;
       ds.hasCredentials = res.hasCredentials;
-      ds.userName = res.hasCredentials ? user : null;
+      ds.userName = mode === "Store" && res.hasCredentials ? user : null;
     }
     const passEl = document.getElementById(`ds-pass-${dsId}`);
-    if (passEl) {
+    if (passEl && mode === "Store") {
       passEl.value = "";
-      passEl.placeholder = res.hasCredentials ? "Stored (unchanged)" : "Not set";
+      passEl.placeholder = res.hasCredentials ? "Stored (unchanged)" : "Password";
     }
     if (pill) {
-      pill.className = res.hasCredentials ? "pill ok" : "pill";
-      pill.innerText = res.hasCredentials ? "Stored" : "Credentials not set";
+      const isOk = mode === "Integrated" || res.hasCredentials || mode === "None";
+      pill.className = isOk ? "pill ok" : "pill";
+      pill.innerText = mode === "Integrated" ? "Windows Auth" : (res.hasCredentials ? "Stored" : (mode === "None" ? "None" : "Prompt"));
     }
-    showToast(res.hasCredentials ? "Data source credentials saved for this session." : "Data source credentials cleared.");
+    showToast(`Data source settings updated (${mode}).`);
   } catch (err) {
-    showToast(err.message);
+    showToast(`Failed to save: ${err.message}`, true);
   }
 }
 
@@ -321,11 +376,11 @@ async function testSsrsConnection() {
 
 async function testDestConnection() {
   if (!currentRun) return;
-  const url = document.getElementById("conn-dest-url").value;
+  const url = (document.getElementById("conn-dest-url").value || "").trim();
   const mode = document.getElementById("conn-dest-auth-mode").value;
-  const email = document.getElementById("conn-dest-email").value;
+  const email = (document.getElementById("conn-dest-email").value || "").trim();
   const pass = document.getElementById("conn-dest-pass").value;
-  const token = document.getElementById("conn-dest-token").value;
+  const token = (document.getElementById("conn-dest-token").value || "").trim();
 
   const pill = document.getElementById("conn-dest-status-pill");
   pill.className = "pill run";
@@ -1040,6 +1095,7 @@ async function refreshMigrationState(knownPoll) {
       }).join("");
       logBox.scrollTop = logBox.scrollHeight;
     }
+    await loadServerUploadedReports();
   } catch { }
 }
 
@@ -1101,400 +1157,468 @@ function clearLiveLogViewer() {
 }
 
 // -----------------------------------------------------------------------------
-// Step 4: Validation & Diff
+// Step 4: Automated Render Validation & Interactive Inspection
 // -----------------------------------------------------------------------------
+let validationSummaryCache = null;
+let currentValFilter = "all";
+let currentValSearch = "";
+let valPollInterval = null;
+
 function selectReportForValidation(reportId) {
   selectedValidationReportId = reportId;
   switchTab("validation");
 }
 
 async function refreshValidationState() {
-  if (!reportsCache || reportsCache.length === 0) {
-    await refreshLibraryState();
-  }
-
-  const selector = document.getElementById("val-report-selector");
-  if (!selector) return;
-
-  // Populate selector with real reports
-  selector.innerHTML = reportsCache.map(r => `
-    <option value="${r.id}" ${r.id === selectedValidationReportId ? "selected" : ""}>
-      ${escapeHtml(r.name)} (${escapeHtml(r.folder)})
-    </option>
-  `).join("");
-
-  if (!selectedValidationReportId && reportsCache.length > 0) {
-    selectedValidationReportId = reportsCache[0].id;
-  }
-
-  await loadReportValidation(selectedValidationReportId);
+  await loadValidationSummary(true);
 }
 
-async function runValidationPass() {
+async function loadValidationSummary(force = false) {
   if (!currentRun) return;
-  const btn = document.getElementById("btn-run-validation");
-  if (btn) { btn.disabled = true; btn.innerText = "Validating..."; }
 
-  showToast("Rendering each report on SSRS and Bold Reports and comparing output...");
-  try {
-    await Api.startValidation(currentRun.id);
-
-    // Wait for the backend pass to produce results for the selected report.
-    for (let i = 0; i < 20; i++) {
-      await new Promise(r => setTimeout(r, 1000));
-      const v = await Api.getReportValidation(currentRun.id, selectedValidationReportId);
-      if (v && v.validated) break;
-    }
-
-    await refreshLibraryState();
-    await loadReportValidation(selectedValidationReportId);
-    showToast("Validation pass complete.");
-  } catch (err) {
-    showToast("Validation failed: " + err.message);
-  } finally {
-    if (btn) { btn.disabled = false; btn.innerText = "Run Validation"; }
-  }
-}
-
-async function loadReportValidation(reportId) {
-  selectedValidationReportId = reportId;
-  const report = reportsCache.find(r => r.id === reportId) || reportsCache[0];
-  if (!report) return;
-
-  document.getElementById("val-report-title").innerText = `Step 4: Output Validation — ${report.name}`;
-
-  // Update metadata bar
-  document.getElementById("val-meta-folder").innerText = report.folder;
-  const sizeFormatted = report.sizeBytes > 1024 ? `${(report.sizeBytes / 1024).toFixed(1)} KB` : `${report.sizeBytes} B`;
-  document.getElementById("val-meta-size").innerText = sizeFormatted;
-  document.getElementById("val-meta-params").innerText = report.parameterCount || 0;
-
-  const bucketPill = document.getElementById("val-meta-bucket");
-  bucketPill.innerText = report.bucket;
-  bucketPill.className = report.bucket === "Clean" || report.bucket === "AutoFixed" ? "pill ok" : (report.bucket === "NeedsReview" ? "pill warn" : "pill fail");
-
-  const blockerSpan = document.getElementById("val-meta-blocker");
-  if (report.blockReason) {
-    blockerSpan.style.display = "inline";
-    blockerSpan.innerText = `Blocker: ${report.blockReason}`;
-  } else {
-    blockerSpan.style.display = "none";
-  }
-
-  // Measured results only — never an assumed score.
-  let validation = null;
-  try {
-    validation = await Api.getReportValidation(currentRun.id, report.id);
-  } catch {
-    validation = null;
-  }
-  latestValidation = validation;
-
-  renderValidationMetrics(validation);
-  renderValidationViewport(report, validation);
-}
-
-function fmtPct(v) {
-  if (v === null || v === undefined) return "—";
-  return `${Number(v).toFixed(1)}%`;
-}
-
-function renderValidationMetrics(v) {
-  const accEl = document.getElementById("val-data-acc");
-  const simEl = document.getElementById("val-vis-sim");
-  const rowsEl = document.getElementById("val-rows-matched");
-  const stateEl = document.getElementById("val-state");
-
-  if (stateEl) {
-    const st = (v && v.state) || "Unknown";
-    const pretty = st.replace(/([a-z])([A-Z])/g, "$1 $2");
-    stateEl.innerText = (v && v.validated) ? pretty : "Not validated";
-    stateEl.style.color = st === "AutoPassed" ? "#059669"
-      : (st === "AwaitingReview" ? "#D97706"
-      : (st.includes("Failed") ? "#DC2626" : "#64748B"));
-  }
-
-  if (!v || !v.validated) {
-    // No measurement exists. Show that plainly rather than inventing numbers.
-    [accEl, simEl].forEach(el => { if (el) { el.innerText = "—"; el.style.color = "#94A3B8"; } });
-    if (rowsEl) { rowsEl.innerText = "—"; rowsEl.style.color = "#94A3B8"; }
-    return;
-  }
-
-  if (accEl) {
-    accEl.innerText = fmtPct(v.dataAccuracy);
-    accEl.style.color = v.dataAccuracy >= 99 ? "#059669" : (v.dataAccuracy >= 90 ? "#D97706" : "#DC2626");
-  }
-  // The second tile reports pagination, which is actually measured. Pixel-level comparison
-  // is not implemented, so no similarity percentage is shown.
-  if (simEl) {
-    const sp = v.sourcePageCount, dp = v.destinationPageCount;
-    if (sp === null || sp === undefined || dp === null || dp === undefined) {
-      simEl.innerText = "n/a";
-      simEl.style.color = "#94A3B8";
-      simEl.title = v.renderSummary || "A PDF render was not available from both servers.";
-    } else {
-      simEl.innerText = `${dp} / ${sp}`;
-      simEl.style.color = sp === dp ? "#2563EB" : "#DC2626";
-      simEl.title = v.renderSummary || "";
-    }
-  }
-  if (rowsEl) {
-    rowsEl.innerText = `${v.rowsDestination ?? 0} / ${v.rowsSource ?? 0}`;
-    rowsEl.style.color = (v.rowsDestination === v.rowsSource) ? "#0F172A" : "#DC2626";
-  }
-}
-
-function setDiffView(mode) {
-  currentDiffMode = mode;
-  document.querySelectorAll(".seg button").forEach(b => b.classList.remove("sel"));
-  if (mode === "side-by-side") document.getElementById("seg-side-by-side")?.classList.add("sel");
-  if (mode === "rdl") document.getElementById("seg-rdl-diff")?.classList.add("sel");
-  if (mode === "designer") document.getElementById("seg-designer")?.classList.add("sel");
-  if (mode === "pixel") document.getElementById("seg-pixel-diff")?.classList.add("sel");
-  if (mode === "data") document.getElementById("seg-data-diff")?.classList.add("sel");
-  if (mode === "staged") document.getElementById("seg-staged")?.classList.add("sel");
-
-  const report = reportsCache.find(r => r.id === selectedValidationReportId) || reportsCache[0];
-  renderValidationViewport(report);
-}
-
-function renderValidationViewport(report, v) {
-  const grid = document.getElementById("val-viewport-grid");
+  const grid = document.getElementById("val-evidence-grid");
   if (!grid) return;
 
-  // Leaving the staged list tears down any open local viewer/designer.
-  if (currentDiffMode !== "staged") {
-    Preview.destroyWidgets();
-    Preview.open = null;
-  }
+  try {
+    const summary = await Api.getValidationSummary(currentRun.id);
+    validationSummaryCache = summary;
 
-  if (currentDiffMode === "staged") {
-    if (currentRun) Preview.render(grid);
-    return;
-  }
+    // Update 4 Metric Tiles
+    const passEl = document.getElementById("val-stat-passed");
+    const manEl = document.getElementById("val-stat-manual");
+    const failEl = document.getElementById("val-stat-failed");
+    const totEl = document.getElementById("val-stat-total");
 
-  if (v === undefined) v = latestValidation;
-  const name = report ? escapeHtml(report.name) : "Report";
+    if (passEl) passEl.innerText = summary.passed || 0;
+    if (manEl) manEl.innerText = summary.needsManualCheck || 0;
+    if (failEl) failEl.innerText = summary.failed || 0;
+    if (totEl) totEl.innerText = summary.total || 0;
 
-  if (currentDiffMode === "rdl") {
-    grid.innerHTML = `
-      <div class="card" style="grid-column: 1 / -1; padding: 18px;">
-        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
-          <h2>RDL Definition Code Diff: ${name}</h2>
-          <span class="pill ok">Schema 2016 / RDL 2010</span>
-        </div>
-        <div class="rdl-diff-container" id="rdl-diff-box">
-          <div class="rdl-pane">
-            <div class="rdl-pane-title">
-              <span>Source SSRS Definition (Original .rdl)</span>
-              <small>External Shared Datasets &amp; DataSources</small>
-            </div>
-            <pre class="rdl-code" id="rdl-code-original">Loading RDL source definition...</pre>
-          </div>
-          <div class="rdl-pane">
-            <div class="rdl-pane-title">
-              <span>Target Bold Reports Definition (Transformed .rdl)</span>
-              <small>Inlined Datasets &amp; Rewritten DS References</small>
-            </div>
-            <pre class="rdl-code" id="rdl-code-transformed">Loading transformed RDL definition...</pre>
-          </div>
-        </div>
-      </div>
-    `;
-    loadReportRdlDiff(report);
-    return;
-  }
+    // Update Filter Pills
+    const pAll = document.getElementById("val-pill-all");
+    const pPass = document.getElementById("val-pill-passed");
+    const pMan = document.getElementById("val-pill-manual");
+    const pFail = document.getElementById("val-pill-failed");
 
-  if (currentDiffMode === "designer") {
-    let categoryName = "Sample Reports";
-    if (report.folder && report.folder !== "/") {
-      categoryName = report.folder.replace(/^\/+|\/+$/g, '');
+    if (pAll) pAll.innerText = summary.total || 0;
+    if (pPass) pPass.innerText = summary.passed || 0;
+    if (pMan) pMan.innerText = summary.needsManualCheck || 0;
+    if (pFail) pFail.innerText = summary.failed || 0;
+
+    const footStatus = document.getElementById("val-footer-status");
+    if (footStatus) {
+      if (summary.passed > 0 && summary.failed === 0) {
+        footStatus.innerText = `${summary.passed} of ${summary.total} reports verified and ready for upload.`;
+      } else if (summary.failed > 0) {
+        footStatus.innerText = `${summary.failed} report(s) encountered rendering errors. Inspect logs or edit before upload.`;
+      } else {
+        footStatus.innerText = `Ready to run automated validation on ${summary.total} reports, or skip directly to upload.`;
+      }
     }
-    const reportPath = `/${categoryName}/${name}`;
 
-    grid.innerHTML = `
-      <div class="card" style="grid-column: 1 / -1; padding: 0; overflow: hidden; height: 800px; display: flex; flex-direction: column;">
-        <div style="background: #0F172A; color: #fff; padding: 10px 16px; display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid #334155;">
-          <div style="display:flex; align-items:center; gap:12px;">
-            <div style="font-size:15px; font-weight:700; color:#38BDF8; display:flex; align-items:center; gap:6px;">
-              <span>⚡ Bold Reports Web Designer</span>
-            </div>
-            <span class="pill ok" style="font-size:11.5px;">Report: ${escapeHtml(name)}</span>
-            <span style="font-size:11.5px; color:#94A3B8;">Path: <code>${escapeHtml(reportPath)}</code></span>
-          </div>
-          <div style="display:flex; gap:10px; align-items:center;">
-            <button class="btn2 btn-sm" onclick="setDiffView('rdl')">View RDL Diff</button>
-            <button class="btn2 btn-sm" onclick="setDiffView('side-by-side')">Exit Designer</button>
-          </div>
-        </div>
-        <div id="bold-designer-loading-overlay" style="padding:40px; text-align:center; color:#64748B; background:#F8FAFC; flex:1; display:flex; flex-direction:column; justify-content:center; align-items:center;">
-          <div style="font-size:17px; font-weight:600; color:#0F172A; margin-bottom:8px;">Initializing Bold Reports Web Designer...</div>
-          <div style="font-size:13px; color:#64748B;">Connecting to Report Server at <code>http://localhost:8090/reporting/reportservice/api/Designer</code></div>
-        </div>
-        <div id="bold-report-designer" style="flex:1; width:100%; height:100%; min-height:720px; display:none;"></div>
-      </div>
-    `;
-
-    initBoldReportDesigner(report, reportPath);
-    return;
-  }
-
-  if (currentDiffMode === "pixel") {
-    if (!v || !v.validated) {
-      grid.innerHTML = notValidatedPanel("Visual comparison");
-      return;
+    renderValidationEvidenceGrid();
+  } catch (err) {
+    console.error("Failed loading validation summary:", err);
+    if (grid) {
+      grid.innerHTML = `
+        <div class="card" style="grid-column: 1 / -1; padding: 24px; text-align: center; color: #DC2626;">
+          <p style="margin: 0; font-size: 14px;">Error loading validation summary: ${escapeHtml(err.message)}</p>
+          <button class="btn2 btn-sm" onclick="loadValidationSummary(true)" style="margin-top: 10px;">Retry</button>
+        </div>`;
     }
-    const sp = v.sourcePageCount, dp = v.destinationPageCount;
-    const measured = sp != null && dp != null;
-    grid.innerHTML = `
-      <div class="card" style="grid-column: 1 / -1; padding: 20px;">
-        <h2>Layout Comparison</h2>
-        <p class="sub" style="margin-bottom:14px;">
-          Both servers were rendered to PDF and their pagination compared.
-        </p>
-        <div style="display:flex;gap:18px;flex-wrap:wrap;">
-          <div style="flex:1;min-width:200px;border:1px solid #E2E8F0;border-radius:8px;padding:16px;">
-            <div style="font-size:12px;color:#64748B;font-weight:600;text-transform:uppercase;letter-spacing:.4px;">SSRS pages</div>
-            <div style="font-size:30px;font-weight:700;color:#0F172A;margin-top:4px;">${sp ?? "—"}</div>
-          </div>
-          <div style="flex:1;min-width:200px;border:1px solid #E2E8F0;border-radius:8px;padding:16px;">
-            <div style="font-size:12px;color:#64748B;font-weight:600;text-transform:uppercase;letter-spacing:.4px;">Bold Reports pages</div>
-            <div style="font-size:30px;font-weight:700;color:${measured && sp === dp ? "#059669" : "#DC2626"};margin-top:4px;">${dp ?? "—"}</div>
-          </div>
-        </div>
-        <div style="margin-top:16px;padding:12px 14px;background:#F8FAFC;border:1px solid #E2E8F0;border-radius:6px;font-size:13px;color:#334155;">
-          ${escapeHtml(v.renderSummary || "No render summary available.")}
-        </div>
-        <div style="margin-top:12px;padding:12px 14px;background:#FFFBEB;border:1px solid #FDE68A;border-radius:6px;font-size:12.5px;color:#92400E;">
-          <strong>Pixel comparison is not performed.</strong> SSRS and Bold Reports use different PDF
-          writers, so comparing their output byte-for-byte would describe the encoders rather than the
-          report. Confirm appearance in the Web Report Designer tab.
-        </div>
-        <p class="sub" style="margin-top:12px;font-size:12px;">
-          Compared at ${v.runUtc ? new Date(v.runUtc).toLocaleString() : "unknown time"}
-          on parameter set <code>${escapeHtml((v.parameterSetHash || "").slice(0, 12))}</code>.
-        </p>
-      </div>
-    `;
-    return;
   }
-
-  if (currentDiffMode === "data") {
-    if (!v || !v.validated) {
-      grid.innerHTML = notValidatedPanel("Data comparison");
-      return;
-    }
-    const matched = v.rowsSource === v.rowsDestination;
-    grid.innerHTML = `
-      <div class="card" style="grid-column: 1 / -1; padding: 20px;">
-        <h2>Data Comparison for ${name}</h2>
-        <table style="margin-top:10px;">
-          <thead><tr><th>Measure</th><th>SSRS (source)</th><th>Bold Reports (destination)</th><th>Result</th></tr></thead>
-          <tbody>
-            <tr>
-              <td>Rows returned</td>
-              <td>${v.rowsSource ?? 0}</td>
-              <td>${v.rowsDestination ?? 0}</td>
-              <td><span class="pill ${matched ? "ok" : "fail"}">${matched ? "Match" : "Mismatch"}</span></td>
-            </tr>
-            <tr>
-              <td>Cell-level data accuracy</td>
-              <td colspan="2" style="text-align:center;">${fmtPct(v.dataAccuracy)}</td>
-              <td><span class="pill ${v.dataAccuracy >= 99 ? "ok" : "warn"}">${v.dataAccuracy >= 99 ? "Within threshold" : "Below threshold"}</span></td>
-            </tr>
-          </tbody>
-        </table>
-        <p class="sub" style="margin-top:12px;font-size:12px;">
-          Both servers were rendered to CSV with the same parameter set and compared row by row.
-        </p>
-      </div>
-    `;
-    return;
-  }
-
-  // Side-by-side default view — shows the measured comparison, not a mock render.
-  // Embedding a true visual preview requires the Bold Reports Viewer widget; use the
-  // "Web Report Designer" tab for that.
-  if (!v || !v.validated) {
-    grid.innerHTML = notValidatedPanel("Side-by-side comparison");
-    return;
-  }
-
-  const dataOk = v.dataAccuracy >= 99;
-  const rowsOk = v.rowsSource === v.rowsDestination;
-  const pagesMeasured = v.sourcePageCount != null && v.destinationPageCount != null;
-  const pagesOk = pagesMeasured && v.sourcePageCount === v.destinationPageCount;
-  const allOk = dataOk && rowsOk && pagesOk;
-  const pagePill = !pagesMeasured
-    ? `<span class="pill warn" title="${escapeHtml(v.renderSummary || "")}">Not compared</span>`
-    : `<span class="pill ${pagesOk ? "ok" : "fail"}">${pagesOk ? "Match" : "Mismatch"}</span>`;
-
-  grid.innerHTML = `
-    <div class="card" style="grid-column: 1 / -1; padding:20px;">
-      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">
-        <h2>Source vs Destination — ${name}</h2>
-        <span class="pill ${allOk ? "ok" : "warn"}">${allOk ? "Outputs match" : "Differences found"}</span>
-      </div>
-      <p class="sub" style="margin-bottom:16px;">
-        Both servers rendered this report with the same parameters; the exports were compared directly.
-      </p>
-      <table>
-        <thead>
-          <tr><th>Check</th><th>SSRS</th><th>Bold Reports</th><th>Result</th></tr>
-        </thead>
-        <tbody>
-          <tr>
-            <td><strong>Rows returned</strong></td>
-            <td>${v.rowsSource ?? 0}</td>
-            <td>${v.rowsDestination ?? 0}</td>
-            <td><span class="pill ${rowsOk ? "ok" : "fail"}">${rowsOk ? "Match" : "Mismatch"}</span></td>
-          </tr>
-          <tr>
-            <td><strong>Data accuracy</strong></td>
-            <td colspan="2" style="text-align:center;">${fmtPct(v.dataAccuracy)}</td>
-            <td><span class="pill ${dataOk ? "ok" : "warn"}">${dataOk ? "Pass" : "Below threshold"}</span></td>
-          </tr>
-          <tr>
-            <td><strong>Pages rendered</strong><div style="font-size:11.5px;color:#64748B;">PDF render from each server</div></td>
-            <td>${v.sourcePageCount ?? "—"}</td>
-            <td>${v.destinationPageCount ?? "—"}</td>
-            <td>${pagePill}</td>
-          </tr>
-        </tbody>
-      </table>
-      <div style="margin-top:12px;padding:10px 12px;background:#F8FAFC;border:1px solid #E2E8F0;border-radius:6px;font-size:12.5px;color:#475569;">
-        ${escapeHtml(v.renderSummary || "No render summary available.")}
-        <div style="margin-top:4px;color:#64748B;">
-          Pixel-level layout is not compared automatically — open the report in the Bold Reports
-          Designer to confirm appearance.
-        </div>
-      </div>
-      <div style="margin-top:16px;display:flex;gap:10px;flex-wrap:wrap;">
-        <button class="btn2 btn-sm" onclick="setDiffView('designer')">Open the live report in Bold Reports Designer</button>
-        <button class="btn2 btn-sm" onclick="setDiffView('rdl')">Compare RDL definitions</button>
-      </div>
-      <p class="sub" style="margin-top:12px;font-size:12px;">
-        Last compared ${v.runUtc ? new Date(v.runUtc).toLocaleString() : "unknown"}. Current state:
-        <strong>${escapeHtml(v.state || "Unknown")}</strong>.
-      </p>
-    </div>
-  `;
 }
 
-function notValidatedPanel(what) {
-  return `
-    <div class="card" style="grid-column: 1 / -1; padding:28px; text-align:center;">
-      <div style="font-size:15px;font-weight:600;color:#0F172A;margin-bottom:6px;">
-        ${escapeHtml(what)} not available yet
+function filterValidationCards(filter) {
+  currentValFilter = filter;
+  ["all", "passed", "manual", "failed"].forEach(f => {
+    const btn = document.getElementById(`val-btn-filter-${f}`);
+    if (btn) {
+      if (f === filter) btn.classList.add("filter-active");
+      else btn.classList.remove("filter-active");
+    }
+  });
+  renderValidationEvidenceGrid();
+}
+
+function onValidationSearch(query) {
+  currentValSearch = (query || "").trim().toLowerCase();
+  renderValidationEvidenceGrid();
+}
+
+function renderValidationEvidenceGrid() {
+  const grid = document.getElementById("val-evidence-grid");
+  if (!grid || !validationSummaryCache) return;
+
+  const reports = validationSummaryCache.reports || [];
+  let filtered = reports;
+
+  if (currentValFilter === "passed") {
+    filtered = filtered.filter(r => r.status === "Passed" || r.status === "Approved");
+  } else if (currentValFilter === "manual") {
+    filtered = filtered.filter(r => r.status === "NeedsManualCheck");
+  } else if (currentValFilter === "failed") {
+    filtered = filtered.filter(r => r.status === "Failed");
+  }
+
+  if (currentValSearch) {
+    filtered = filtered.filter(r =>
+      (r.name && r.name.toLowerCase().includes(currentValSearch)) ||
+      (r.path && r.path.toLowerCase().includes(currentValSearch))
+    );
+  }
+
+  if (filtered.length === 0) {
+    grid.innerHTML = `
+      <div class="card" style="grid-column: 1 / -1; padding: 36px; text-align: center; color: #64748B;">
+        <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" style="margin-bottom: 8px; opacity: 0.6;">
+          <circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line>
+        </svg>
+        <p style="margin: 0; font-size: 14px; font-weight: 500;">No reports match the current filter (${currentValFilter}).</p>
+      </div>`;
+    return;
+  }
+
+  grid.innerHTML = filtered.map(r => {
+    // Feature tags
+    const tagsHtml = (r.featureTags || []).map(t =>
+      `<span style="font-size:11px;font-weight:600;padding:2px 7px;border-radius:4px;background:#EFF6FF;color:#2563EB;border:1px solid #DBEAFE;">${escapeHtml(t)}</span>`
+    ).join(" ");
+
+    // Status Badge & Border
+    let statusBadge = "";
+    let borderStyle = "border: 1px solid #E2E8F0;";
+    if (r.status === "Passed" || r.status === "Approved") {
+      const dur = r.durationMs ? `${(r.durationMs / 1000).toFixed(1)}s` : "OK";
+      statusBadge = `<span class="pill ok" style="font-size:11.5px;font-weight:600;">✓ Passed (${dur})</span>`;
+      borderStyle = "border: 1px solid #BBF7D0;";
+    } else if (r.status === "NeedsManualCheck") {
+      statusBadge = `<span class="pill warn" style="font-size:11.5px;font-weight:600;" title="Requires parameters without defaults">⚠ Needs Parameters</span>`;
+      borderStyle = "border: 1px solid #FED7AA;";
+    } else if (r.status === "Failed") {
+      statusBadge = `<span class="pill fail" style="font-size:11.5px;font-weight:600;cursor:pointer;" onclick="openRenderLogs('${escapeHtml(r.path)}')" title="Click to view error log">✕ Render Error</span>`;
+      borderStyle = "border: 1px solid #FECACA;";
+    } else {
+      statusBadge = `<span class="pill" style="font-size:11.5px;color:#64748B;">⚪ Not Validated</span>`;
+    }
+
+    // Thumbnail Preview
+    let thumbHtml = "";
+    if (r.screenshotUrl) {
+      thumbHtml = `
+        <div style="height:150px;width:100%;background:#F8FAFC;border-bottom:1px solid #E2E8F0;position:relative;overflow:hidden;cursor:pointer;" onclick="openSnapshotZoom('${r.screenshotUrl}', '${escapeHtml(r.name)}')">
+          <img src="${r.screenshotUrl}?t=${Date.now()}" alt="${escapeHtml(r.name)}" style="width:100%;height:100%;object-fit:cover;object-position:top;" loading="lazy">
+          <div style="position:absolute;bottom:6px;right:6px;background:rgba(15,23,42,0.7);color:#FFF;font-size:10.5px;padding:2px 6px;border-radius:4px;backdrop-filter:blur(2px);">
+            🔍 Click to expand
+          </div>
+        </div>`;
+    } else if (r.status === "NeedsManualCheck") {
+      thumbHtml = `
+        <div style="height:140px;width:100%;background:#FFFBEB;border-bottom:1px solid #FEF3C7;display:flex;flex-direction:column;align-items:center;justify-content:center;color:#D97706;padding:12px;text-align:center;">
+          <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" style="margin-bottom:6px;"><path d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/></svg>
+          <span style="font-size:12.5px;font-weight:600;">Requires Parameters</span>
+          <small style="font-size:11px;color:#92400E;margin-top:2px;">Open in Viewer to supply parameters</small>
+        </div>`;
+    } else if (r.status === "Failed") {
+      thumbHtml = `
+        <div style="height:140px;width:100%;background:#FEF2F2;border-bottom:1px solid #FEE2E2;display:flex;flex-direction:column;align-items:center;justify-content:center;color:#DC2626;padding:12px;text-align:center;cursor:pointer;" onclick="openRenderLogs('${escapeHtml(r.path)}')">
+          <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" style="margin-bottom:6px;"><circle cx="12" cy="12" r="10"></circle><line x1="15" y1="9" x2="9" y2="15"></line><line x1="9" y1="9" x2="15" y2="15"></line></svg>
+          <span style="font-size:12.5px;font-weight:600;">Render Error</span>
+          <small style="font-size:11px;color:#991B1B;margin-top:2px;max-width:90%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">
+            ${escapeHtml(r.errorMessage || "Click to inspect error log")}
+          </small>
+        </div>`;
+    } else {
+      thumbHtml = `
+        <div style="height:120px;width:100%;background:#F8FAFC;border-bottom:1px solid #E2E8F0;display:flex;flex-direction:column;align-items:center;justify-content:center;color:#94A3B8;padding:12px;text-align:center;">
+          <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" style="margin-bottom:6px;"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="16" y1="13" x2="8" y2="13"></line><line x1="16" y1="17" x2="8" y2="17"></line><polyline points="10 9 9 9 8 9"></polyline></svg>
+          <span style="font-size:12px;font-weight:500;">Not validated yet</span>
+        </div>`;
+    }
+
+    return `
+      <div class="card" style="padding:0;overflow:hidden;display:flex;flex-direction:column;border-radius:10px;${borderStyle}">
+        ${thumbHtml}
+        <div style="padding:14px;flex:1;display:flex;flex-direction:column;">
+          <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:6px;gap:8px;">
+            <div style="font-weight:700;font-size:14px;color:#0F172A;word-break:break-word;">${escapeHtml(r.name)}</div>
+            ${statusBadge}
+          </div>
+          <div style="font-size:12px;color:#64748B;margin-bottom:8px;font-family:monospace;">${escapeHtml(r.path)}</div>
+
+          ${tagsHtml ? `<div style="display:flex;flex-wrap:wrap;gap:4px;margin-bottom:10px;">${tagsHtml}</div>` : ""}
+
+          ${r.errorMessage && r.status === "Failed" ? `
+            <div style="font-size:11.5px;color:#DC2626;background:#FEF2F2;border:1px solid #FEE2E2;border-radius:6px;padding:6px 8px;margin-bottom:10px;max-height:48px;overflow:hidden;text-overflow:ellipsis;">
+              ${escapeHtml(r.errorMessage)}
+            </div>` : ""}
+
+          <div style="margin-top:auto;display:flex;justify-content:space-between;align-items:center;padding-top:10px;border-top:1px solid #F1F5F9;">
+            <div style="display:flex;gap:6px;">
+              <button class="btn2 btn-sm" onclick="openInteractiveViewer('${r.reportId}', '${escapeHtml(r.path)}', 'staged')" title="Open interactive local viewer">
+                👁 View
+              </button>
+              <button class="btn2 btn-sm" onclick="openInteractiveDesigner('${r.reportId}', '${escapeHtml(r.path)}', 'staged')" title="Edit in Web Report Designer">
+                ✏ Edit
+              </button>
+            </div>
+            ${r.status === "Failed" ? `
+              <button class="btn2 btn-sm btn-danger" onclick="openRenderLogs('${escapeHtml(r.path)}')" style="padding:4px 8px;font-size:11px;">
+                📜 Error Log
+              </button>` : ""}
+          </div>
+        </div>
       </div>
-      <p class="sub" style="max-width:520px;margin:0 auto 16px;">
-        This report has not been validated. Run a validation pass to render it on both SSRS and
-        Bold Reports and compare the real output.
-      </p>
-      <button class="btn" onclick="runValidationPass()">Run Validation</button>
-    </div>
-  `;
+    `;
+  }).join("");
+}
+
+async function startAutomatedRenderValidation() {
+  if (!currentRun) return;
+
+  const btn = document.getElementById("btn-run-render-validation");
+  const txt = document.getElementById("btn-run-validation-text");
+  if (btn) btn.disabled = true;
+  if (txt) txt.innerText = "Running Validation (5 Parallel)...";
+
+  showToast("Starting automated render validation (5 parallel tabs with headless Playwright)...");
+
+  try {
+    await Api.validateRender(currentRun.id, 5);
+
+    // Poll for updates every 3 seconds
+    if (valPollInterval) clearInterval(valPollInterval);
+    let attempts = 0;
+    valPollInterval = setInterval(async () => {
+      attempts++;
+      await loadValidationSummary();
+
+      // Check if all reports are no longer in NotValidated
+      const summary = validationSummaryCache;
+      if (summary) {
+        const notDone = summary.reports.filter(r => r.status === "NotValidated").length;
+        if (notDone === 0 || attempts >= 40) {
+          clearInterval(valPollInterval);
+          valPollInterval = null;
+          if (btn) btn.disabled = false;
+          if (txt) txt.innerText = "Run Automated Validation (5 Parallel)";
+          showToast(`Automated validation finished! Passed: ${summary.passed}, Errors: ${summary.failed}, Needs Params: ${summary.needsManualCheck}`);
+        }
+      }
+    }, 3000);
+  } catch (err) {
+    if (btn) btn.disabled = false;
+    if (txt) txt.innerText = "Run Automated Validation (5 Parallel)";
+    showToast("Validation failed to start: " + err.message);
+  }
+}
+
+async function skipRenderValidationAndUpload() {
+  if (!currentRun) return;
+  if (!confirm("Skip local automated validation and proceed directly to Step 5: Upload Pipeline?")) return;
+
+  try {
+    await Api.skipValidation(currentRun.id);
+    showToast("Validation skipped. Switching to Step 5: Upload Pipeline...");
+    switchTab("migration");
+  } catch (err) {
+    showToast("Error skipping validation: " + err.message);
+  }
+}
+
+// -----------------------------------------------------------------------------
+// Interactive Local & Server Viewer/Designer Modals
+// -----------------------------------------------------------------------------
+function openInteractiveViewer(reportId, reportPath, mode = "staged") {
+  const modal = document.getElementById("modal-interactive-viewer");
+  const host = document.getElementById("interactive-viewer-host");
+  const title = document.getElementById("interactive-viewer-title");
+  const pill = document.getElementById("interactive-viewer-mode-pill");
+
+  if (!modal || !host) return;
+
+  title.innerText = `Report Viewer — ${reportPath || reportId}`;
+  pill.innerText = mode === "staged" ? "Local Staged Engine" : "Bold Reports Server";
+  pill.className = mode === "staged" ? "pill ok" : "pill warn";
+
+  modal.style.display = "flex";
+
+  // Destroy previous viewer if any
+  try { $(host).boldReportViewer("destroy"); } catch {}
+  host.innerHTML = "";
+
+  if (mode === "staged") {
+    $(host).boldReportViewer({
+      reportServiceUrl: "/api/preview/runs/" + currentRun.id + "/viewer",
+      reportPath: reportPath || reportId
+    });
+  } else {
+    // Destination Server mode
+    const dest = destinationConfigCache || {};
+    const destUrl = dest.destinationUrl || "http://localhost:8090/reporting/site/site1";
+    const serviceUrl = destUrl.replace(/\/site\/[^/]+/, "") + "/reporting/reportservice/api/Viewer";
+    $(host).boldReportViewer({
+      reportServiceUrl: serviceUrl,
+      reportServerUrl: destUrl,
+      reportPath: reportPath,
+      serviceAuthorizationToken: dest.bearerToken || ""
+    });
+  }
+}
+
+function closeInteractiveViewer() {
+  const modal = document.getElementById("modal-interactive-viewer");
+  const host = document.getElementById("interactive-viewer-host");
+  if (modal) modal.style.display = "none";
+  if (host) {
+    try { $(host).boldReportViewer("destroy"); } catch {}
+    host.innerHTML = "";
+  }
+}
+
+function openInteractiveDesigner(reportId, reportPath, mode = "staged") {
+  const modal = document.getElementById("modal-interactive-designer");
+  const host = document.getElementById("interactive-designer-host");
+  const title = document.getElementById("interactive-designer-title");
+  const pill = document.getElementById("interactive-designer-mode-pill");
+
+  if (!modal || !host) return;
+
+  title.innerText = `Report Designer — ${reportPath || reportId}`;
+  pill.innerText = mode === "staged" ? "Local Staged Engine" : "Bold Reports Server";
+  pill.className = mode === "staged" ? "pill ok" : "pill warn";
+
+  modal.style.display = "flex";
+
+  try { $(host).boldReportDesigner("destroy"); } catch {}
+  host.innerHTML = "";
+
+  if (mode === "staged") {
+    $(host).boldReportDesigner({
+      serviceUrl: "/api/preview/runs/" + currentRun.id + "/designer",
+      reportPath: reportPath || reportId
+    });
+  } else {
+    // Destination Server mode
+    const dest = destinationConfigCache || {};
+    const destUrl = dest.destinationUrl || "http://localhost:8090/reporting/site/site1";
+    const serviceUrl = destUrl.replace(/\/site\/[^/]+/, "") + "/reporting/reportservice/api/Designer";
+    $(host).boldReportDesigner({
+      serviceUrl: serviceUrl,
+      serverUrl: destUrl,
+      reportPath: reportPath,
+      serviceAuthorizationToken: dest.bearerToken || ""
+    });
+  }
+}
+
+function closeInteractiveDesigner() {
+  const modal = document.getElementById("modal-interactive-designer");
+  const host = document.getElementById("interactive-designer-host");
+  if (modal) modal.style.display = "none";
+  if (host) {
+    try { $(host).boldReportDesigner("destroy"); } catch {}
+    host.innerHTML = "";
+  }
+  loadValidationSummary(true);
+}
+
+async function openRenderLogs(reportPath) {
+  const modal = document.getElementById("modal-render-logs");
+  const body = document.getElementById("render-logs-body");
+  const title = document.getElementById("render-logs-title");
+
+  if (!modal || !body) return;
+  title.innerText = `Diagnostic Error Logs: ${reportPath || "Report"}`;
+  body.innerHTML = "<p style='color:#64748B;'>Loading error logs...</p>";
+  modal.style.display = "flex";
+
+  try {
+    const logs = await Api.getRenderLogs(currentRun.id, reportPath);
+    if (!logs || logs.length === 0) {
+      body.innerHTML = `
+        <div style="padding:20px;text-align:center;color:#64748B;">
+          <p style="margin:0;font-size:14px;">No internal runtime errors logged for this report.</p>
+        </div>`;
+      return;
+    }
+
+    body.innerHTML = logs.map(e => `
+      <div style="background:#FEF2F2;border:1px solid #FEE2E2;border-radius:8px;padding:12px;margin-bottom:12px;">
+        <div style="display:flex;justify-content:space-between;margin-bottom:6px;">
+          <strong style="color:#DC2626;font-size:13px;">${escapeHtml(e.errorType || "Error")} — ${escapeHtml(e.methodName || "Render")}</strong>
+          <small style="color:#64748B;">${new Date(e.timestampUtc).toLocaleTimeString()}</small>
+        </div>
+        <div style="font-size:13px;color:#991B1B;margin-bottom:4px;font-weight:500;">${escapeHtml(e.message)}</div>
+        ${e.exceptionMessage ? `<div style="font-size:12px;color:#7F1D1D;margin-bottom:4px;font-family:monospace;">Exception: ${escapeHtml(e.exceptionMessage)}</div>` : ""}
+        ${e.stackTrace ? `<pre style="font-size:11px;background:#FFF;border:1px solid #FECACA;border-radius:4px;padding:8px;max-height:140px;overflow:auto;margin:6px 0 0 0;color:#334155;">${escapeHtml(e.stackTrace)}</pre>` : ""}
+      </div>
+    `).join("");
+  } catch (err) {
+    body.innerHTML = `<p style="color:#DC2626;">Failed loading error logs: ${escapeHtml(err.message)}</p>`;
+  }
+}
+
+function closeRenderLogsModal() {
+  const modal = document.getElementById("modal-render-logs");
+  if (modal) modal.style.display = "none";
+}
+
+function openSnapshotZoom(imgSrc, title) {
+  const modal = document.getElementById("modal-snapshot-zoom");
+  const img = document.getElementById("snapshot-zoom-img");
+  const t = document.getElementById("snapshot-zoom-title");
+  if (modal && img) {
+    img.src = imgSrc;
+    if (t) t.innerText = `Visual Snapshot — ${title || ""}`;
+    modal.style.display = "flex";
+  }
+}
+
+function closeSnapshotZoom() {
+  const modal = document.getElementById("modal-snapshot-zoom");
+  if (modal) modal.style.display = "none";
+}
+
+// -----------------------------------------------------------------------------
+// Destination Uploaded Reports: Server-Integration Actions (Step 5)
+// -----------------------------------------------------------------------------
+async function loadServerUploadedReports() {
+  if (!currentRun) return;
+  const tbody = document.getElementById("server-uploaded-reports-tbody");
+  if (!tbody) return;
+
+  try {
+    const res = await Api.getReports(currentRun.id);
+    const uploaded = (res && res.reports) ? res.reports.filter(r => r.state === "Uploaded" || r.uploaded) : [];
+
+    if (uploaded.length === 0) {
+      tbody.innerHTML = `<tr><td colspan="4" style="text-align:center;color:#64748B;padding:16px;">No reports have completed upload to Bold Reports Server yet.</td></tr>`;
+      return;
+    }
+
+    tbody.innerHTML = uploaded.map(r => {
+      const cat = r.folder ? r.folder.replace(/^\//, "") : "General";
+      const serverReportPath = `${cat}/${r.name}`;
+      return `
+        <tr>
+          <td><strong>${escapeHtml(r.name)}</strong></td>
+          <td><code>${escapeHtml(cat)}</code></td>
+          <td><span class="pill ok">Uploaded</span></td>
+          <td style="text-align:right;white-space:nowrap;">
+            <button class="btn2 btn-sm" onclick="openInteractiveViewer('${r.id}', '${escapeHtml(serverReportPath)}', 'server')" title="View directly on destination Bold Reports Server">
+              View on Server
+            </button>
+            <button class="btn btn-sm" onclick="openInteractiveDesigner('${r.id}', '${escapeHtml(serverReportPath)}', 'server')" style="margin-left:6px;" title="Edit directly on destination Bold Reports Server">
+              Edit on Server
+            </button>
+          </td>
+        </tr>
+      `;
+    }).join("");
+  } catch (err) {
+    console.error("Failed loading uploaded server reports:", err);
+  }
 }
 
 async function loadReportRdlDiff(report) {
@@ -1520,71 +1644,6 @@ async function loadReportRdlDiff(report) {
     if (origEl) origEl.innerText = `Error loading RDL: ${err.message}`;
     if (xfrmEl) xfrmEl.innerText = "";
   }
-}
-
-async function initBoldReportDesigner(report, reportPath) {
-  const container = document.getElementById("bold-report-designer");
-  const loader = document.getElementById("bold-designer-loading-overlay");
-  if (!container) return;
-
-  try {
-    const config = await Api.getDesignerConfig(currentRun.id);
-    const serviceUrl = config.serviceUrl || "http://localhost:8090/reporting/reportservice/api/Designer";
-    const reportServerUrl = config.reportServerUrl || "http://localhost:8090/reporting/api/site/site1";
-    const token = config.serviceAuthorizationToken || "";
-
-    if (loader) loader.style.display = "none";
-    container.style.display = "block";
-
-    if (window.jQuery && typeof window.jQuery(container).boldReportDesigner === 'function') {
-      try { window.jQuery(container).boldReportDesigner("destroy"); } catch (e) { }
-
-      window.jQuery(container).boldReportDesigner({
-        serviceUrl: serviceUrl,
-        reportServerUrl: reportServerUrl,
-        serviceAuthorizationToken: token,
-        reportPath: reportPath,
-        toolbarSettings: (window.ej && window.ej.ReportDesigner) ? {
-          items: ej.ReportDesigner.ToolbarItems.All
-        } : undefined,
-        reportLoaded: function (args) {
-          showToast(`Report '${report.name}' loaded in Bold Web Report Designer.`);
-        },
-        reportSaved: function (args) {
-          showToast(`Report '${report.name}' saved to Bold Reports Server.`);
-        },
-        ajaxBeforeLoad: function (args) {
-          if (token && args.headers) {
-            args.headers.Authorization = token;
-          }
-        }
-      });
-    } else {
-      // Fallback
-      container.innerHTML = `
-        <div style="padding:40px 20px;text-align:center;color:#475569;background:#FFFFFF;border-radius:8px;margin:20px;">
-          <div style="font-size:24px;margin-bottom:10px;">📊</div>
-          <h3 style="font-size:16px;color:#0F172A;margin-bottom:8px;">Bold Reports Web Designer</h3>
-          <p style="font-size:13px;max-width:550px;margin:0 auto 16px auto;line-height:1.5;">
-            Server Integration configured for <code>${escapeHtml(reportServerUrl)}</code>.<br>
-            Active Report: <code>${escapeHtml(reportPath)}</code>
-          </p>
-          <div style="display:flex;justify-content:center;gap:10px;">
-            <a href="${escapeHtml(config.serverUrl)}/reporting/site/${escapeHtml(config.tenantId || 'site1')}/reports" target="_blank" class="btn" style="text-decoration:none;">
-              Launch Full Designer Studio ↗
-            </a>
-            <button class="btn2" onclick="setDiffView('rdl')">Inspect Transformed RDL Code</button>
-          </div>
-        </div>
-      `;
-    }
-  } catch (err) {
-    if (loader) loader.innerHTML = `<div style="color:#EF4444;font-weight:600;">Designer connection error: ${escapeHtml(err.message)}</div>`;
-  }
-}
-
-function openDesignerSimulation() {
-  setDiffView("designer");
 }
 
 async function approveReportValidation() {

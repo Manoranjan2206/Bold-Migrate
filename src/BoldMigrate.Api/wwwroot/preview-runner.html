@@ -1,0 +1,104 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Bold Reports Headless Preview Runner</title>
+  <link href="https://cdn.boldreports.com/15.1.17/content/v2.0/tailwind-light/bold.report-viewer.min.css" rel="stylesheet" />
+  <style>
+    html, body {
+      margin: 0;
+      padding: 0;
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+      background: #FFFFFF;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    }
+    #viewer {
+      width: 100vw;
+      height: 100vh;
+    }
+  </style>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jquery/3.6.0/jquery.min.js"></script>
+  <script src="https://cdn.boldreports.com/15.1.17/scripts/v2.0/common/bold.reports.common.min.js"></script>
+  <script src="https://cdn.boldreports.com/15.1.17/scripts/v2.0/common/bold.reports.widgets.min.js"></script>
+  <script src="https://cdn.boldreports.com/15.1.17/scripts/v2.0/bold.report-viewer.min.js"></script>
+</head>
+<body data-render-status="initializing">
+  <div id="viewer"></div>
+
+  <script>
+    window.__renderStatus = 'initializing';
+    window.__renderError = null;
+
+    const urlParams = new URLSearchParams(window.location.search);
+    const runId = urlParams.get('runId');
+    const reportId = urlParams.get('reportId');
+    const reportPath = urlParams.get('reportPath') || reportId;
+
+    if (!runId || !reportPath) {
+      document.body.setAttribute('data-render-status', 'error');
+      window.__renderStatus = 'error';
+      window.__renderError = 'Missing required runId or reportPath parameter.';
+    } else {
+      document.body.setAttribute('data-render-status', 'rendering');
+      window.__renderStatus = 'rendering';
+
+      try {
+        $("#viewer").boldReportViewer({
+          reportServiceUrl: "/api/preview/runs/" + encodeURIComponent(runId) + "/viewer",
+          reportPath: reportPath,
+          renderingComplete: function (args) {
+            console.log("Bold Reports: Rendering complete", args);
+            window.__renderStatus = 'complete';
+            document.body.setAttribute('data-render-status', 'complete');
+          },
+          reportError: function (args) {
+            let msg = 'Rendering failed';
+            if (args) {
+              if (typeof args === 'string') {
+                msg = args;
+              } else if (args.errmsg) {
+                msg = args.errmsg;
+              } else if (args.errdetail) {
+                msg = args.errdetail;
+              } else if (args.error) {
+                msg = typeof args.error === 'string' ? args.error : (args.error.message || JSON.stringify(args.error));
+              } else if (args.message) {
+                msg = args.message;
+              } else {
+                msg = JSON.stringify(args);
+              }
+            }
+            if (msg.length > 300) {
+              msg = msg.substring(0, 297) + '...';
+            }
+            console.error("Bold Reports: Rendering error", msg);
+            window.__renderStatus = 'error';
+            window.__renderError = msg;
+            document.body.setAttribute('data-render-status', 'error');
+          },
+          ajaxError: function (args) {
+            console.error("Bold Reports: AJAX error", args);
+            window.__renderStatus = 'error';
+            window.__renderError = (args && (args.error || args.msg || args.statusText)) || 'Server communication error';
+            document.body.setAttribute('data-render-status', 'error');
+          }
+        });
+      } catch (ex) {
+        console.error("Exception initializing Bold Report Viewer:", ex);
+        window.__renderStatus = 'error';
+        window.__renderError = ex.message || 'Initialization failed';
+        document.body.setAttribute('data-render-status', 'error');
+      }
+    }
+
+    window.addEventListener('error', function (event) {
+      if (window.__renderStatus !== 'complete') {
+        console.warn("Uncaught script error during render:", event.message);
+      }
+    });
+  </script>
+</body>
+</html>

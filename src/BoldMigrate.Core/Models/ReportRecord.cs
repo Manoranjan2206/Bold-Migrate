@@ -38,6 +38,12 @@ public class ReportRecord
     [JsonPropertyName("parameterCount")]
     public int ParameterCount { get; set; }
 
+    /// <summary>
+    /// Comma-separated list of informational feature tags detected during static analysis (e.g. Subreport, Chart, Gauge).
+    /// </summary>
+    [JsonPropertyName("featureTags")]
+    public string? FeatureTags { get; set; }
+
     [JsonPropertyName("uploadAttempts")]
     public int UploadAttempts { get; set; }
 

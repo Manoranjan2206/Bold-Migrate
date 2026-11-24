@@ -58,6 +58,7 @@ builder.Services.AddDbContext<MigrationDbContext>(options =>
 builder.Services.AddScoped<IMigrationStore, MigrationStoreRepository>();
 builder.Services.AddSingleton<IStagingStore>(new FileSystemStagingStore(settings.StagingRootPath));
 builder.Services.AddSingleton<ICredentialStore, InMemoryCredentialStore>();
+builder.Services.AddSingleton<BoldMigrate.Engine.Preview.IRenderLogStore, BoldMigrate.Engine.Preview.InMemoryRenderLogStore>();
 builder.Services.AddMemoryCache();
 
 // Logging & Rules
@@ -82,6 +83,7 @@ builder.Services.AddScoped<TransformEngine>();
 builder.Services.AddScoped<UploadLayer>();
 builder.Services.AddScoped<BoldMigrate.Core.Interfaces.IStagedReportRenderer, BoldMigrate.Api.Preview.StagedReportRenderer>();
 builder.Services.AddScoped<ValidationEngine>();
+builder.Services.AddScoped<RenderValidationEngine>();
 builder.Services.AddScoped<DeltaSyncEngine>();
 builder.Services.AddScoped<BoldMigrate.Api.Preview.StagedReportSession>();
 builder.Services.AddSingleton<LocalFolderMigrationService>();
@@ -210,6 +212,35 @@ using (var scope = app.Services.CreateScope())
         {
             await db.Database.ExecuteSqlRawAsync(
                 "ALTER TABLE ReportRecords ADD COLUMN LocalEditPendingUpload INTEGER NOT NULL DEFAULT 0;");
+        }
+        if (!existing.Contains("FeatureTags"))
+        {
+            await db.Database.ExecuteSqlRawAsync("ALTER TABLE ReportRecords ADD COLUMN FeatureTags TEXT NULL;");
+        }
+
+        var valExisting = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        using (var probe = conn.CreateCommand())
+        {
+            probe.CommandText = "SELECT name FROM pragma_table_info('ValidationResults');";
+            using var reader = await probe.ExecuteReaderAsync();
+            while (await reader.ReadAsync()) valExisting.Add(reader.GetString(0));
+        }
+
+        if (!valExisting.Contains("RenderStatus"))
+        {
+            await db.Database.ExecuteSqlRawAsync("ALTER TABLE ValidationResults ADD COLUMN RenderStatus TEXT NULL;");
+        }
+        if (!valExisting.Contains("RenderDurationMs"))
+        {
+            await db.Database.ExecuteSqlRawAsync("ALTER TABLE ValidationResults ADD COLUMN RenderDurationMs INTEGER NULL;");
+        }
+        if (!valExisting.Contains("ScreenshotRelativePath"))
+        {
+            await db.Database.ExecuteSqlRawAsync("ALTER TABLE ValidationResults ADD COLUMN ScreenshotRelativePath TEXT NULL;");
+        }
+        if (!valExisting.Contains("ErrorMessage"))
+        {
+            await db.Database.ExecuteSqlRawAsync("ALTER TABLE ValidationResults ADD COLUMN ErrorMessage TEXT NULL;");
         }
     }
     catch (Exception ex)

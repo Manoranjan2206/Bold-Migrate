@@ -11,8 +11,8 @@
     {
       "code": "CF-CODE-NET",
       "xpath": "//*[local-name()='Code'][contains(., 'System.')]",
-      "bucket": "NeedsReview",
-      "message": "Contains embedded code that calls a framework type.",
+      "bucket": "Clean",
+      "message": "Contains embedded code that calls framework types.",
       "article": "https://support.boldreports.com/kb/embedded-code-net"
     },
     {
@@ -25,42 +25,42 @@
     {
       "code": "CF-SUBREPORT",
       "xpath": "//*[local-name()='Subreport']",
-      "bucket": "NeedsReview",
-      "message": "Contains a subreport, so check navigation after upload.",
+      "bucket": "Clean",
+      "message": "Contains a subreport.",
       "article": "https://support.boldreports.com/kb/subreports"
     },
     {
       "code": "CF-LOOKUP",
       "xpath": "//*[local-name()='Value'][contains(., 'Lookup(') or contains(., 'LookupSet(') or contains(., 'RunningValue(') or contains(., 'Previous(') or contains(., 'Aggregate(')]",
-      "bucket": "NeedsReview",
+      "bucket": "Clean",
       "message": "Uses a scoped aggregate function.",
       "article": "https://support.boldreports.com/kb/scoped-aggregates"
     },
     {
       "code": "CF-MAP",
       "xpath": "//*[local-name()='Map']",
-      "bucket": "NeedsReview",
-      "message": "Uses a map.",
+      "bucket": "Clean",
+      "message": "Uses a map visual.",
       "article": "https://support.boldreports.com/kb/maps"
     },
     {
       "code": "CF-GAUGE",
       "xpath": "//*[local-name()='GaugePanel']",
-      "bucket": "NeedsReview",
-      "message": "Uses a gauge.",
+      "bucket": "Clean",
+      "message": "Uses a gauge visual.",
       "article": "https://support.boldreports.com/kb/gauges"
     },
     {
       "code": "CF-INTERACTIVE-SORT",
       "xpath": "//*[local-name()='UserSort']",
-      "bucket": "NeedsReview",
+      "bucket": "Clean",
       "message": "Uses interactive sorting.",
       "article": "https://support.boldreports.com/kb/interactive-sort"
     },
     {
       "code": "CF-RICHTEXT",
       "xpath": "//*[local-name()='MarkupType'][text()='HTML']",
-      "bucket": "NeedsReview",
+      "bucket": "Clean",
       "message": "Uses rich text inside a text box.",
       "article": "https://support.boldreports.com/kb/rich-text"
     },
@@ -81,7 +81,7 @@
     {
       "code": "CF-DOCMAP",
       "xpath": "//*[local-name()='DocumentMapLabel']",
-      "bucket": "NeedsReview",
+      "bucket": "Clean",
       "message": "Uses a document map.",
       "article": "https://support.boldreports.com/kb/document-maps"
     },

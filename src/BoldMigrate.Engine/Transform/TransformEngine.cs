@@ -15,6 +15,7 @@ public class TransformResult
     public string? BlockReasonCode { get; set; }
     public string? Message { get; set; }
     public List<TransformAction> Actions { get; set; } = new();
+    public List<string> FeatureTags { get; set; } = new();
 }
 
 public class TransformEngine
@@ -194,11 +195,12 @@ public class TransformEngine
             }
         }
 
-        // Classification against compatibility rules
+        // Classification against compatibility rules & feature tag extraction
         var rulesFile = _rulesLoader.LoadRules();
         var bucket = ReportBucket.Clean;
         string? blockCode = null;
         string? userMessage = null;
+        var featureTags = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
         foreach (var rule in rulesFile.Rules)
         {
@@ -209,13 +211,30 @@ public class TransformEngine
                 var matches = doc.XPathSelectElements(rule.XPath);
                 if (matches.Any())
                 {
-                    // Most severe wins: Blocked > NeedsReview > AutoFixed > Clean
+                    // Map rule code to friendly informational tag
+                    var tag = rule.Code switch
+                    {
+                        "CF-SUBREPORT" => "Subreport",
+                        "CF-GAUGE" => "Gauge",
+                        "CF-MAP" => "Map",
+                        "CF-LOOKUP" => "Lookup",
+                        "CF-CODE-NET" or "CF-CODE-SIMPLE" => "CustomCode",
+                        "CF-RICHTEXT" => "RichText",
+                        "CF-INTERACTIVE-SORT" => "InteractiveSort",
+                        "CF-SHARED-DS" => "SharedDataSource",
+                        "CF-SHARED-DSET" => "SharedDataSet",
+                        "CF-DOCMAP" => "DocumentMap",
+                        _ => null
+                    };
+                    if (tag != null) featureTags.Add(tag);
+
+                    // Blocked is fatal; AutoFixed marks applied transforms; Clean remains clean
                     if (rule.Bucket == ReportBucket.Blocked)
                     {
                         bucket = ReportBucket.Blocked;
                         blockCode = rule.Code;
                         userMessage = rule.Message;
-                        break; // Blocked is top severity
+                        break;
                     }
                     else if (rule.Bucket == ReportBucket.NeedsReview && bucket != ReportBucket.Blocked)
                     {
@@ -235,6 +254,18 @@ public class TransformEngine
             }
         }
 
+        // Also detect charts as an informational tag
+        try
+        {
+            if (doc.XPathSelectElements("//*[local-name()='Chart']").Any())
+            {
+                featureTags.Add("Chart");
+            }
+        }
+        catch
+        {
+        }
+
         // Serialize updated document to bytes
         using var outMs = new MemoryStream();
         doc.Save(outMs);
@@ -245,6 +276,7 @@ public class TransformEngine
         result.BlockReasonCode = blockCode;
         result.Message = userMessage;
         result.Actions = actions;
+        result.FeatureTags = featureTags.OrderBy(t => t).ToList();
 
         return result;
     }

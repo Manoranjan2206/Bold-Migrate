@@ -20,6 +20,8 @@
 *.db-wal
 *.sqlite
 *.sqlite3
+[Ss]taging/
+**/staging/
 
 ## OS-generated files
 .DS_Store

@@ -59,7 +59,9 @@ public sealed class StagedReportServer : ReportingServer
         }
 
         _contextFolder = StagedCatalog.ParentOf(report.SourcePath);
-        return new MemoryStream(File.ReadAllBytes(report.StagedFilePath!));
+        var bytes = File.ReadAllBytes(report.StagedFilePath!);
+        bytes = EnsureTrustServerCertificateInRdl(bytes);
+        return new MemoryStream(bytes);
     }
 
     public override DataSourceDefinition GetDataSourceDefinition(string dataSource)
@@ -188,12 +190,24 @@ public sealed class StagedReportServer : ReportingServer
 
         var effective = parsed.WithCredentials(_credentials.GetDataSourceCredential(item.Id.ToString()));
 
+        var connectString = effective.ConnectString;
+        if (!string.IsNullOrWhiteSpace(connectString) &&
+            (string.Equals(effective.Extension, "SQL", StringComparison.OrdinalIgnoreCase) ||
+             connectString.Contains("Server=", StringComparison.OrdinalIgnoreCase) ||
+             connectString.Contains("Data Source=", StringComparison.OrdinalIgnoreCase)))
+        {
+            if (!connectString.Contains("TrustServerCertificate=", StringComparison.OrdinalIgnoreCase))
+            {
+                connectString = connectString.TrimEnd(';') + ";TrustServerCertificate=True;";
+            }
+        }
+
         return new DataSourceDefinition
         {
             Name = item.Name,
             Guid = item.Id.ToString(),
             Extension = effective.Extension,
-            ConnectString = effective.ConnectString,
+            ConnectString = connectString,
             CredentialRetrieval = Enum.Parse<CredentialRetrievalEnum>(effective.CredentialRetrieval),
             UserName = effective.UserName,
             Password = effective.Password,
@@ -203,6 +217,36 @@ public sealed class StagedReportServer : ReportingServer
             Enabled = effective.Enabled,
             EnabledSpecified = true
         };
+    }
+
+    private static byte[] EnsureTrustServerCertificateInRdl(byte[] rdlBytes)
+    {
+        try
+        {
+            using var ms = new MemoryStream(rdlBytes);
+            var doc = System.Xml.Linq.XDocument.Load(ms);
+            var modified = false;
+            foreach (var elem in doc.Descendants().Where(e => e.Name.LocalName == "ConnectString"))
+            {
+                var val = elem.Value;
+                if (!string.IsNullOrWhiteSpace(val) &&
+                    (val.Contains("Server=", StringComparison.OrdinalIgnoreCase) || val.Contains("Data Source=", StringComparison.OrdinalIgnoreCase)) &&
+                    !val.Contains("TrustServerCertificate=", StringComparison.OrdinalIgnoreCase))
+                {
+                    elem.Value = val.TrimEnd(';') + ";TrustServerCertificate=True;";
+                    modified = true;
+                }
+            }
+
+            if (modified)
+            {
+                using var outMs = new MemoryStream();
+                doc.Save(outMs);
+                return outMs.ToArray();
+            }
+        }
+        catch { }
+        return rdlBytes;
     }
 
     private IEnumerable<string> ChildFolders(string folder)

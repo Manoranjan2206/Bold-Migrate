@@ -203,9 +203,10 @@ public class LocalFolderMigrationService
                         var password = passNode?.InnerText?.Trim();
                         var credRetrieval = !string.IsNullOrEmpty(userName) ? "Store" : "None";
 
+                        var isWindows = !string.IsNullOrEmpty(userName) && userName.Contains('\\');
                         WriteLog($"Uploading DataSource: '{dsName}' (Type: {serverType})", datasourcesLog);
                         var (dsSuccess, publishedId) = await client.CreateDataSourceAsync(
-                            request.TenantId, dsName, connectString, serverType, userName, password, credRetrieval, ct);
+                            request.TenantId, dsName, connectString, serverType, userName, password, credRetrieval, isWindows, false, ct);
 
                         if (dsSuccess)
                         {

@@ -44,6 +44,18 @@ public class ValidationResult
     [JsonPropertyName("renderSummary")]
     public string? RenderSummary { get; set; }
 
+    [JsonPropertyName("renderStatus")]
+    public string? RenderStatus { get; set; }
+
+    [JsonPropertyName("renderDurationMs")]
+    public long? RenderDurationMs { get; set; }
+
+    [JsonPropertyName("screenshotRelativePath")]
+    public string? ScreenshotRelativePath { get; set; }
+
+    [JsonPropertyName("errorMessage")]
+    public string? ErrorMessage { get; set; }
+
     [JsonPropertyName("parameterSetHash")]
     public string ParameterSetHash { get; set; } = string.Empty;
 

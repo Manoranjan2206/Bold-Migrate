@@ -30,6 +30,8 @@ public class MigrationController : ControllerBase
     private readonly ExpressionTesterEngine _expressionTester;
     private readonly IStagingStore _staging;
     private readonly BoldMigrate.Core.Configuration.MigrationSettings _settings;
+    private readonly BoldMigrate.Engine.Validation.RenderValidationEngine _renderValidation;
+    private readonly IServiceScopeFactory _scopeFactory;
 
     public MigrationController(
         IMigrationOrchestrator orchestrator,
@@ -40,7 +42,9 @@ public class MigrationController : ControllerBase
         LocalFolderMigrationService localFolderService,
         ExpressionTesterEngine expressionTester,
         IStagingStore staging,
-        BoldMigrate.Core.Configuration.MigrationSettings settings)
+        BoldMigrate.Core.Configuration.MigrationSettings settings,
+        BoldMigrate.Engine.Validation.RenderValidationEngine renderValidation,
+        IServiceScopeFactory scopeFactory)
     {
         _orchestrator = orchestrator;
         _store = store;
@@ -51,6 +55,8 @@ public class MigrationController : ControllerBase
         _expressionTester = expressionTester;
         _staging = staging;
         _settings = settings;
+        _renderValidation = renderValidation;
+        _scopeFactory = scopeFactory;
     }
 
     [HttpPost("runs")]
@@ -303,8 +309,20 @@ public class MigrationController : ControllerBase
         var items = await _store.GetCatalogItemsAsync(id, ItemType.DataSource, ct);
         return Ok(items.Select(i =>
         {
-            // Only the user name is returned; the stored password never leaves the server.
             var cred = _credStore.GetDataSourceCredential(i.Id.ToString());
+            SharedDataSourceDefinition? def = null;
+            if (StagedCatalog.IsStaged(i) && System.IO.File.Exists(i.StagedFilePath))
+            {
+                try
+                {
+                    def = SharedDataSourceDefinition.Parse(System.IO.File.ReadAllBytes(i.StagedFilePath));
+                }
+                catch { }
+            }
+
+            var retrieval = cred != null ? "Store" : (def?.CredentialRetrieval ?? "Prompt");
+            var isWindows = (cred != null && !string.IsNullOrEmpty(cred.Domain)) || (def?.WindowsCredentials ?? false) || string.Equals(retrieval, "Integrated", StringComparison.OrdinalIgnoreCase);
+
             return new
             {
                 id = i.Id,
@@ -312,8 +330,12 @@ public class MigrationController : ControllerBase
                 sourcePath = i.SourcePath,
                 parentPath = i.ParentPath,
                 sizeBytes = i.SizeBytes,
-                hasCredentials = cred != null,
-                userName = cred == null ? null : string.IsNullOrEmpty(cred.Domain) ? cred.UserName : $"{cred.Domain}\\{cred.UserName}"
+                serverType = def?.Extension ?? "SQL",
+                connectString = def?.ConnectString ?? "",
+                credentialRetrieval = retrieval,
+                isWindowsCredentials = isWindows,
+                hasCredentials = cred != null || string.Equals(retrieval, "Integrated", StringComparison.OrdinalIgnoreCase) || string.Equals(retrieval, "None", StringComparison.OrdinalIgnoreCase),
+                userName = cred == null ? (def?.UserName) : (string.IsNullOrEmpty(cred.Domain) ? cred.UserName : $"{cred.Domain}\\{cred.UserName}")
             };
         }));
     }
@@ -501,9 +523,159 @@ public class MigrationController : ControllerBase
             sourcePageCount = latest.SourcePageCount,
             destinationPageCount = latest.DestinationPageCount,
             renderSummary = latest.RenderSummary,
+            renderStatus = latest.RenderStatus,
+            renderDurationMs = latest.RenderDurationMs,
+            screenshotRelativePath = latest.ScreenshotRelativePath,
+            errorMessage = latest.ErrorMessage,
             parameterSetHash = latest.ParameterSetHash,
             runUtc = latest.RunUtc
         });
+    }
+
+    [HttpPost("runs/{id:guid}/validate-render")]
+    public async Task<IActionResult> RunAutomatedRenderValidation(Guid id, [FromQuery] int concurrency = 5, CancellationToken ct = default)
+    {
+        var baseUrl = $"{Request.Scheme}://{Request.Host}";
+        _logger.Log(LogLevel.Information, "VALD-RENDER", id, $"Starting automated render validation (concurrency: {concurrency}) via {baseUrl}");
+
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                using var scope = _scopeFactory.CreateScope();
+                var engine = scope.ServiceProvider.GetRequiredService<BoldMigrate.Engine.Validation.RenderValidationEngine>();
+                var appLogger = scope.ServiceProvider.GetRequiredService<MigrationLogger>();
+                await engine.ValidateRunAsync(id, baseUrl, concurrency, CancellationToken.None);
+                appLogger.Log(LogLevel.Information, "VALD-COMPLETE", id, "Automated render validation completed.");
+            }
+            catch (Exception ex)
+            {
+                using var errScope = _scopeFactory.CreateScope();
+                var appLogger = errScope.ServiceProvider.GetRequiredService<MigrationLogger>();
+                appLogger.Log(LogLevel.Error, "VALD-FAILED", id, $"Automated render validation failed: {ex.Message}");
+            }
+        });
+
+        return Accepted(new { message = "Automated render validation started", concurrency });
+    }
+
+    [HttpPost("runs/{id:guid}/skip-validation")]
+    public async Task<IActionResult> SkipValidation(Guid id, CancellationToken ct)
+    {
+        await _renderValidation.SkipValidationAsync(id, ct);
+        _logger.Log(LogLevel.Information, "VALD-SKIP", id, "Validation skipped by user request; reports marked as ready for upload.");
+        return Ok(new { message = "Validation skipped. Reports approved for upload." });
+    }
+
+    [HttpGet("runs/{id:guid}/validation-summary")]
+    public async Task<IActionResult> GetValidationSummary(Guid id, CancellationToken ct)
+    {
+        var reports = await _store.GetCatalogItemsAsync(id, ItemType.Report, ct);
+        var cards = new List<object>();
+
+        foreach (var report in reports)
+        {
+            var record = await _store.GetReportRecordAsync(report.Id, ct);
+            var results = await _store.GetValidationResultsAsync(report.Id, ct);
+            var latest = results.OrderByDescending(r => r.RunUtc).FirstOrDefault();
+
+            var featureTags = (record?.FeatureTags ?? "")
+                .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+                .ToList();
+
+            if (featureTags.Count == 0 && !string.IsNullOrWhiteSpace(report.StagedFilePath) && System.IO.File.Exists(report.StagedFilePath))
+            {
+                try
+                {
+                    using var tagMs = new System.IO.FileStream(report.StagedFilePath, System.IO.FileMode.Open, System.IO.FileAccess.Read, System.IO.FileShare.Read);
+                    var doc = System.Xml.Linq.XDocument.Load(tagMs);
+                    var detected = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                    if (doc.Descendants().Any(e => e.Name.LocalName == "Subreport")) detected.Add("Subreport");
+                    if (doc.Descendants().Any(e => e.Name.LocalName == "Chart")) detected.Add("Chart");
+                    if (doc.Descendants().Any(e => e.Name.LocalName == "GaugePanel")) detected.Add("Gauge");
+                    if (doc.Descendants().Any(e => e.Name.LocalName == "Map" || e.Name.LocalName == "MapDataRegion")) detected.Add("Map");
+                    if (doc.Descendants().Any(e => e.Name.LocalName == "Code")) detected.Add("CustomCode");
+                    if (doc.Descendants().Any(e => e.Name.LocalName == "UserSort")) detected.Add("InteractiveSort");
+                    if (doc.Descendants().Any(e => e.Name.LocalName == "DocumentMapLabel")) detected.Add("DocumentMap");
+                    if (doc.Descendants().Any(e => e.Name.LocalName == "DataSourceReference")) detected.Add("SharedDataSource");
+                    if (doc.Descendants().Any(e => e.Name.LocalName == "SharedDataSet")) detected.Add("SharedDataSet");
+                    if (doc.Descendants().Any(e => e.Value.Contains("Lookup(") || e.Value.Contains("LookupSet("))) detected.Add("Lookup");
+                    if (doc.Descendants().Any(e => e.Name.LocalName == "MarkupType" && e.Value == "HTML")) detected.Add("RichText");
+
+                    if (detected.Count > 0)
+                    {
+                        featureTags = detected.OrderBy(t => t).ToList();
+                        if (record != null)
+                        {
+                            record.FeatureTags = string.Join(",", featureTags);
+                            _ = _store.UpdateReportRecordAsync(record, ct);
+                        }
+                    }
+                }
+                catch { }
+            }
+
+            var status = latest?.RenderStatus ?? (record?.State == ReportState.AutoPassed ? "Passed" :
+                                                record?.State == ReportState.Approved ? "Approved" :
+                                                record?.State == ReportState.AwaitingReview ? "NeedsManualCheck" :
+                                                record?.State == ReportState.ValidationFailed ? "Failed" : "NotValidated");
+
+            cards.Add(new
+            {
+                reportId = report.Id,
+                name = report.Name,
+                path = report.SourcePath,
+                status,
+                state = record?.State.ToString() ?? "Unknown",
+                durationMs = latest?.RenderDurationMs,
+                screenshotUrl = latest?.ScreenshotRelativePath,
+                errorMessage = latest?.ErrorMessage,
+                summary = latest?.RenderSummary,
+                featureTags,
+                parameterCount = record?.ParameterCount ?? 0
+            });
+        }
+
+        var total = cards.Count;
+        var passed = cards.Count(c =>
+        {
+            var s = (string)((dynamic)c).status;
+            return s == "Passed" || s == "Approved";
+        });
+        var failed = cards.Count(c => (string)((dynamic)c).status == "Failed");
+        var needsManual = cards.Count(c => (string)((dynamic)c).status == "NeedsManualCheck");
+        var skipped = cards.Count(c => (string)((dynamic)c).status == "Skipped");
+
+        return Ok(new
+        {
+            runId = id,
+            total,
+            passed,
+            failed,
+            needsManualCheck = needsManual,
+            skipped,
+            reports = cards
+        });
+    }
+
+    [HttpGet("runs/{id:guid}/screenshots/{reportId:guid}.png")]
+    public IActionResult GetScreenshot(Guid id, Guid reportId)
+    {
+        var candidates = new[]
+        {
+            Path.Combine(Directory.GetCurrentDirectory(), "staging", id.ToString(), "screenshots", $"{reportId}.png"),
+            Path.Combine(AppContext.BaseDirectory, "staging", id.ToString(), "screenshots", $"{reportId}.png"),
+            Path.Combine(Directory.GetCurrentDirectory(), "src", "BoldMigrate.Api", "staging", id.ToString(), "screenshots", $"{reportId}.png"),
+            Path.Combine(_staging.GetRunStagingPath(id), "screenshots", $"{reportId}.png")
+        };
+
+        var filePath = candidates.FirstOrDefault(System.IO.File.Exists);
+        if (filePath == null)
+        {
+            return NotFound();
+        }
+
+        return PhysicalFile(filePath, "image/png");
     }
 
     [HttpGet("runs/{id:guid}/review-queue")]
@@ -846,8 +1018,9 @@ public class MigrationController : ControllerBase
     }
 
     /// <summary>
-    /// Step 1: stores the account a shared data source connects with (in memory only). The
-    /// local viewer/designer use it; without it they prompt for credentials at run time.
+    /// Step 1: stores the authentication configuration for a shared data source (Prompt, Store, Integrated, None),
+    /// optional user/password, and optional updated connection string.
+    /// Updates both the in-memory credential store and the staged .rsds definition.
     /// </summary>
     [HttpPut("runs/{id:guid}/datasources/{dataSourceId:guid}/credentials")]
     public async Task<IActionResult> SetDataSourceCredentials(Guid id, Guid dataSourceId, [FromBody] DataSourceCredentialRequest req, CancellationToken ct)
@@ -855,20 +1028,106 @@ public class MigrationController : ControllerBase
         var item = await _store.GetCatalogItemAsync(dataSourceId, ct);
         if (item == null || item.RunId != id || item.ItemType != ItemType.DataSource) return NotFound();
 
-        if (string.IsNullOrWhiteSpace(req.UserName))
+        var mode = req.CredentialRetrieval?.Trim();
+        if (string.IsNullOrEmpty(mode))
         {
-            _credStore.RemoveDataSourceCredential(dataSourceId.ToString());
-            return Ok(new { success = true, hasCredentials = false });
+            mode = !string.IsNullOrWhiteSpace(req.UserName) ? "Store" : "Prompt";
         }
 
-        var user = req.UserName.Trim();
-        var cred = user.Contains('\\')
-            ? new NetworkCredential(user.Split('\\', 2)[1], req.Password ?? "", user.Split('\\', 2)[0])
-            : new NetworkCredential(user, req.Password ?? "");
-        _credStore.SetDataSourceCredential(dataSourceId.ToString(), cred);
+        bool hasCredentials = false;
 
-        _logger.Log(LogLevel.Information, "CONN-DS-CRED", id, $"Credentials set for data source '{item.Name}'.", itemPath: item.SourcePath);
-        return Ok(new { success = true, hasCredentials = true });
+        if (string.Equals(mode, "Integrated", StringComparison.OrdinalIgnoreCase))
+        {
+            _credStore.RemoveDataSourceCredential(dataSourceId.ToString());
+            hasCredentials = true;
+        }
+        else if (string.Equals(mode, "None", StringComparison.OrdinalIgnoreCase))
+        {
+            _credStore.RemoveDataSourceCredential(dataSourceId.ToString());
+            hasCredentials = true;
+        }
+        else if (string.Equals(mode, "Prompt", StringComparison.OrdinalIgnoreCase))
+        {
+            _credStore.RemoveDataSourceCredential(dataSourceId.ToString());
+            hasCredentials = false;
+        }
+        else // Store
+        {
+            if (!string.IsNullOrWhiteSpace(req.UserName))
+            {
+                var user = req.UserName.Trim();
+                var cred = user.Contains('\\')
+                    ? new NetworkCredential(user.Split('\\', 2)[1], req.Password ?? "", user.Split('\\', 2)[0])
+                    : new NetworkCredential(user, req.Password ?? "");
+                _credStore.SetDataSourceCredential(dataSourceId.ToString(), cred);
+                hasCredentials = true;
+            }
+            else
+            {
+                _credStore.RemoveDataSourceCredential(dataSourceId.ToString());
+                hasCredentials = false;
+            }
+        }
+
+        // Update staged RSDS/RDS file if available
+        if (!string.IsNullOrEmpty(item.StagedFilePath) && System.IO.File.Exists(item.StagedFilePath))
+        {
+            try
+            {
+                var doc = System.Xml.Linq.XDocument.Load(item.StagedFilePath);
+                var root = doc.Root;
+                if (root != null)
+                {
+                    var ns = root.Name.Namespace;
+                    var props = root.Name.LocalName switch
+                    {
+                        "RptDataSource" => root.Element(ns + "ConnectionProperties"),
+                        "DataSourceDefinition" => root,
+                        _ => null
+                    };
+                    if (props != null)
+                    {
+                        if (!string.IsNullOrWhiteSpace(req.ConnectString))
+                        {
+                            var csElem = props.Element(ns + "ConnectString");
+                            if (csElem == null)
+                            {
+                                csElem = new System.Xml.Linq.XElement(ns + "ConnectString");
+                                props.Add(csElem);
+                            }
+                            csElem.Value = req.ConnectString.Trim();
+                        }
+
+                        var crElem = props.Element(ns + "CredentialRetrieval");
+                        if (crElem == null)
+                        {
+                            crElem = new System.Xml.Linq.XElement(ns + "CredentialRetrieval");
+                            props.Add(crElem);
+                        }
+                        crElem.Value = mode;
+
+                        var winElem = props.Element(ns + "WindowsCredentials");
+                        if (winElem == null)
+                        {
+                            winElem = new System.Xml.Linq.XElement(ns + "WindowsCredentials");
+                            props.Add(winElem);
+                        }
+                        winElem.Value = (string.Equals(mode, "Integrated", StringComparison.OrdinalIgnoreCase) ||
+                                        (!string.IsNullOrEmpty(req.UserName) && req.UserName.Contains('\\')))
+                                        ? "True" : "False";
+
+                        doc.Save(item.StagedFilePath);
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.Log(LogLevel.Warning, "DS-XML-UPDATE", id, $"Failed to update staged data source XML: {ex.Message}");
+            }
+        }
+
+        _logger.Log(LogLevel.Information, "CONN-DS-CRED", id, $"Credentials updated ({mode}) for data source '{item.Name}'.", itemPath: item.SourcePath);
+        return Ok(new { success = true, hasCredentials, credentialRetrieval = mode });
     }
 
     private string DescribeCredentials(CatalogItem dataSource)
@@ -1132,7 +1391,7 @@ public class MigrationController : ControllerBase
 public record CreateRunRequest(string? Name, string? SourceUrl);
 public record ConnectRequest(string SourceUrl, string? Username = null, string? Password = null, string? AuthMode = "Integrated");
 public record ConnectDestinationRequest(string DestinationUrl, string? Email = null, string? Password = null, string? BearerToken = null);
-public record DataSourceCredentialRequest(string? UserName = null, string? Password = null);
+public record DataSourceCredentialRequest(string? UserName = null, string? Password = null, string? CredentialRetrieval = null, string? ConnectString = null);
 public record ApproveRequest(string? UserId, string? UserName, string? Comment);
 public record SelectReportsRequest(Guid[]? SelectedReportIds);
 public record DeleteDestinationReportsRequest(Guid[]? ReportIds = null, string[]? Sections = null, bool DeleteAll = false, bool DeleteCategories = false);

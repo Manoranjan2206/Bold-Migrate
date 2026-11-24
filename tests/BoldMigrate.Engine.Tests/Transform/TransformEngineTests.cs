@@ -70,7 +70,7 @@ public class TransformEngineTests
     }
 
     [Fact]
-    public void Transform_Subreport_ClassifiedAsNeedsReview()
+    public void Transform_Subreport_ClassifiedWithFeatureTag()
     {
         var xml = @"<Report xmlns=""http://schemas.microsoft.com/sqlserver/reporting/2016/01/reportdefinition"">
   <Body>
@@ -84,6 +84,7 @@ public class TransformEngineTests
 
         var result = _engine.TransformAndClassify(Guid.NewGuid(), Encoding.UTF8.GetBytes(xml));
 
-        Assert.Equal(ReportBucket.NeedsReview, result.Bucket);
+        Assert.Contains("Subreport", result.FeatureTags);
+        Assert.NotEqual(ReportBucket.Blocked, result.Bucket);
     }
 }

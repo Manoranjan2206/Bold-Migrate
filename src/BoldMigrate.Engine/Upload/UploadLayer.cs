@@ -1,4 +1,3 @@
-using BoldMigrate.Core.StateMachine;
 using System.Net;
 using System.Net.Http.Headers;
 using System.Security.Cryptography;
@@ -7,7 +6,10 @@ using System.Text.Json;
 using BoldMigrate.Core.Enums;
 using BoldMigrate.Core.Interfaces;
 using BoldMigrate.Core.Models;
+using BoldMigrate.Core.StateMachine;
 using BoldMigrate.Engine.Logging;
+using BoldMigrate.Engine.Preview;
+using BoldMigrate.Infrastructure.Credentials;
 
 namespace BoldMigrate.Engine.Upload;
 
@@ -55,12 +57,8 @@ public class DestinationClient
 
     public async Task<string> AuthenticateAsync(string email, string password, CancellationToken ct = default)
     {
-        var content = new FormUrlEncodedContent(new[]
-        {
-            new KeyValuePair<string, string>("grant_type", "password"),
-            new KeyValuePair<string, string>("username", email),
-            new KeyValuePair<string, string>("password", password)
-        });
+        var cleanEmail = email?.Trim() ?? "";
+        var cleanPassword = password ?? "";
 
         var tokenUrls = new List<string>
         {
@@ -72,10 +70,18 @@ public class DestinationClient
         };
 
         HttpResponseMessage? lastRes = null;
+        string? serverErrorMessage = null;
+
         foreach (var url in tokenUrls.Distinct())
         {
             try
             {
+                using var content = new FormUrlEncodedContent(new[]
+                {
+                    new KeyValuePair<string, string>("grant_type", "password"),
+                    new KeyValuePair<string, string>("username", cleanEmail),
+                    new KeyValuePair<string, string>("password", cleanPassword)
+                });
                 using var req = new HttpRequestMessage(HttpMethod.Post, url) { Content = content };
                 var res = await _httpClient.SendAsync(req, ct);
                 lastRes = res;
@@ -90,6 +96,27 @@ public class DestinationClient
                         return _bearerToken ?? "";
                     }
                 }
+                else
+                {
+                    try
+                    {
+                        var body = await res.Content.ReadAsStringAsync(ct);
+                        if (!string.IsNullOrWhiteSpace(body) && !body.TrimStart().StartsWith("<"))
+                        {
+                            using var doc = JsonDocument.Parse(body);
+                            if (doc.RootElement.TryGetProperty("Message", out var msg))
+                                serverErrorMessage = msg.GetString();
+                            else if (doc.RootElement.TryGetProperty("error_description", out var desc))
+                                serverErrorMessage = desc.GetString();
+                            else if (doc.RootElement.TryGetProperty("errorMessage", out var emsg))
+                                serverErrorMessage = emsg.GetString();
+                        }
+                    }
+                    catch
+                    {
+                        // Ignore parse errors on error body
+                    }
+                }
             }
             catch
             {
@@ -98,7 +125,8 @@ public class DestinationClient
         }
 
         var status = lastRes != null ? $"HTTP {(int)lastRes.StatusCode}" : "Unreachable";
-        throw new HttpRequestException($"Authentication failed on destination server ({status}). Check URL, Usermail, and Password.");
+        var detail = !string.IsNullOrEmpty(serverErrorMessage) ? $": {serverErrorMessage}" : "";
+        throw new HttpRequestException($"Authentication failed on destination server ({status}){detail}. Check URL, Usermail, and Password.");
     }
 
     public async Task<string> CreateItemAsync(
@@ -314,19 +342,31 @@ public class DestinationClient
         string? username,
         string? password,
         string credentialRetrieval = "None",
+        bool windowsCredentials = false,
+        bool impersonateUser = false,
         CancellationToken ct = default)
     {
+        var isWindows = windowsCredentials ||
+                        string.Equals(credentialRetrieval, "Integrated", StringComparison.OrdinalIgnoreCase) ||
+                        (!string.IsNullOrEmpty(username) && username.Contains('\\'));
+
         var dsDef = new Dictionary<string, object>
         {
             { "ConnectString", connectString },
             { "CredentialRetrieval", credentialRetrieval },
-            { "ImpersonateUser", false },
-            { "WindowsCredentials", false },
+            { "ImpersonateUser", impersonateUser },
+            { "WindowsCredentials", isWindows },
             { "ServerType", serverType }
         };
 
-        if (!string.IsNullOrWhiteSpace(username)) dsDef["UserName"] = username;
-        if (!string.IsNullOrWhiteSpace(password)) dsDef["Password"] = password;
+        if (!string.IsNullOrWhiteSpace(username) && !string.Equals(credentialRetrieval, "Integrated", StringComparison.OrdinalIgnoreCase))
+        {
+            dsDef["UserName"] = username;
+        }
+        if (!string.IsNullOrWhiteSpace(password) && !string.Equals(credentialRetrieval, "Integrated", StringComparison.OrdinalIgnoreCase))
+        {
+            dsDef["Password"] = password;
+        }
 
         var payload = new Dictionary<string, object>
         {
@@ -374,8 +414,16 @@ public class DestinationClient
                     }
                     return (true, Guid.NewGuid().ToString());
                 }
+                else
+                {
+                    var errBody = await res.Content.ReadAsStringAsync(ct);
+                    Console.WriteLine($"[DestinationClient] CreateDataSource '{name}' failed with {res.StatusCode}: {errBody}");
+                }
             }
-            catch { }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"[DestinationClient] CreateDataSource '{name}' exception: {ex.Message}");
+            }
         }
 
         return (true, $"ds-{Guid.NewGuid():N}");
@@ -871,13 +919,15 @@ public class UploadLayer
     private readonly IMigrationStore _store;
     private readonly IStagingStore _staging;
     private readonly MigrationLogger _logger;
+    private readonly ICredentialStore? _credStore;
     private readonly int[] _retryBackoffs = { 2, 8, 30 };
 
-    public UploadLayer(IMigrationStore store, IStagingStore staging, MigrationLogger logger)
+    public UploadLayer(IMigrationStore store, IStagingStore staging, MigrationLogger logger, ICredentialStore? credStore = null)
     {
         _store = store;
         _staging = staging;
         _logger = logger;
+        _credStore = credStore;
     }
 
     public static bool IsEligibleForUpload(ReportState state) =>
@@ -1019,12 +1069,82 @@ public class UploadLayer
                 }
                 else if (item.ItemType == ItemType.DataSource)
                 {
-                    var (ok, dsId) = await client.CreateDataSourceAsync(tenantId, item.Name, "Server=localhost;Database=MigrationDb;Integrated Security=True;", "SQL", null, null, "None", ct);
+                    var connectString = "Server=localhost;Database=MigrationDb;Integrated Security=True;";
+                    var serverType = "SQL";
+                    var retrieval = "None";
+                    string? userName = null;
+                    string? password = null;
+                    bool windowsCredentials = false;
+                    bool impersonateUser = false;
+
+                    // Read staged definition if available
+                    byte[]? dsBytes = null;
+                    if (!string.IsNullOrEmpty(item.StagedFilePath) && File.Exists(item.StagedFilePath))
+                    {
+                        dsBytes = await File.ReadAllBytesAsync(item.StagedFilePath, ct);
+                    }
+                    else if (Directory.Exists("C:\\migrations"))
+                    {
+                        var candidate = Path.Combine("C:\\migrations", runId.ToString("N"), item.Name);
+                        if (File.Exists(candidate))
+                        {
+                            dsBytes = await File.ReadAllBytesAsync(candidate, ct);
+                        }
+                        else
+                        {
+                            var matches = Directory.GetFiles("C:\\migrations", item.Name + "*", SearchOption.AllDirectories);
+                            if (matches.Length > 0)
+                            {
+                                dsBytes = await File.ReadAllBytesAsync(matches[0], ct);
+                            }
+                        }
+                    }
+
+                    if (dsBytes != null)
+                    {
+                        var parsed = SharedDataSourceDefinition.Parse(dsBytes);
+                        if (parsed != null)
+                        {
+                            connectString = parsed.ConnectString;
+                            serverType = parsed.Extension;
+                            retrieval = parsed.CredentialRetrieval;
+                            windowsCredentials = parsed.WindowsCredentials;
+                            impersonateUser = parsed.ImpersonateUser;
+                            userName = parsed.UserName;
+                            password = parsed.Password;
+                        }
+                    }
+
+                    // Check credential store for user-configured credentials or overrides
+                    var cred = _credStore?.GetDataSourceCredential(item.Id.ToString());
+                    if (cred != null)
+                    {
+                        userName = string.IsNullOrEmpty(cred.Domain) ? cred.UserName : $"{cred.Domain}\\{cred.UserName}";
+                        password = cred.Password;
+                        retrieval = "Store";
+                        if (!string.IsNullOrEmpty(cred.Domain) || (userName != null && userName.Contains('\\')))
+                        {
+                            windowsCredentials = true;
+                        }
+                    }
+
+                    var (ok, dsId) = await client.CreateDataSourceAsync(
+                        tenantId,
+                        item.Name,
+                        connectString,
+                        serverType,
+                        userName,
+                        password,
+                        retrieval,
+                        windowsCredentials,
+                        impersonateUser,
+                        ct);
+
                     destId = dsId;
                 }
                 else if (item.ItemType == ItemType.DataSet)
                 {
-                    var (ok, dsetId) = await client.CreateDataSetAsync(tenantId, item.Name, "Migrated shared dataset", null, ct);
+                    var (ok, dsetId) = await client.CreateDataSetAsync(tenantId, item.Name, "Migrated shared dataset", item.Name, ct);
                     destId = dsetId;
                 }
                 else // Report

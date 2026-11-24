@@ -61,6 +61,29 @@ const Api = {
     return await res.json();
   },
 
+  async validateRender(runId, concurrency = 5) {
+    const res = await fetch(`${this.baseUrl}/runs/${runId}/validate-render?concurrency=${concurrency}`, { method: "POST" });
+    return await res.json();
+  },
+
+  async skipValidation(runId) {
+    const res = await fetch(`${this.baseUrl}/runs/${runId}/skip-validation`, { method: "POST" });
+    return await res.json();
+  },
+
+  async getValidationSummary(runId) {
+    const res = await fetch(`${this.baseUrl}/runs/${runId}/validation-summary`);
+    if (!res.ok) throw new Error(`Failed to load validation summary (HTTP ${res.status})`);
+    return await res.json();
+  },
+
+  async getRenderLogs(runId, reportPath) {
+    const q = reportPath ? `?reportPath=${encodeURIComponent(reportPath)}` : "";
+    const res = await fetch(`/api/preview/runs/${runId}/viewer/render-logs${q}`);
+    if (!res.ok) return [];
+    return await res.json();
+  },
+
   async retryFailed(runId) {
     const res = await fetch(`${this.baseUrl}/runs/${runId}/retry`, { method: "POST" });
     return await res.json();
@@ -184,11 +207,11 @@ const Api = {
     return await res.json();
   },
 
-  async setDataSourceCredentials(runId, dataSourceId, userName, password) {
+  async setDataSourceCredentials(runId, dataSourceId, userName, password, credentialRetrieval, connectString) {
     const res = await fetch(`${this.baseUrl}/runs/${runId}/datasources/${dataSourceId}/credentials`, {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ userName, password })
+      body: JSON.stringify({ userName, password, credentialRetrieval, connectString })
     });
     if (!res.ok) throw new Error(`Failed to save credentials (HTTP ${res.status})`);
     return await res.json();

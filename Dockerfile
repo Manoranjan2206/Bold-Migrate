@@ -28,8 +28,27 @@ RUN dotnet publish -c Release -o /app/publish /p:UseAppHost=false
 FROM mcr.microsoft.com/dotnet/aspnet:10.0 AS runtime
 WORKDIR /app
 
-# Ensure curl is available for container healthcheck and create data/staging directories
-RUN apt-get update && apt-get install -y --no-install-recommends curl && rm -rf /var/lib/apt/lists/* \
+# Ensure dependencies are available for Playwright Chromium headless, GDI+ rendering, and healthcheck
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    curl \
+    libgdiplus \
+    fontconfig \
+    libnss3 \
+    libnspr4 \
+    libatk1.0-0 \
+    libatk-bridge2.0-0 \
+    libcups2 \
+    libdrm2 \
+    libxkbcommon0 \
+    libxcomposite1 \
+    libxdamage1 \
+    libxfixes3 \
+    libxrandr2 \
+    libgbm1 \
+    libpango-1.0-0 \
+    libcairo2 \
+    fonts-liberation \
+    && rm -rf /var/lib/apt/lists/* \
     && mkdir -p /app/data /app/staging
 
 # Copy published application from build stage
