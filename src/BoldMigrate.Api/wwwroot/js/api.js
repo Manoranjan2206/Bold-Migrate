@@ -177,6 +177,23 @@ const Api = {
     return await res.json();
   },
 
+  // Step 5: staged reports with their resolved data sources / datasets, for local preview and edit.
+  async getPreviewReports(runId) {
+    const res = await fetch(`${this.baseUrl}/runs/${runId}/preview/reports`);
+    if (!res.ok) throw new Error(`Failed to load staged reports (HTTP ${res.status})`);
+    return await res.json();
+  },
+
+  async setDataSourceCredentials(runId, dataSourceId, userName, password) {
+    const res = await fetch(`${this.baseUrl}/runs/${runId}/datasources/${dataSourceId}/credentials`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ userName, password })
+    });
+    if (!res.ok) throw new Error(`Failed to save credentials (HTTP ${res.status})`);
+    return await res.json();
+  },
+
   async getDesignerConfig(runId) {
     const res = await fetch(`${this.baseUrl}/runs/${runId}/designer-config`);
     return await res.json();

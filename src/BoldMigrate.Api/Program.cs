@@ -40,6 +40,9 @@ var builder = WebApplication.CreateBuilder(new WebApplicationOptions
 });
 
 // Configuration
+var logsPath = builder.Configuration["BoldMigrate:LogsPath"] ?? Path.Combine(AppContext.BaseDirectory, "logs");
+builder.Logging.AddProvider(new BoldMigrate.Api.Logging.FileLoggerProvider(logsPath));
+
 var settings = new MigrationSettings();
 builder.Configuration.GetSection("BoldMigrate").Bind(settings);
 builder.Services.AddSingleton(settings);
@@ -55,6 +58,7 @@ builder.Services.AddDbContext<MigrationDbContext>(options =>
 builder.Services.AddScoped<IMigrationStore, MigrationStoreRepository>();
 builder.Services.AddSingleton<IStagingStore>(new FileSystemStagingStore(settings.StagingRootPath));
 builder.Services.AddSingleton<ICredentialStore, InMemoryCredentialStore>();
+builder.Services.AddMemoryCache();
 
 // Logging & Rules
 builder.Services.AddSingleton<CompatibilityRulesLoader>(sp =>
@@ -78,6 +82,7 @@ builder.Services.AddScoped<TransformEngine>();
 builder.Services.AddScoped<UploadLayer>();
 builder.Services.AddScoped<ValidationEngine>();
 builder.Services.AddScoped<DeltaSyncEngine>();
+builder.Services.AddScoped<BoldMigrate.Api.Preview.StagedReportSession>();
 builder.Services.AddSingleton<LocalFolderMigrationService>();
 builder.Services.AddSingleton<ExpressionTesterEngine>();
 
@@ -162,7 +167,73 @@ using (var scope = app.Services.CreateScope())
     {
         app.Logger.LogError(ex, "Could not bring the ValidationResults schema up to date.");
     }
+
+    // Earlier builds re-inserted every discovered item each time discovery ran. Keep the first
+    // row per (run, type, source path) and drop the repeats with their dependent rows.
+    try
+    {
+        const string dupes =
+            "SELECT Id FROM CatalogItems WHERE rowid NOT IN " +
+            "(SELECT MIN(rowid) FROM CatalogItems GROUP BY RunId, ItemType, SourcePath)";
+        await db.Database.ExecuteSqlRawAsync($"DELETE FROM ValidationResults WHERE ReportId IN ({dupes});");
+        await db.Database.ExecuteSqlRawAsync($"DELETE FROM ReportRecords WHERE CatalogItemId IN ({dupes});");
+        var removed = await db.Database.ExecuteSqlRawAsync($"DELETE FROM CatalogItems WHERE Id IN ({dupes});");
+        if (removed > 0)
+            app.Logger.LogWarning("Removed {Count} duplicate catalog items left by repeated discovery.", removed);
+    }
+    catch (Exception ex)
+    {
+        app.Logger.LogError(ex, "Could not remove duplicate catalog items.");
+    }
+
+    // ReportRecords gained local-edit tracking for the Step 5 designer. The columns are added
+    // in place (nullable / defaulted) so existing run data is kept.
+    try
+    {
+        var conn = db.Database.GetDbConnection();
+        if (conn.State != System.Data.ConnectionState.Open) await conn.OpenAsync();
+
+        var existing = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        using (var probe = conn.CreateCommand())
+        {
+            probe.CommandText = "SELECT name FROM pragma_table_info('ReportRecords');";
+            using var reader = await probe.ExecuteReaderAsync();
+            while (await reader.ReadAsync()) existing.Add(reader.GetString(0));
+        }
+
+        if (!existing.Contains("LocalEditUtc"))
+        {
+            await db.Database.ExecuteSqlRawAsync("ALTER TABLE ReportRecords ADD COLUMN LocalEditUtc TEXT NULL;");
+        }
+        if (!existing.Contains("LocalEditPendingUpload"))
+        {
+            await db.Database.ExecuteSqlRawAsync(
+                "ALTER TABLE ReportRecords ADD COLUMN LocalEditPendingUpload INTEGER NOT NULL DEFAULT 0;");
+        }
+    }
+    catch (Exception ex)
+    {
+        app.Logger.LogError(ex, "Could not bring the ReportRecords schema up to date.");
+    }
 }
+
+// Bold Reports data extensions for the Step 5 local viewer/designer. SQL Server is built in;
+// these let previews, and designer data-source changes, run against every other provider.
+BoldReports.Web.ReportConfig.DefaultSettings = new BoldReports.Web.ReportSettings().RegisterExtensions(new List<string>
+{
+    "BoldReports.Data.AWSSecretsManager",
+    "BoldReports.Data.Csv",
+    "BoldReports.Data.ElasticSearch",
+    "BoldReports.Data.Excel",
+    "BoldReports.Data.GoogleBigQuery",
+    "BoldReports.Data.MongoDB",
+    "BoldReports.Data.MySQL",
+    "BoldReports.Data.Oracle",
+    "BoldReports.Data.PostgreSQL",
+    "BoldReports.Data.Snowflake",
+    "BoldReports.Data.SSAS",
+    "BoldReports.Data.WebData"
+});
 
 app.UseCors("AllowAll");
 
