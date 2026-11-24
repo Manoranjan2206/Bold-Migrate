@@ -100,6 +100,30 @@ const Api = {
     return await res.json();
   },
 
+  // Returns the measured source-vs-destination comparison for one report, or
+  // { validated: false } when validation has not produced a result yet.
+  async getReportValidation(runId, reportId) {
+    const res = await fetch(`${this.baseUrl}/runs/${runId}/reports/${reportId}/validation`);
+    if (!res.ok) return { validated: false, message: `Request failed (HTTP ${res.status})` };
+    return await res.json();
+  },
+
+  async getSettings() {
+    const res = await fetch("/api/settings");
+    if (!res.ok) throw new Error(`Failed to load settings (HTTP ${res.status})`);
+    return await res.json();
+  },
+
+  async updateSettings(settings) {
+    const res = await fetch("/api/settings", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(settings)
+    });
+    if (!res.ok) throw new Error(`Failed to save settings (HTTP ${res.status})`);
+    return await res.json();
+  },
+
   async getReportRdl(runId, reportId) {
     const res = await fetch(`${this.baseUrl}/runs/${runId}/reports/${reportId}/rdl`);
     return await res.json();

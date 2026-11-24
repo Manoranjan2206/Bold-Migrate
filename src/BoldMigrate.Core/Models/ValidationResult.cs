@@ -16,8 +16,12 @@ public class ValidationResult
     [JsonPropertyName("dataAccuracy")]
     public decimal DataAccuracy { get; set; }
 
+    /// <summary>
+    /// Similarity of the PDF renders from both servers, or null when a PDF render could not be
+    /// obtained from one of them. Null means "not measured" — it must never be treated as 0 or 100.
+    /// </summary>
     [JsonPropertyName("visualSimilarity")]
-    public decimal VisualSimilarity { get; set; }
+    public decimal? VisualSimilarity { get; set; }
 
     [JsonPropertyName("rowsSource")]
     public long RowsSource { get; set; }
@@ -27,6 +31,18 @@ public class ValidationResult
 
     [JsonPropertyName("layoutShifts")]
     public int LayoutShifts { get; set; }
+
+    /// <summary>Pages in the SSRS PDF render; null when no PDF render was obtained.</summary>
+    [JsonPropertyName("sourcePageCount")]
+    public int? SourcePageCount { get; set; }
+
+    /// <summary>Pages in the Bold Reports PDF render; null when no PDF render was obtained.</summary>
+    [JsonPropertyName("destinationPageCount")]
+    public int? DestinationPageCount { get; set; }
+
+    /// <summary>Human-readable outcome of the render comparison.</summary>
+    [JsonPropertyName("renderSummary")]
+    public string? RenderSummary { get; set; }
 
     [JsonPropertyName("parameterSetHash")]
     public string ParameterSetHash { get; set; } = string.Empty;

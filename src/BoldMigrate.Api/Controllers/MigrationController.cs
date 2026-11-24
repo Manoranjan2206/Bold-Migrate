@@ -28,6 +28,7 @@ public class MigrationController : ControllerBase
     private readonly LocalFolderMigrationService _localFolderService;
     private readonly ExpressionTesterEngine _expressionTester;
     private readonly IStagingStore _staging;
+    private readonly BoldMigrate.Core.Configuration.MigrationSettings _settings;
 
     public MigrationController(
         IMigrationOrchestrator orchestrator,
@@ -37,7 +38,8 @@ public class MigrationController : ControllerBase
         DeltaSyncEngine deltaSync,
         LocalFolderMigrationService localFolderService,
         ExpressionTesterEngine expressionTester,
-        IStagingStore staging)
+        IStagingStore staging,
+        BoldMigrate.Core.Configuration.MigrationSettings settings)
     {
         _orchestrator = orchestrator;
         _store = store;
@@ -47,6 +49,7 @@ public class MigrationController : ControllerBase
         _localFolderService = localFolderService;
         _expressionTester = expressionTester;
         _staging = staging;
+        _settings = settings;
     }
 
     [HttpPost("runs")]
@@ -339,8 +342,19 @@ public class MigrationController : ControllerBase
     [HttpPost("runs/{id:guid}/select-reports")]
     public async Task<IActionResult> SelectReports(Guid id, [FromBody] SelectReportsRequest req, CancellationToken ct)
     {
+        // A missing or unparsable selectedReportIds would otherwise silently exclude every
+        // report and make the next upload look like a success that migrated nothing.
+        if (req?.SelectedReportIds == null)
+        {
+            return BadRequest(new
+            {
+                success = false,
+                message = "selectedReportIds is required. Send an empty array to deselect every report."
+            });
+        }
+
         var records = await _store.GetReportRecordsAsync(id, ct: ct);
-        var selectedSet = new HashSet<Guid>(req.SelectedReportIds ?? Enumerable.Empty<Guid>());
+        var selectedSet = new HashSet<Guid>(req.SelectedReportIds);
 
         foreach (var r in records)
         {
@@ -444,6 +458,46 @@ public class MigrationController : ControllerBase
         });
     }
 
+    /// <summary>
+    /// Returns the most recent measured validation result for a report, or null when the
+    /// report has not been validated yet. The UI must show "not validated" rather than an
+    /// assumed score when this is null.
+    /// </summary>
+    [HttpGet("runs/{id:guid}/reports/{reportId:guid}/validation")]
+    public async Task<IActionResult> GetReportValidation(Guid id, Guid reportId, CancellationToken ct)
+    {
+        var record = await _store.GetReportRecordAsync(reportId, ct);
+        var results = await _store.GetValidationResultsAsync(reportId, ct);
+        var latest = results.OrderByDescending(r => r.RunUtc).FirstOrDefault();
+
+        if (latest == null)
+        {
+            return Ok(new
+            {
+                validated = false,
+                state = record?.State.ToString() ?? "Unknown",
+                message = "This report has not been validated yet. Run validation to compare the "
+                          + "source and destination renders."
+            });
+        }
+
+        return Ok(new
+        {
+            validated = true,
+            state = record?.State.ToString() ?? "Unknown",
+            dataAccuracy = latest.DataAccuracy,
+            visualSimilarity = latest.VisualSimilarity,
+            rowsSource = latest.RowsSource,
+            rowsDestination = latest.RowsDestination,
+            layoutShifts = latest.LayoutShifts,
+            sourcePageCount = latest.SourcePageCount,
+            destinationPageCount = latest.DestinationPageCount,
+            renderSummary = latest.RenderSummary,
+            parameterSetHash = latest.ParameterSetHash,
+            runUtc = latest.RunUtc
+        });
+    }
+
     [HttpGet("runs/{id:guid}/review-queue")]
     public async Task<IActionResult> GetReviewQueue(Guid id, CancellationToken ct)
     {
@@ -532,12 +586,31 @@ public class MigrationController : ControllerBase
         var reports = await _store.GetReportRecordsAsync(id, ct: ct);
         var catalogReports = await _store.GetCatalogItemsAsync(id, ItemType.Report, ct);
 
-        var actuallyUploaded = catalogReports.Count(r => !string.IsNullOrEmpty(r.DestinationItemId) &&
-                                                        !r.DestinationItemId.StartsWith("dest-") &&
-                                                        !r.DestinationItemId.StartsWith("rep-"));
-        var unresolved = reports.Any(r => r.State is ReportState.AwaitingReview or ReportState.UploadFailed or ReportState.ValidationFailed or ReportState.Discovered or ReportState.Analysed);
+        var uploadedItems = catalogReports.Where(r => !string.IsNullOrEmpty(r.DestinationItemId) &&
+                                                      !r.DestinationItemId.StartsWith("dest-") &&
+                                                      !r.DestinationItemId.StartsWith("rep-")).ToList();
+        var actuallyUploaded = uploadedItems.Count;
 
-        var allReady = actuallyUploaded > 0 && !unresolved;
+        var selected = reports.Where(r => r.State != ReportState.Excluded).ToList();
+        var awaitingReview = selected.Count(r => r.State == ReportState.AwaitingReview);
+        var uploadFailed = selected.Count(r => r.State == ReportState.UploadFailed);
+        var validationFailed = selected.Count(r => r.State == ReportState.ValidationFailed);
+        var notStarted = selected.Count(r => r.State is ReportState.Discovered or ReportState.Analysed or ReportState.Queued);
+
+        // A report counts as validated only when a measured validation result exists for it.
+        var validatedCount = 0;
+        foreach (var item in uploadedItems)
+        {
+            var results = await _store.GetValidationResultsAsync(item.Id, ct);
+            if (results.Count > 0) validatedCount++;
+        }
+
+        var allReady = actuallyUploaded > 0
+                       && validatedCount == actuallyUploaded
+                       && awaitingReview == 0
+                       && uploadFailed == 0
+                       && validationFailed == 0
+                       && notStarted == 0;
 
         var gates = new[]
         {
@@ -551,21 +624,55 @@ public class MigrationController : ControllerBase
             },
             new
             {
-                name = "Every report resolved & validated",
-                passed = actuallyUploaded > 0 && !unresolved,
-                detail = actuallyUploaded > 0 && !unresolved
-                    ? "All uploaded reports validated and approved"
-                    : (actuallyUploaded == 0 ? "No reports uploaded to Bold Reports Server" : "Some reports remain un-uploaded, in review, or failed validation")
+                name = "Every uploaded report validated against destination",
+                passed = actuallyUploaded > 0 && validatedCount == actuallyUploaded,
+                detail = actuallyUploaded == 0
+                    ? "No reports uploaded yet"
+                    : $"{validatedCount} of {actuallyUploaded} uploaded reports have a measured source-vs-destination result"
             },
-            new { name = "Permissions applied", passed = actuallyUploaded > 0, detail = actuallyUploaded > 0 ? "Role assignments ready" : "Awaiting report uploads" },
-            new { name = "Unmatched principals resolved", passed = true, detail = "No unmatched directory principals" },
-            new { name = "Subscriptions accounted for", passed = true, detail = "Subscriptions inventoried" },
-            new { name = "Delta sync current", passed = actuallyUploaded > 0, detail = actuallyUploaded > 0 ? "Content hashes match" : "Pending report upload" },
-            new { name = "URL shim active", passed = actuallyUploaded > 0, detail = actuallyUploaded > 0 ? "Ready to redirect" : "Awaiting report upload" },
-            new { name = "Rollback agreed", passed = true, detail = "Source server retained read-only" }
+            new
+            {
+                name = "No reports awaiting manual review",
+                passed = awaitingReview == 0,
+                detail = awaitingReview == 0
+                    ? "Nothing queued for review"
+                    : $"{awaitingReview} report(s) flagged for manual review"
+            },
+            new
+            {
+                name = "No failed uploads or validations",
+                passed = uploadFailed == 0 && validationFailed == 0,
+                detail = uploadFailed == 0 && validationFailed == 0
+                    ? "No failures recorded"
+                    : $"{uploadFailed} upload failure(s), {validationFailed} validation failure(s)"
+            },
+            new
+            {
+                name = "No reports left unprocessed",
+                passed = notStarted == 0,
+                detail = notStarted == 0
+                    ? "All selected reports have been through the pipeline"
+                    : $"{notStarted} selected report(s) have not been uploaded yet"
+            },
+            new
+            {
+                name = "URL compatibility shim configured",
+                passed = _settings.UrlShimEnabled,
+                detail = _settings.UrlShimEnabled
+                    ? $"Shim enabled on {_settings.UrlShimListenPath}"
+                    : "Disabled in Settings. Optional — only needed to keep existing SSRS bookmarks working."
+            }
         };
 
-        return Ok(new { ready = allReady, gates });
+        // The shim gate is advisory: a team that is not preserving old SSRS URLs can cut over
+        // without it, so it is reported but does not gate readiness.
+        return Ok(new
+        {
+            ready = allReady,
+            gates,
+            gateCount = gates.Length,
+            advisoryGates = new[] { "URL compatibility shim configured" }
+        });
     }
 
     [HttpPost("runs/{id:guid}/cutover")]

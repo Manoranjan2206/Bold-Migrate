@@ -92,7 +92,7 @@ public class DeltaSyncEngine
                                 await _staging.StageFileAsync(runId, fresh.Path, xfrm.RewrittenBytes, ct);
                             }
 
-                            await _validation.ValidateReportAsync(runId, stored, record, source, ct);
+                            await _validation.ValidateReportAsync(runId, stored, record, source, destClient, ct);
                             result.ItemsRevalidated++;
                         }
                     }

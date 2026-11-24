@@ -13,6 +13,7 @@ let currentLibFilter = "all";
 let isPaused = false;
 let currentDiffMode = "side-by-side";
 let selectedValidationReportId = null;
+let latestValidation = null;
 
 document.addEventListener("DOMContentLoaded", async () => {
   await initApp();
@@ -128,6 +129,10 @@ function showAppView(initialTab = "connections") {
 async function refreshConnectionsState() {
   if (!currentRun) return;
   try {
+    // Show the servers this run is ACTUALLY pointed at. Leaving the defaults in the
+    // fields would let "Test connection" silently repoint the run at the wrong host.
+    hydrateConnectionFields();
+
     const poll = await Api.pollState(currentRun.id);
     if (poll && poll.itemsTotal > 0) {
       const banner = document.getElementById("discovery-status-banner");
@@ -138,7 +143,11 @@ async function refreshConnectionsState() {
 
       const descEl = document.getElementById("discovery-banner-desc");
       if (descEl) {
-        descEl.innerText = `Discovered ${poll.reportsTotal} reports, ${poll.datasourcesCount} data sources, ${poll.datasetsCount} datasets across ${poll.foldersCount} folders.`;
+        const plural = (n, one, many) => `${n} ${n === 1 ? one : many}`;
+        descEl.innerText = `Discovered ${plural(poll.reportsTotal, "report", "reports")}, `
+          + `${plural(poll.datasourcesCount, "data source", "data sources")}, `
+          + `${plural(poll.datasetsCount, "dataset", "datasets")} across `
+          + `${plural(poll.foldersCount, "folder", "folders")}.`;
       }
     }
 
@@ -148,6 +157,49 @@ async function refreshConnectionsState() {
   } catch (err) {
     console.warn("Connections refresh error:", err);
   }
+}
+
+function hydrateConnectionFields() {
+  if (!currentRun) return;
+
+  const urlEl = document.getElementById("conn-ssrs-url");
+  if (urlEl && currentRun.sourceServerUrl) {
+    urlEl.value = currentRun.sourceServerUrl;
+  }
+
+  const destEl = document.getElementById("conn-dest-url");
+  if (destEl && currentRun.destinationServerUrl) {
+    destEl.value = currentRun.destinationServerUrl;
+  }
+
+  const emailEl = document.getElementById("conn-dest-email");
+  if (emailEl && currentRun.destinationUserEmail &&
+      currentRun.destinationUserEmail !== "BearerTokenAuth") {
+    emailEl.value = currentRun.destinationUserEmail;
+  }
+
+  // Reflect real connection state instead of the optimistic markup defaults.
+  const ssrsConnected = !!currentRun.sourceServerUrl &&
+    ["Connected", "Fetching", "Analysed", "Uploading", "Uploaded", "Validating", "Validated", "CutOver"]
+      .includes(currentRun.status);
+  setConnectionIndicator("conn-ssrs-status-pill", "side-ssrs-dot", "side-ssrs-text",
+    ssrsConnected, ssrsConnected ? `Connected · ${currentRun.sourceVersion || ""}`.trim() : "Not connected");
+
+  const destConnected = !!currentRun.destinationServerUrl;
+  setConnectionIndicator("conn-dest-status-pill", "side-dest-dot", "side-dest-text",
+    destConnected, destConnected ? "Connected" : "Not connected");
+}
+
+function setConnectionIndicator(pillId, dotId, textId, ok, label) {
+  const pill = document.getElementById(pillId);
+  if (pill) {
+    pill.className = ok ? "pill ok" : "pill";
+    pill.innerText = label;
+  }
+  const text = document.getElementById(textId);
+  if (text) text.innerText = ok ? "Connected" : "Not connected";
+  const dot = document.getElementById(dotId);
+  if (dot) dot.style.background = ok ? "#10B981" : "#94A3B8";
 }
 
 function renderDataSourcesTable() {
@@ -169,10 +221,16 @@ function renderDataSourcesTable() {
     <tr>
       <td><strong>${escapeHtml(ds.name)}</strong></td>
       <td><code>${escapeHtml(ds.sourcePath || ds.parentPath || "/")}</code></td>
-      <td><span class="pill" style="font-size:11px;">Shared (.rds)</span></td>
-      <td><input value="svc_reports" style="width:130px;padding:4px 8px;border:1px solid #CBD5E1;border-radius:4px;"></td>
-      <td><input type="password" value="••••••••" style="width:130px;padding:4px 8px;border:1px solid #CBD5E1;border-radius:4px;"></td>
-      <td><span class="pill ok">Ready</span></td>
+      <td><span class="pill" style="font-size:11px;">${escapeHtml(ds.itemType || "DataSource")}</span></td>
+      <td>
+        <input id="ds-user-${ds.id}" data-ds-id="${ds.id}" class="ds-cred-user" placeholder="Not set"
+               style="width:130px;padding:4px 8px;border:1px solid #CBD5E1;border-radius:4px;">
+      </td>
+      <td>
+        <input type="password" id="ds-pass-${ds.id}" data-ds-id="${ds.id}" class="ds-cred-pass" placeholder="Not set"
+               style="width:130px;padding:4px 8px;border:1px solid #CBD5E1;border-radius:4px;">
+      </td>
+      <td><span class="pill" id="ds-status-${ds.id}">Credentials not set</span></td>
     </tr>
   `).join("");
 }
@@ -364,7 +422,10 @@ function renderReportLibrary() {
 
   const footerStatus = document.getElementById("lib-footer-status");
   if (footerStatus) {
-    footerStatus.innerText = `${reportsCache.length} reports cataloged across 4 folders.`;
+    const folderCount = new Set(reportsCache.map(r => r.folder || "/")).size;
+    const rLabel = reportsCache.length === 1 ? "report" : "reports";
+    const fLabel = folderCount === 1 ? "folder" : "folders";
+    footerStatus.innerText = `${reportsCache.length} ${rLabel} cataloged across ${folderCount} ${fLabel}.`;
   }
 
   tbody.innerHTML = filtered.map(r => {
@@ -466,6 +527,15 @@ function updateSelectedCountUI() {
 
   const delModalCount = document.getElementById("del-modal-selected-count");
   if (delModalCount) delModalCount.innerText = count;
+
+  const delModalTotal = document.getElementById("del-modal-total-count");
+  if (delModalTotal) delModalTotal.innerText = total;
+
+  const selectCleanBtn = document.getElementById("btn-select-clean-text");
+  if (selectCleanBtn) {
+    const eligible = reportsCache.filter(r => r.bucket === "Clean" || r.bucket === "AutoFixed").length;
+    selectCleanBtn.innerText = `Select Clean & Auto-Fixed Only (${eligible})`;
+  }
 }
 
 let sectionsCache = [];
@@ -639,8 +709,8 @@ async function executeDeleteReports() {
       showToast(res.message);
 
       // Refresh Report Library and Estate counts
-      await loadReportsForLibrary();
-      await pollRunState();
+      await refreshLibraryState();
+      await refreshConnectionsState();
 
       // Close modal after 1.5 seconds
       setTimeout(() => {
@@ -677,8 +747,8 @@ async function deleteSingleBoldReport(reportId, reportName) {
     const res = await Api.deleteDestinationReports(currentRun.id, { reportIds: [reportId] });
     if (res.success) {
       showToast(`Deleted '${reportName}' from Bold Reports.`);
-      await loadReportsForLibrary();
-      await pollRunState();
+      await refreshLibraryState();
+      await refreshConnectionsState();
     } else {
       showToast("Delete failed: " + res.message);
     }
@@ -709,10 +779,11 @@ function filterReportLibrary() {
   renderReportLibrary();
 }
 
-function setLibraryFilter(filter) {
+function setLibraryFilter(filter, el) {
   currentLibFilter = filter;
   document.querySelectorAll("#library-filter-chips .chip").forEach(c => c.classList.remove("active"));
-  event.target.classList.add("active");
+  const target = el || document.querySelector(`#library-filter-chips .chip[data-filter="${filter}"]`);
+  if (target) target.classList.add("active");
   renderReportLibrary();
 }
 
@@ -758,6 +829,34 @@ async function refreshDashboardState() {
     setBarAndPct("comp-autofix", autofixPct);
     setBarAndPct("comp-review", reviewPct);
     setBarAndPct("comp-blocked", blockedPct);
+
+    // Footer must agree with the tile above it.
+    const footerReadiness = document.getElementById("dash-footer-readiness");
+    if (footerReadiness) {
+      footerReadiness.innerHTML = total > 0
+        ? `Readiness score: <strong>${readinessPct}%</strong> — ${clean + autofix} of ${total} report(s) ready for direct import.`
+        : "No reports discovered yet. Run Step 1: Connect & Discover first.";
+    }
+
+    // Connection pills reflect the run, not an assumption.
+    const srcOk = !!(currentRun && currentRun.sourceServerUrl);
+    const dstOk = !!(currentRun && currentRun.destinationServerUrl);
+    const srcPill = document.getElementById("dash-ssrs-pill");
+    if (srcPill) {
+      srcPill.className = srcOk ? "pill ok" : "pill";
+      srcPill.innerText = srcOk ? "Connected" : "Not connected";
+    }
+    const dstPill = document.getElementById("dash-dest-pill");
+    if (dstPill) {
+      dstPill.className = dstOk ? "pill ok" : "pill";
+      dstPill.innerText = dstOk ? "Connected" : "Not connected";
+    }
+    const srcDetail = document.getElementById("dash-ssrs-detail");
+    if (srcDetail) {
+      srcDetail.innerText = srcOk
+        ? `${currentRun.sourceVersion || "SSRS"} · ${poll.itemsTotal || 0} items`
+        : "Source server";
+    }
 
     // Populate Flagged Reports Attention List
     renderFlaggedReportsList();
@@ -824,26 +923,56 @@ async function refreshMigrationState() {
   try {
     const poll = await Api.pollState(currentRun.id);
     if (poll) {
-      document.getElementById("stage-folders-count").innerText = poll.foldersCount || 4;
-      document.getElementById("stage-ds-count").innerText = poll.datasourcesCount || 3;
-      document.getElementById("stage-dset-count").innerText = poll.datasetsCount || 3;
-      document.getElementById("stage-rep-count").innerText = `${poll.reportsUploaded || 0} / ${poll.reportsTotal || 42}`;
+      // Discovered counts only — a zero means nothing of that type was found,
+      // which must not be masked by a placeholder number.
+      const folders = poll.foldersCount || 0;
+      const datasources = poll.datasourcesCount || 0;
+      const datasets = poll.datasetsCount || 0;
+      const repsTotal = poll.reportsTotal || 0;
+      const repsUploaded = poll.reportsUploaded || 0;
 
-      const totalItems = poll.itemsTotal || 52;
-      const uploadedItems = (poll.foldersCount || 4) + (poll.datasourcesCount || 3) + (poll.datasetsCount || 3) + (poll.reportsUploaded || 0);
-      const progressPct = totalItems > 0 ? Math.min(100, Math.round((uploadedItems / totalItems) * 100)) : 0;
+      document.getElementById("stage-folders-count").innerText = folders;
+      document.getElementById("stage-ds-count").innerText = datasources;
+      document.getElementById("stage-dset-count").innerText = datasets;
+      document.getElementById("stage-rep-count").innerText = `${repsUploaded} / ${repsTotal}`;
+
+      // Progress tracks reports, the only stage whose completion is actually recorded.
+      const progressPct = repsTotal > 0 ? Math.min(100, Math.round((repsUploaded / repsTotal) * 100)) : 0;
+
+      const footerInfo = document.getElementById("migration-footer-info");
+      if (footerInfo) {
+        const itemsTotal = poll.itemsTotal || 0;
+        footerInfo.innerText = itemsTotal > 0
+          ? `${repsUploaded} of ${repsTotal} reports uploaded (${itemsTotal} catalog items discovered).`
+          : "Nothing discovered yet. Run Step 1: Connect & Discover first.";
+      }
+
+      // Mark the non-report stages honestly: they are only "done" if there was
+      // something to upload and it completed.
+      setStagePill("stage-folders-pill", folders, poll.status);
+      setStagePill("stage-ds-pill", datasources, poll.status);
+      setStagePill("stage-dset-pill", datasets, poll.status);
 
       const bar = document.getElementById("migration-progress-bar");
       const pctSpan = document.getElementById("migration-progress-pct");
       if (bar) bar.style.width = `${progressPct}%`;
       if (pctSpan) pctSpan.innerText = `${progressPct}%`;
 
-      if (poll.status === "Uploading") {
-        document.getElementById("stage-rep-pill").className = "pill run";
-        document.getElementById("stage-rep-pill").innerText = "Uploading";
-      } else if (poll.status === "Uploaded" || poll.reportsUploaded === poll.reportsTotal) {
-        document.getElementById("stage-rep-pill").className = "pill ok";
-        document.getElementById("stage-rep-pill").innerText = "Completed";
+      const repPill = document.getElementById("stage-rep-pill");
+      if (repPill) {
+        if (poll.status === "Uploading") {
+          repPill.className = "pill run";
+          repPill.innerText = "Uploading";
+        } else if (repsTotal > 0 && repsUploaded === repsTotal) {
+          repPill.className = "pill ok";
+          repPill.innerText = "Completed";
+        } else if (repsUploaded > 0) {
+          repPill.className = "pill warn";
+          repPill.innerText = `${repsUploaded} of ${repsTotal}`;
+        } else {
+          repPill.className = "pill";
+          repPill.innerText = repsTotal > 0 ? "Ready" : "Nothing discovered";
+        }
       }
     }
 
@@ -905,6 +1034,25 @@ async function togglePauseMigration() {
   }
 }
 
+// A stage with nothing to upload is "None", not "Ready" or "Completed".
+function setStagePill(elId, count, status) {
+  const el = document.getElementById(elId);
+  if (!el) return;
+  if (count === 0) {
+    el.className = "pill";
+    el.innerText = "None discovered";
+  } else if (status === "Uploading") {
+    el.className = "pill run";
+    el.innerText = "Uploading";
+  } else if (status === "Uploaded" || status === "Validated" || status === "CutOver") {
+    el.className = "pill ok";
+    el.innerText = "Completed";
+  } else {
+    el.className = "pill";
+    el.innerText = "Ready";
+  }
+}
+
 function clearLiveLogViewer() {
   const box = document.getElementById("migration-live-log-box");
   if (box) box.innerHTML = "<div style='color:#64748B;font-family:Consolas, monospace;font-size:12px;'>Log cleared.</div>";
@@ -937,10 +1085,36 @@ async function refreshValidationState() {
     selectedValidationReportId = reportsCache[0].id;
   }
 
-  loadReportValidation(selectedValidationReportId);
+  await loadReportValidation(selectedValidationReportId);
 }
 
-function loadReportValidation(reportId) {
+async function runValidationPass() {
+  if (!currentRun) return;
+  const btn = document.getElementById("btn-run-validation");
+  if (btn) { btn.disabled = true; btn.innerText = "Validating..."; }
+
+  showToast("Rendering each report on SSRS and Bold Reports and comparing output...");
+  try {
+    await Api.startValidation(currentRun.id);
+
+    // Wait for the backend pass to produce results for the selected report.
+    for (let i = 0; i < 20; i++) {
+      await new Promise(r => setTimeout(r, 1000));
+      const v = await Api.getReportValidation(currentRun.id, selectedValidationReportId);
+      if (v && v.validated) break;
+    }
+
+    await refreshLibraryState();
+    await loadReportValidation(selectedValidationReportId);
+    showToast("Validation pass complete.");
+  } catch (err) {
+    showToast("Validation failed: " + err.message);
+  } finally {
+    if (btn) { btn.disabled = false; btn.innerText = "Run Validation"; }
+  }
+}
+
+async function loadReportValidation(reportId) {
   selectedValidationReportId = reportId;
   const report = reportsCache.find(r => r.id === reportId) || reportsCache[0];
   if (!report) return;
@@ -965,13 +1139,68 @@ function loadReportValidation(reportId) {
     blockerSpan.style.display = "none";
   }
 
-  // Real or calibrated metric tiles
-  document.getElementById("val-data-acc").innerText = report.bucket === "Blocked" ? "N/A" : "99.8%";
-  document.getElementById("val-vis-sim").innerText = report.bucket === "Blocked" ? "0.0%" : (report.bucket === "NeedsReview" ? "92.4%" : "98.9%");
-  document.getElementById("val-rows-matched").innerText = report.bucket === "Blocked" ? "0 / 0" : "1,240 / 1,240";
-  document.getElementById("val-shifts-count").innerText = report.bucket === "NeedsReview" ? "2 minor" : "0";
+  // Measured results only — never an assumed score.
+  let validation = null;
+  try {
+    validation = await Api.getReportValidation(currentRun.id, report.id);
+  } catch {
+    validation = null;
+  }
+  latestValidation = validation;
 
-  renderValidationViewport(report);
+  renderValidationMetrics(validation);
+  renderValidationViewport(report, validation);
+}
+
+function fmtPct(v) {
+  if (v === null || v === undefined) return "—";
+  return `${Number(v).toFixed(1)}%`;
+}
+
+function renderValidationMetrics(v) {
+  const accEl = document.getElementById("val-data-acc");
+  const simEl = document.getElementById("val-vis-sim");
+  const rowsEl = document.getElementById("val-rows-matched");
+  const stateEl = document.getElementById("val-state");
+
+  if (stateEl) {
+    const st = (v && v.state) || "Unknown";
+    const pretty = st.replace(/([a-z])([A-Z])/g, "$1 $2");
+    stateEl.innerText = (v && v.validated) ? pretty : "Not validated";
+    stateEl.style.color = st === "AutoPassed" ? "#059669"
+      : (st === "AwaitingReview" ? "#D97706"
+      : (st.includes("Failed") ? "#DC2626" : "#64748B"));
+  }
+
+  if (!v || !v.validated) {
+    // No measurement exists. Show that plainly rather than inventing numbers.
+    [accEl, simEl].forEach(el => { if (el) { el.innerText = "—"; el.style.color = "#94A3B8"; } });
+    if (rowsEl) { rowsEl.innerText = "—"; rowsEl.style.color = "#94A3B8"; }
+    return;
+  }
+
+  if (accEl) {
+    accEl.innerText = fmtPct(v.dataAccuracy);
+    accEl.style.color = v.dataAccuracy >= 99 ? "#059669" : (v.dataAccuracy >= 90 ? "#D97706" : "#DC2626");
+  }
+  // The second tile reports pagination, which is actually measured. Pixel-level comparison
+  // is not implemented, so no similarity percentage is shown.
+  if (simEl) {
+    const sp = v.sourcePageCount, dp = v.destinationPageCount;
+    if (sp === null || sp === undefined || dp === null || dp === undefined) {
+      simEl.innerText = "n/a";
+      simEl.style.color = "#94A3B8";
+      simEl.title = v.renderSummary || "A PDF render was not available from both servers.";
+    } else {
+      simEl.innerText = `${dp} / ${sp}`;
+      simEl.style.color = sp === dp ? "#2563EB" : "#DC2626";
+      simEl.title = v.renderSummary || "";
+    }
+  }
+  if (rowsEl) {
+    rowsEl.innerText = `${v.rowsDestination ?? 0} / ${v.rowsSource ?? 0}`;
+    rowsEl.style.color = (v.rowsDestination === v.rowsSource) ? "#0F172A" : "#DC2626";
+  }
 }
 
 function setDiffView(mode) {
@@ -987,10 +1216,11 @@ function setDiffView(mode) {
   renderValidationViewport(report);
 }
 
-function renderValidationViewport(report) {
+function renderValidationViewport(report, v) {
   const grid = document.getElementById("val-viewport-grid");
   if (!grid) return;
 
+  if (v === undefined) v = latestValidation;
   const name = report ? escapeHtml(report.name) : "Report";
 
   if (currentDiffMode === "rdl") {
@@ -1057,98 +1287,158 @@ function renderValidationViewport(report) {
   }
 
   if (currentDiffMode === "pixel") {
+    if (!v || !v.validated) {
+      grid.innerHTML = notValidatedPanel("Visual comparison");
+      return;
+    }
+    const sp = v.sourcePageCount, dp = v.destinationPageCount;
+    const measured = sp != null && dp != null;
     grid.innerHTML = `
       <div class="card" style="grid-column: 1 / -1; padding: 20px;">
-        <h2>Pixel Differential Map (Per-channel delta tolerance: 2)</h2>
-        <div style="background:#0F172A;border-radius:8px;padding:36px;text-align:center;color:#94A3B8;">
-          <div style="border:2px dashed #3B82F6;display:inline-block;padding:24px 48px;border-radius:8px;background:rgba(30,58,138,0.25);">
-            <span style="color:#60A5FA;font-weight:700;display:block;margin-bottom:8px;font-size:16px;">
-              OVERLAY MATCH FIDELITY: 98.9%
-            </span>
-            <span>Identical geometry. Sub-pixel anti-aliasing delta noted on header fonts. No clipping or pagination overflow.</span>
+        <h2>Layout Comparison</h2>
+        <p class="sub" style="margin-bottom:14px;">
+          Both servers were rendered to PDF and their pagination compared.
+        </p>
+        <div style="display:flex;gap:18px;flex-wrap:wrap;">
+          <div style="flex:1;min-width:200px;border:1px solid #E2E8F0;border-radius:8px;padding:16px;">
+            <div style="font-size:12px;color:#64748B;font-weight:600;text-transform:uppercase;letter-spacing:.4px;">SSRS pages</div>
+            <div style="font-size:30px;font-weight:700;color:#0F172A;margin-top:4px;">${sp ?? "—"}</div>
+          </div>
+          <div style="flex:1;min-width:200px;border:1px solid #E2E8F0;border-radius:8px;padding:16px;">
+            <div style="font-size:12px;color:#64748B;font-weight:600;text-transform:uppercase;letter-spacing:.4px;">Bold Reports pages</div>
+            <div style="font-size:30px;font-weight:700;color:${measured && sp === dp ? "#059669" : "#DC2626"};margin-top:4px;">${dp ?? "—"}</div>
           </div>
         </div>
+        <div style="margin-top:16px;padding:12px 14px;background:#F8FAFC;border:1px solid #E2E8F0;border-radius:6px;font-size:13px;color:#334155;">
+          ${escapeHtml(v.renderSummary || "No render summary available.")}
+        </div>
+        <div style="margin-top:12px;padding:12px 14px;background:#FFFBEB;border:1px solid #FDE68A;border-radius:6px;font-size:12.5px;color:#92400E;">
+          <strong>Pixel comparison is not performed.</strong> SSRS and Bold Reports use different PDF
+          writers, so comparing their output byte-for-byte would describe the encoders rather than the
+          report. Confirm appearance in the Web Report Designer tab.
+        </div>
+        <p class="sub" style="margin-top:12px;font-size:12px;">
+          Compared at ${v.runUtc ? new Date(v.runUtc).toLocaleString() : "unknown time"}
+          on parameter set <code>${escapeHtml((v.parameterSetHash || "").slice(0, 12))}</code>.
+        </p>
       </div>
     `;
     return;
   }
 
   if (currentDiffMode === "data") {
+    if (!v || !v.validated) {
+      grid.innerHTML = notValidatedPanel("Data comparison");
+      return;
+    }
+    const matched = v.rowsSource === v.rowsDestination;
     grid.innerHTML = `
       <div class="card" style="grid-column: 1 / -1; padding: 20px;">
-        <h2>Data Row-by-Row Comparison for ${name}</h2>
-        <table>
-          <thead>
-            <tr><th>Row</th><th>Dataset Field</th><th>SSRS Value</th><th>Bold Reports Value</th><th>Match</th></tr>
-          </thead>
+        <h2>Data Comparison for ${name}</h2>
+        <table style="margin-top:10px;">
+          <thead><tr><th>Measure</th><th>SSRS (source)</th><th>Bold Reports (destination)</th><th>Result</th></tr></thead>
           <tbody>
-            <tr><td>1</td><td>CategoryName</td><td>Beverages</td><td>Beverages</td><td><span class="pill ok">Exact</span></td></tr>
-            <tr><td>2</td><td>UnitsInStock</td><td>140</td><td>140</td><td><span class="pill ok">Exact</span></td></tr>
-            <tr><td>3</td><td>TotalRevenue</td><td>$142,500.00</td><td>$142,500.00</td><td><span class="pill ok">Exact</span></td></tr>
-            <tr><td>4</td><td>GrowthRate</td><td>+12.4%</td><td>+12.4%</td><td><span class="pill ok">Exact</span></td></tr>
+            <tr>
+              <td>Rows returned</td>
+              <td>${v.rowsSource ?? 0}</td>
+              <td>${v.rowsDestination ?? 0}</td>
+              <td><span class="pill ${matched ? "ok" : "fail"}">${matched ? "Match" : "Mismatch"}</span></td>
+            </tr>
+            <tr>
+              <td>Cell-level data accuracy</td>
+              <td colspan="2" style="text-align:center;">${fmtPct(v.dataAccuracy)}</td>
+              <td><span class="pill ${v.dataAccuracy >= 99 ? "ok" : "warn"}">${v.dataAccuracy >= 99 ? "Within threshold" : "Below threshold"}</span></td>
+            </tr>
           </tbody>
         </table>
+        <p class="sub" style="margin-top:12px;font-size:12px;">
+          Both servers were rendered to CSV with the same parameter set and compared row by row.
+        </p>
       </div>
     `;
     return;
   }
 
-  // Side-by-side default view
-  grid.innerHTML = `
-    <!-- Left: SSRS Render -->
-    <div class="card" style="padding:16px;">
-      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
-        <h2>SSRS · Report Server Render</h2>
-        <span class="pill ok">Original Source</span>
-      </div>
-      <div style="border:1px solid #E2E8F0;border-radius:6px;padding:16px;background:#FAFAFA;">
-        <h3 style="margin:0 0 10px;font-size:15px;color:#0F172A;">${name}</h3>
-        <div class="chart-sim">
-          <i style="height:60px"></i>
-          <i style="height:95px"></i>
-          <i style="height:75px"></i>
-          <i style="height:120px"></i>
-          <i style="height:85px"></i>
-          <i style="height:100px"></i>
-        </div>
-        <table style="margin-top:12px;font-size:12.5px;">
-          <thead><tr><th>Entity</th><th>Aggregate</th></tr></thead>
-          <tbody>
-            <tr><td>North Division</td><td>1,240,000</td></tr>
-            <tr><td>South Division</td><td>980,500</td></tr>
-            <tr><td>East Division</td><td>1,430,200</td></tr>
-            <tr><td>West Division</td><td>1,120,800</td></tr>
-          </tbody>
-        </table>
-      </div>
-    </div>
+  // Side-by-side default view — shows the measured comparison, not a mock render.
+  // Embedding a true visual preview requires the Bold Reports Viewer widget; use the
+  // "Web Report Designer" tab for that.
+  if (!v || !v.validated) {
+    grid.innerHTML = notValidatedPanel("Side-by-side comparison");
+    return;
+  }
 
-    <!-- Right: Bold Reports Viewer Render -->
-    <div class="card" style="padding:16px;">
-      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
-        <h2>Bold Reports · Web Report Viewer</h2>
-        <span class="pill ok">Destination Verified</span>
+  const dataOk = v.dataAccuracy >= 99;
+  const rowsOk = v.rowsSource === v.rowsDestination;
+  const pagesMeasured = v.sourcePageCount != null && v.destinationPageCount != null;
+  const pagesOk = pagesMeasured && v.sourcePageCount === v.destinationPageCount;
+  const allOk = dataOk && rowsOk && pagesOk;
+  const pagePill = !pagesMeasured
+    ? `<span class="pill warn" title="${escapeHtml(v.renderSummary || "")}">Not compared</span>`
+    : `<span class="pill ${pagesOk ? "ok" : "fail"}">${pagesOk ? "Match" : "Mismatch"}</span>`;
+
+  grid.innerHTML = `
+    <div class="card" style="grid-column: 1 / -1; padding:20px;">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">
+        <h2>Source vs Destination — ${name}</h2>
+        <span class="pill ${allOk ? "ok" : "warn"}">${allOk ? "Outputs match" : "Differences found"}</span>
       </div>
-      <div style="border:1px solid #E2E8F0;border-radius:6px;padding:16px;background:#FAFAFA;">
-        <h3 style="margin:0 0 10px;font-size:15px;color:#0F172A;">${name}</h3>
-        <div class="chart-sim">
-          <i style="height:60px"></i>
-          <i style="height:95px"></i>
-          <i style="height:75px"></i>
-          <i style="height:120px"></i>
-          <i style="height:85px"></i>
-          <i style="height:100px"></i>
+      <p class="sub" style="margin-bottom:16px;">
+        Both servers rendered this report with the same parameters; the exports were compared directly.
+      </p>
+      <table>
+        <thead>
+          <tr><th>Check</th><th>SSRS</th><th>Bold Reports</th><th>Result</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><strong>Rows returned</strong></td>
+            <td>${v.rowsSource ?? 0}</td>
+            <td>${v.rowsDestination ?? 0}</td>
+            <td><span class="pill ${rowsOk ? "ok" : "fail"}">${rowsOk ? "Match" : "Mismatch"}</span></td>
+          </tr>
+          <tr>
+            <td><strong>Data accuracy</strong></td>
+            <td colspan="2" style="text-align:center;">${fmtPct(v.dataAccuracy)}</td>
+            <td><span class="pill ${dataOk ? "ok" : "warn"}">${dataOk ? "Pass" : "Below threshold"}</span></td>
+          </tr>
+          <tr>
+            <td><strong>Pages rendered</strong><div style="font-size:11.5px;color:#64748B;">PDF render from each server</div></td>
+            <td>${v.sourcePageCount ?? "—"}</td>
+            <td>${v.destinationPageCount ?? "—"}</td>
+            <td>${pagePill}</td>
+          </tr>
+        </tbody>
+      </table>
+      <div style="margin-top:12px;padding:10px 12px;background:#F8FAFC;border:1px solid #E2E8F0;border-radius:6px;font-size:12.5px;color:#475569;">
+        ${escapeHtml(v.renderSummary || "No render summary available.")}
+        <div style="margin-top:4px;color:#64748B;">
+          Pixel-level layout is not compared automatically — open the report in the Bold Reports
+          Designer to confirm appearance.
         </div>
-        <table style="margin-top:12px;font-size:12.5px;">
-          <thead><tr><th>Entity</th><th>Aggregate</th></tr></thead>
-          <tbody>
-            <tr><td>North Division</td><td>1,240,000</td></tr>
-            <tr><td>South Division</td><td>980,500</td></tr>
-            <tr><td>East Division</td><td>1,430,200</td></tr>
-            <tr><td>West Division</td><td>1,120,800</td></tr>
-          </tbody>
-        </table>
       </div>
+      <div style="margin-top:16px;display:flex;gap:10px;flex-wrap:wrap;">
+        <button class="btn2 btn-sm" onclick="setDiffView('designer')">Open the live report in Bold Reports Designer</button>
+        <button class="btn2 btn-sm" onclick="setDiffView('rdl')">Compare RDL definitions</button>
+      </div>
+      <p class="sub" style="margin-top:12px;font-size:12px;">
+        Last compared ${v.runUtc ? new Date(v.runUtc).toLocaleString() : "unknown"}. Current state:
+        <strong>${escapeHtml(v.state || "Unknown")}</strong>.
+      </p>
+    </div>
+  `;
+}
+
+function notValidatedPanel(what) {
+  return `
+    <div class="card" style="grid-column: 1 / -1; padding:28px; text-align:center;">
+      <div style="font-size:15px;font-weight:600;color:#0F172A;margin-bottom:6px;">
+        ${escapeHtml(what)} not available yet
+      </div>
+      <p class="sub" style="max-width:520px;margin:0 auto 16px;">
+        This report has not been validated. Run a validation pass to render it on both SSRS and
+        Bold Reports and compare the real output.
+      </p>
+      <button class="btn" onclick="runValidationPass()">Run Validation</button>
     </div>
   `;
 }
@@ -1161,19 +1451,20 @@ async function loadReportRdlDiff(report) {
 
   try {
     const data = await Api.getReportRdl(currentRun.id, report.id);
-    if (origEl && data.originalRdl) {
-      origEl.innerText = data.originalRdl;
-    } else if (origEl) {
-      origEl.innerText = `<?xml version="1.0" encoding="utf-8"?>\n<Report xmlns="http://schemas.microsoft.com/sqlserver/reporting/2016/01/reportdefinition">\n  <!-- ${escapeHtml(report.name)} RDL Definition -->\n  <DataSources>\n    <DataSource Name="Migration_SharedDS">\n      <DataSourceReference>/MigrationTestSuite/Migration_SharedDS</DataSourceReference>\n    </DataSource>\n  </DataSources>\n  <DataSets>\n    <DataSet Name="Customers_SharedSet">\n      <SharedDataSet>\n        <SharedDataSetReference>/MigrationTestSuite/Customers_SharedSet</SharedDataSetReference>\n      </SharedDataSet>\n    </DataSet>\n  </DataSets>\n  <ReportSections>\n    <ReportSection>\n      <Body>\n        <ReportItems>\n          <Textbox Name="Title">\n            <Value>${escapeHtml(report.name)}</Value>\n          </Textbox>\n        </ReportItems>\n      </Body>\n    </ReportSection>\n  </ReportSections>\n</Report>`;
-    }
 
-    if (xfrmEl && data.transformedRdl) {
-      xfrmEl.innerText = data.transformedRdl;
-    } else if (xfrmEl) {
-      xfrmEl.innerText = `<?xml version="1.0" encoding="utf-8"?>\n<Report xmlns="http://schemas.microsoft.com/sqlserver/reporting/2016/01/reportdefinition">\n  <!-- Bold Reports Transformed RDL (Datasets Inlined) -->\n  <DataSources>\n    <DataSource Name="Migration_SharedDS">\n      <ConnectionProperties>\n        <DataProvider>SQL</DataProvider>\n        <ConnectString>Server=sql01;Database=MigrationTest</ConnectString>\n      </ConnectionProperties>\n    </DataSource>\n  </DataSources>\n  <DataSets>\n    <DataSet Name="Customers_SharedSet">\n      <Query>\n        <DataSourceName>Migration_SharedDS</DataSourceName>\n        <CommandText>SELECT CustomerID, CompanyName, City FROM Customers</CommandText>\n      </Query>\n      <Fields>\n        <Field Name="CustomerID"><DataField>CustomerID</DataField></Field>\n        <Field Name="CompanyName"><DataField>CompanyName</DataField></Field>\n      </Fields>\n    </DataSet>\n  </DataSets>\n</Report>`;
+    // Never substitute invented XML for a definition the server did not return —
+    // a fake diff would hide a real transformation problem.
+    if (origEl) {
+      origEl.innerText = data.originalRdl
+        || "The source RDL for this report is not available in staging. Re-run Step 1: Connect & Discover to stage it.";
+    }
+    if (xfrmEl) {
+      xfrmEl.innerText = data.transformedRdl
+        || "No transformed RDL was produced. This report was uploaded unchanged, or the assessment in Step 3 has not run yet.";
     }
   } catch (err) {
     if (origEl) origEl.innerText = `Error loading RDL: ${err.message}`;
+    if (xfrmEl) xfrmEl.innerText = "";
   }
 }
 
@@ -1264,16 +1555,35 @@ async function refreshCutoverState() {
   try {
     const gatesRes = await Api.getCutoverGates(currentRun.id);
     const container = document.getElementById("cutover-gates-list");
+    const advisory = new Set(gatesRes?.advisoryGates || []);
     if (gatesRes && gatesRes.gates && container) {
-      container.innerHTML = gatesRes.gates.map(g => `
+      container.innerHTML = gatesRes.gates.map(g => {
+        // An advisory gate is reported but does not block cutover, so it must not be
+        // styled as a blocker.
+        const isAdvisory = advisory.has(g.name);
+        const label = g.passed ? "Passed" : (isAdvisory ? "Optional" : "Action Required");
+        const cls = g.passed ? "ok" : (isAdvisory ? "" : "warn");
+        return `
         <div style="display:flex;align-items:center;justify-content:space-between;padding:10px 14px;background:#F8FAFC;border:1px solid #E2E8F0;border-radius:8px;">
           <div>
             <strong style="color:#0F172A;font-size:13.5px;">${escapeHtml(g.name)}</strong>
             <div style="color:#64748B;font-size:12px;margin-top:2px;">${escapeHtml(g.detail)}</div>
           </div>
-          <span class="pill ${g.passed ? "ok" : "warn"}">${g.passed ? "Passed" : "Action Required"}</span>
+          <span class="pill ${cls}">${label}</span>
         </div>
-      `).join("");
+      `;
+      }).join("");
+    }
+
+    // Footer must agree with the gates above it.
+    const footer = document.getElementById("cutover-footer-status");
+    if (footer) {
+      const blocking = (gatesRes?.gates || []).filter(g => !g.passed && !advisory.has(g.name));
+      if (gatesRes?.ready) {
+        footer.innerHTML = '<span style="color:#059669;font-weight:600;">✓ All blocking gates passed — ready for cutover sign-off.</span>';
+      } else {
+        footer.innerHTML = `<span style="color:#B45309;font-weight:600;">${blocking.length} gate(s) still need attention before cutover.</span>`;
+      }
     }
 
     const banner = document.getElementById("cutover-blocked-banner");
@@ -1331,13 +1641,18 @@ function toggleLfAuth() {
   document.getElementById("lf-token-box").style.display = mode === "token" ? "block" : "none";
 }
 
+// Fills the folder fields with the conventional SSRS export layout so the shape of the
+// expected input is obvious. These are examples, not paths that exist on this machine.
 function prefillLocalFolderDemo() {
-  document.getElementById("lf-report-folder").value = "C:\\Users\\manor\\Downloads\\Migration Scripts\\Migration Scripts\\Export\\Reports";
-  document.getElementById("lf-ds-folder").value = "C:\\Users\\manor\\Downloads\\Migration Scripts\\Migration Scripts\\Export\\Datasources";
-  document.getElementById("lf-dset-folder").value = "C:\\Users\\manor\\Downloads\\Migration Scripts\\Migration Scripts\\Export\\Datasets";
-  document.getElementById("lf-backup-folder").value = "C:\\SSRS_Backup";
-  document.getElementById("lf-log-folder").value = "C:\\SSRS_Migration_Logs";
-  showToast("Loaded migration directory paths.");
+  const root = (document.getElementById("lf-report-folder").value || "").trim();
+  const base = root ? root.replace(/[\\/]+(Reports)?[\\/]*$/i, "") : "C:\\SSRS_Export";
+
+  document.getElementById("lf-report-folder").value = `${base}\\Reports`;
+  document.getElementById("lf-ds-folder").value = `${base}\\Datasources`;
+  document.getElementById("lf-dset-folder").value = `${base}\\Datasets`;
+  document.getElementById("lf-backup-folder").value = `${base}\\Backup`;
+  document.getElementById("lf-log-folder").value = `${base}\\logs`;
+  showToast(`Filled the standard export layout under ${base}. Edit the paths to match your export.`);
 }
 
 async function executeLocalFolderMigration() {
@@ -1451,11 +1766,52 @@ async function evaluateExpression() {
 }
 
 async function loadSettingsView() {
-  // Settings view loaded
+  try {
+    const s = await Api.getSettings();
+    const set = (id, val) => {
+      const el = document.getElementById(id);
+      if (el && val !== undefined && val !== null) el.value = val;
+    };
+    // MigrationSettings serializes with dotted names (see JsonPropertyName attributes).
+    set("setting-data-threshold", s["Validation.DataAccuracyThreshold"]);
+    set("setting-vis-threshold", s["Validation.VisualSimilarityThreshold"]);
+    set("setting-pixel-tolerance", s["Validation.PixelTolerance"]);
+    set("setting-extract-parallel", s["Extraction.MaxParallel"]);
+    set("setting-upload-parallel", s["Upload.MaxParallel"]);
+    set("setting-row-limit", s["Validation.SampleRowLimit"]);
+
+    const shim = document.getElementById("setting-shim-enabled");
+    if (shim && s["UrlShim.Enabled"] !== undefined) shim.checked = !!s["UrlShim.Enabled"];
+  } catch (err) {
+    showToast("Could not load settings: " + err.message);
+  }
 }
 
 async function saveSettings() {
-  showToast("Migration thresholds and execution settings saved.");
+  const num = (id, fallback) => {
+    const el = document.getElementById(id);
+    const v = el ? parseFloat(el.value) : NaN;
+    return Number.isFinite(v) ? v : fallback;
+  };
+
+  const payload = {
+    "Validation.DataAccuracyThreshold": num("setting-data-threshold", 99.5),
+    "Validation.VisualSimilarityThreshold": num("setting-vis-threshold", 95.0),
+    "Validation.PixelTolerance": Math.round(num("setting-pixel-tolerance", 2)),
+    "Validation.SampleRowLimit": Math.round(num("setting-row-limit", 10000)),
+    "Extraction.MaxParallel": Math.round(num("setting-extract-parallel", 4)),
+    "Upload.MaxParallel": Math.round(num("setting-upload-parallel", 4)),
+    "UrlShim.Enabled": document.getElementById("setting-shim-enabled")?.checked ?? false,
+    "UrlShim.ListenPath": "/ReportServer"
+  };
+
+  try {
+    await Api.updateSettings(payload);
+    showToast("Settings saved. New thresholds apply to the next validation pass.");
+    await loadSettingsView();
+  } catch (err) {
+    showToast("Save failed: " + err.message);
+  }
 }
 
 async function handleLandingFileScan(event) {

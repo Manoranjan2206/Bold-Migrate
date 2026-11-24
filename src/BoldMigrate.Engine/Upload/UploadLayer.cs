@@ -666,6 +666,95 @@ public class DestinationClient
         }
         return list;
     }
+
+    /// <summary>
+    /// Renders a report that already exists on the Bold Reports Server into the requested
+    /// export format and returns the raw bytes. Used by the validation layer to compare the
+    /// destination's actual output against the source server's output.
+    /// Returns null when the server could not render the report, so callers can fail closed
+    /// rather than assuming equivalence.
+    /// </summary>
+    public async Task<byte[]?> ExportReportAsync(
+        string? tenantId,
+        string destinationItemId,
+        string format = "CSV",
+        IDictionary<string, string>? parameters = null,
+        CancellationToken ct = default)
+    {
+        if (string.IsNullOrWhiteSpace(destinationItemId)) return null;
+
+        var tenant = !string.IsNullOrWhiteSpace(tenantId) ? tenantId : GetTenantId();
+        var urls = new[]
+        {
+            $"{_serverUrl}/reporting/api/site/{tenant}/v1.0/reports/export",
+            $"{_serverUrl}/api/site/{tenant}/v1.0/reports/export",
+            $"{_serverUrl}/api/v1.0/reports/export"
+        };
+
+        var payload = new Dictionary<string, object?>
+        {
+            ["ReportId"] = destinationItemId,
+            ["ExportType"] = format
+        };
+
+        if (parameters is { Count: > 0 })
+        {
+            payload["Parameters"] = parameters
+                .Select(p => new { Name = p.Key, Values = new[] { p.Value } })
+                .ToArray();
+        }
+
+        var json = JsonSerializer.Serialize(payload);
+
+        foreach (var url in urls)
+        {
+            try
+            {
+                using var req = new HttpRequestMessage(HttpMethod.Post, url)
+                {
+                    Content = new StringContent(json, Encoding.UTF8, "application/json")
+                };
+                if (!string.IsNullOrEmpty(_bearerToken))
+                {
+                    req.Headers.Authorization = new AuthenticationHeaderValue("Bearer", _bearerToken);
+                }
+
+                var res = await _httpClient.SendAsync(req, ct);
+                if (!res.IsSuccessStatusCode) continue;
+
+                using var doc = await JsonDocument.ParseAsync(await res.Content.ReadAsStreamAsync(ct), cancellationToken: ct);
+                var root = doc.RootElement;
+
+                // The server reports render failures in-band with HTTP 200.
+                if (root.TryGetProperty("Status", out var statusProp) &&
+                    statusProp.ValueKind == JsonValueKind.False)
+                {
+                    return null;
+                }
+
+                if (root.TryGetProperty("FileContent", out var contentProp) &&
+                    contentProp.ValueKind == JsonValueKind.String)
+                {
+                    var b64 = contentProp.GetString();
+                    if (string.IsNullOrEmpty(b64)) return Array.Empty<byte>();
+                    try
+                    {
+                        return Convert.FromBase64String(b64);
+                    }
+                    catch (FormatException)
+                    {
+                        return null;
+                    }
+                }
+            }
+            catch
+            {
+                // Try the next candidate route.
+            }
+        }
+
+        return null;
+    }
 }
 
 public class DestinationItemInfo
