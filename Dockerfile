@@ -28,8 +28,9 @@ RUN dotnet publish -c Release -o /app/publish /p:UseAppHost=false
 FROM mcr.microsoft.com/dotnet/aspnet:10.0 AS runtime
 WORKDIR /app
 
-# Ensure data and staging directories exist with write permissions
-RUN mkdir -p /app/data /app/staging
+# Ensure curl is available for container healthcheck and create data/staging directories
+RUN apt-get update && apt-get install -y --no-install-recommends curl && rm -rf /var/lib/apt/lists/* \
+    && mkdir -p /app/data /app/staging
 
 # Copy published application from build stage
 COPY --from=build /app/publish ./

@@ -68,6 +68,17 @@ public class DeltaSyncEngine
 
             if (fresh.ModifiedUtc > stored.ModifiedUtc)
             {
+                // A report edited in the local designer is the migration's version now;
+                // re-staging it from the source would silently discard that edit.
+                if (stored.ItemType == ItemType.Report &&
+                    (await _store.GetReportRecordAsync(stored.Id, ct))?.LocalEditUtc != null)
+                {
+                    _logger.Log(Microsoft.Extensions.Logging.LogLevel.Warning, "CUT-DELTA-EDIT", runId,
+                        $"'{stored.Name}' changed on the source server but was edited locally in Step 5. "
+                        + "The local edit was kept; merge the source change manually if it is needed.",
+                        itemPath: stored.SourcePath);
+                    continue;
+                }
                 var content = await source.GetDefinitionAsync(fresh.Id, ct);
                 var newHash = Convert.ToHexString(SHA256.HashData(content)).ToLowerInvariant();
 

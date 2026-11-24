@@ -224,15 +224,57 @@ function renderDataSourcesTable() {
       <td><span class="pill" style="font-size:11px;">${escapeHtml(ds.itemType || "DataSource")}</span></td>
       <td>
         <input id="ds-user-${ds.id}" data-ds-id="${ds.id}" class="ds-cred-user" placeholder="Not set"
+               value="${escapeHtml(ds.userName || "")}" aria-label="User for ${escapeHtml(ds.name)}"
                style="width:130px;padding:4px 8px;border:1px solid #CBD5E1;border-radius:4px;">
       </td>
       <td>
-        <input type="password" id="ds-pass-${ds.id}" data-ds-id="${ds.id}" class="ds-cred-pass" placeholder="Not set"
+        <input type="password" id="ds-pass-${ds.id}" data-ds-id="${ds.id}" class="ds-cred-pass"
+               placeholder="${ds.hasCredentials ? "Stored (unchanged)" : "Not set"}" aria-label="Password for ${escapeHtml(ds.name)}"
+               autocomplete="new-password"
                style="width:130px;padding:4px 8px;border:1px solid #CBD5E1;border-radius:4px;">
       </td>
-      <td><span class="pill" id="ds-status-${ds.id}">Credentials not set</span></td>
+      <td style="white-space:nowrap;">
+        <span class="pill ${ds.hasCredentials ? "ok" : ""}" id="ds-status-${ds.id}">${ds.hasCredentials ? "Stored" : "Credentials not set"}</span>
+        <button class="btn2 btn-sm" style="margin-left:6px;" onclick="saveDataSourceCredentials('${ds.id}')">Save</button>
+      </td>
     </tr>
   `).join("");
+}
+
+// Credentials stay in server memory for this session. The local Step 5 viewer/designer use
+// them; data sources without credentials prompt for them when a report runs.
+async function saveDataSourceCredentials(dsId) {
+  if (!currentRun) return;
+  const user = document.getElementById(`ds-user-${dsId}`)?.value.trim() || "";
+  const pass = document.getElementById(`ds-pass-${dsId}`)?.value || "";
+  const pill = document.getElementById(`ds-status-${dsId}`);
+  const ds = dataSourcesCache.find(d => d.id === dsId);
+
+  // An empty password with an unchanged, already-stored user keeps the stored password.
+  if (user && !pass && ds?.hasCredentials && ds.userName === user) {
+    showToast("Credentials unchanged.");
+    return;
+  }
+
+  try {
+    const res = await Api.setDataSourceCredentials(currentRun.id, dsId, user, pass);
+    if (ds) {
+      ds.hasCredentials = res.hasCredentials;
+      ds.userName = res.hasCredentials ? user : null;
+    }
+    const passEl = document.getElementById(`ds-pass-${dsId}`);
+    if (passEl) {
+      passEl.value = "";
+      passEl.placeholder = res.hasCredentials ? "Stored (unchanged)" : "Not set";
+    }
+    if (pill) {
+      pill.className = res.hasCredentials ? "pill ok" : "pill";
+      pill.innerText = res.hasCredentials ? "Stored" : "Credentials not set";
+    }
+    showToast(res.hasCredentials ? "Data source credentials saved for this session." : "Data source credentials cleared.");
+  } catch (err) {
+    showToast(err.message);
+  }
 }
 
 function toggleSsrsAuthFields() {
@@ -798,10 +840,10 @@ async function runAssessmentAndGoToDashboard() {
 // -----------------------------------------------------------------------------
 // Step 3: Assessment Dashboard
 // -----------------------------------------------------------------------------
-async function refreshDashboardState() {
+async function refreshDashboardState(knownPoll) {
   if (!currentRun) return;
   try {
-    const poll = await Api.pollState(currentRun.id);
+    const poll = knownPoll || await Api.pollState(currentRun.id);
     if (!poll) return;
 
     const total = poll.reportsTotal || 0;
@@ -918,10 +960,10 @@ async function recheckEstate() {
 // -----------------------------------------------------------------------------
 // Step 4: Migration Pipeline
 // -----------------------------------------------------------------------------
-async function refreshMigrationState() {
+async function refreshMigrationState(knownPoll) {
   if (!currentRun) return;
   try {
-    const poll = await Api.pollState(currentRun.id);
+    const poll = knownPoll || await Api.pollState(currentRun.id);
     if (poll) {
       // Discovered counts only — a zero means nothing of that type was found,
       // which must not be masked by a placeholder number.
@@ -1211,6 +1253,7 @@ function setDiffView(mode) {
   if (mode === "designer") document.getElementById("seg-designer")?.classList.add("sel");
   if (mode === "pixel") document.getElementById("seg-pixel-diff")?.classList.add("sel");
   if (mode === "data") document.getElementById("seg-data-diff")?.classList.add("sel");
+  if (mode === "staged") document.getElementById("seg-staged")?.classList.add("sel");
 
   const report = reportsCache.find(r => r.id === selectedValidationReportId) || reportsCache[0];
   renderValidationViewport(report);
@@ -1219,6 +1262,17 @@ function setDiffView(mode) {
 function renderValidationViewport(report, v) {
   const grid = document.getElementById("val-viewport-grid");
   if (!grid) return;
+
+  // Leaving the staged list tears down any open local viewer/designer.
+  if (currentDiffMode !== "staged") {
+    Preview.destroyWidgets();
+    Preview.open = null;
+  }
+
+  if (currentDiffMode === "staged") {
+    if (currentRun) Preview.render(grid);
+    return;
+  }
 
   if (v === undefined) v = latestValidation;
   const name = report ? escapeHtml(report.name) : "Report";
@@ -1860,8 +1914,8 @@ function startPoller() {
       const poll = await Api.pollState(currentRun.id);
       if (poll) {
         updateJourneyBadges(poll);
-        if (currentTab === "dashboard") refreshDashboardState();
-        if (currentTab === "migration") refreshMigrationState();
+        if (currentTab === "dashboard") refreshDashboardState(poll);
+        if (currentTab === "migration") refreshMigrationState(poll);
       }
     } catch { }
   }, 3000);

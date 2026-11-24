@@ -9,6 +9,7 @@ using BoldMigrate.Engine.ExpressionTester;
 using BoldMigrate.Engine.LocalFolder;
 using BoldMigrate.Engine.Logging;
 using BoldMigrate.Engine.Orchestrator;
+using BoldMigrate.Engine.Preview;
 using BoldMigrate.Engine.Upload;
 using BoldMigrate.Infrastructure.Credentials;
 using BoldMigrate.Infrastructure.SourceAdapters;
@@ -300,13 +301,20 @@ public class MigrationController : ControllerBase
     public async Task<IActionResult> GetDataSources(Guid id, CancellationToken ct)
     {
         var items = await _store.GetCatalogItemsAsync(id, ItemType.DataSource, ct);
-        return Ok(items.Select(i => new
+        return Ok(items.Select(i =>
         {
-            id = i.Id,
-            name = i.Name,
-            sourcePath = i.SourcePath,
-            parentPath = i.ParentPath,
-            sizeBytes = i.SizeBytes
+            // Only the user name is returned; the stored password never leaves the server.
+            var cred = _credStore.GetDataSourceCredential(i.Id.ToString());
+            return new
+            {
+                id = i.Id,
+                name = i.Name,
+                sourcePath = i.SourcePath,
+                parentPath = i.ParentPath,
+                sizeBytes = i.SizeBytes,
+                hasCredentials = cred != null,
+                userName = cred == null ? null : string.IsNullOrEmpty(cred.Domain) ? cred.UserName : $"{cred.Domain}\\{cred.UserName}"
+            };
         }));
     }
 
@@ -757,6 +765,128 @@ public class MigrationController : ControllerBase
         return Ok(ExpressionTesterEngine.GetSampleExpressions());
     }
 
+    /// <summary>
+    /// Step 5: every staged report with the shared data sources and datasets it uses, as they
+    /// resolve inside the staged SSRS folder tree. Drives the local Viewer / Designer list.
+    /// </summary>
+    [HttpGet("runs/{id:guid}/preview/reports")]
+    public async Task<IActionResult> GetPreviewReports(Guid id, CancellationToken ct)
+    {
+        if (await _store.GetRunAsync(id, ct) == null) return NotFound();
+
+        var catalog = new StagedCatalog(id, await _store.GetCatalogItemsAsync(id, ct: ct));
+        var records = (await _store.GetReportRecordsAsync(id, ct: ct)).ToDictionary(r => r.CatalogItemId);
+
+        var reports = new List<object>();
+        foreach (var report in catalog.OfType(ItemType.Report).OrderBy(r => r.SourcePath, StringComparer.OrdinalIgnoreCase))
+        {
+            records.TryGetValue(report.Id, out var record);
+            var staged = StagedCatalog.IsStaged(report);
+            var folder = StagedCatalog.ParentOf(report.SourcePath);
+            var deps = staged ? ReportDependencies.Read(await System.IO.File.ReadAllBytesAsync(report.StagedFilePath!, ct)) : new ReportDependencies();
+
+            var dataSources = deps.DataSources.Select(ds =>
+            {
+                if (ds.SharedReference == null)
+                {
+                    return new { name = ds.Name, kind = "Embedded", reference = (string?)null, resolvedPath = (string?)null, resolved = true, credentials = "InReport" };
+                }
+
+                var shared = catalog.ResolveReference(ds.SharedReference, folder, ItemType.DataSource);
+                return new
+                {
+                    name = ds.Name,
+                    kind = "Shared",
+                    reference = (string?)ds.SharedReference,
+                    resolvedPath = shared != null ? StagedCatalog.NormalizePath(shared.SourcePath) : null,
+                    resolved = shared != null && StagedCatalog.IsStaged(shared),
+                    credentials = shared == null ? "Unresolved" : DescribeCredentials(shared)
+                };
+            }).ToList();
+
+            var dataSets = deps.SharedDataSets.Select(dset =>
+            {
+                var shared = catalog.ResolveReference(dset.SharedReference, folder, ItemType.DataSet);
+                return new
+                {
+                    name = dset.Name,
+                    reference = dset.SharedReference,
+                    resolvedPath = shared != null ? StagedCatalog.NormalizePath(shared.SourcePath) : null,
+                    resolved = shared != null && StagedCatalog.IsStaged(shared)
+                };
+            }).ToList();
+
+            reports.Add(new
+            {
+                id = report.Id,
+                name = report.Name,
+                folder,
+                // The SSRS path is what the viewer and designer open.
+                path = StagedCatalog.NormalizePath(report.SourcePath),
+                staged,
+                status = record?.State.ToString() ?? "Discovered",
+                bucket = record?.Bucket.ToString() ?? "Clean",
+                uploaded = IsGenuineDestinationId(report.DestinationItemId),
+                // SQLite drops DateTimeKind; mark it UTC so clients do not read it as local time.
+                localEditUtc = record?.LocalEditUtc is { } edited ? DateTime.SpecifyKind(edited, DateTimeKind.Utc) : (DateTime?)null,
+                localEditPendingUpload = record?.LocalEditPendingUpload ?? false,
+                dataSources,
+                dataSets,
+                unresolvedCount = dataSources.Count(d => !d.resolved) + dataSets.Count(d => !d.resolved)
+            });
+        }
+
+        return Ok(new
+        {
+            viewerServiceUrl = $"/api/preview/runs/{id}/viewer",
+            designerServiceUrl = $"/api/preview/runs/{id}/designer",
+            reports
+        });
+    }
+
+    /// <summary>
+    /// Step 1: stores the account a shared data source connects with (in memory only). The
+    /// local viewer/designer use it; without it they prompt for credentials at run time.
+    /// </summary>
+    [HttpPut("runs/{id:guid}/datasources/{dataSourceId:guid}/credentials")]
+    public async Task<IActionResult> SetDataSourceCredentials(Guid id, Guid dataSourceId, [FromBody] DataSourceCredentialRequest req, CancellationToken ct)
+    {
+        var item = await _store.GetCatalogItemAsync(dataSourceId, ct);
+        if (item == null || item.RunId != id || item.ItemType != ItemType.DataSource) return NotFound();
+
+        if (string.IsNullOrWhiteSpace(req.UserName))
+        {
+            _credStore.RemoveDataSourceCredential(dataSourceId.ToString());
+            return Ok(new { success = true, hasCredentials = false });
+        }
+
+        var user = req.UserName.Trim();
+        var cred = user.Contains('\\')
+            ? new NetworkCredential(user.Split('\\', 2)[1], req.Password ?? "", user.Split('\\', 2)[0])
+            : new NetworkCredential(user, req.Password ?? "");
+        _credStore.SetDataSourceCredential(dataSourceId.ToString(), cred);
+
+        _logger.Log(LogLevel.Information, "CONN-DS-CRED", id, $"Credentials set for data source '{item.Name}'.", itemPath: item.SourcePath);
+        return Ok(new { success = true, hasCredentials = true });
+    }
+
+    private string DescribeCredentials(CatalogItem dataSource)
+    {
+        if (_credStore.GetDataSourceCredential(dataSource.Id.ToString()) != null) return "Stored";
+        if (!StagedCatalog.IsStaged(dataSource)) return "Unresolved";
+
+        var def = SharedDataSourceDefinition.Parse(System.IO.File.ReadAllBytes(dataSource.StagedFilePath!));
+        return def?.CredentialRetrieval switch
+        {
+            "Integrated" => "Integrated",
+            "None" => "None",
+            _ => "PromptAtRunTime"
+        };
+    }
+
+    private static bool IsGenuineDestinationId(string? id) =>
+        !string.IsNullOrEmpty(id) && !id.StartsWith("dest-") && !id.StartsWith("rep-");
+
     [HttpGet("runs/{id:guid}/designer-config")]
     public async Task<IActionResult> GetDesignerConfig(Guid id, CancellationToken ct)
     {
@@ -863,208 +993,91 @@ public class MigrationController : ControllerBase
         var run = await _store.GetRunAsync(id, ct);
         if (run == null) return NotFound(new { success = false, message = "Run not found" });
 
+        var hasScope = req.DeleteAll || (req.Sections?.Length > 0) || (req.ReportIds?.Length > 0);
+        if (!hasScope)
+            return BadRequest(new { success = false, message = "Specify ReportIds, Sections, or set DeleteAll to true." });
+
+        var token = _credStore.GetDestinationToken();
+        if (string.IsNullOrWhiteSpace(run.DestinationServerUrl) || string.IsNullOrEmpty(token))
+            return BadRequest(new { success = false, message = "Not connected to the Bold Reports destination. Connect (sign in) first, then retry." });
+
+        var client = new DestinationClient(run.DestinationServerUrl, token);
+        var tenantId = client.GetTenantId();
+
         var allReports = (await _store.GetCatalogItemsAsync(id, ItemType.Report, ct)).ToList();
         var records = (await _store.GetReportRecordsAsync(id, ct: ct)).ToDictionary(r => r.CatalogItemId);
 
-        // Initialize DestinationClient if destination URL is configured
-        DestinationClient? client = null;
-        string? tenantId = null;
-        if (!string.IsNullOrWhiteSpace(run.DestinationServerUrl))
+        List<DestinationItemInfo> live;
+        try
         {
-            var token = _credStore.GetDestinationToken();
-            client = new DestinationClient(run.DestinationServerUrl, token);
-            tenantId = client.GetTenantId();
-            if (string.IsNullOrEmpty(token) && !string.IsNullOrEmpty(run.DestinationUserEmail))
-            {
-                try
-                {
-                    token = await client.AuthenticateAsync(run.DestinationUserEmail, "Admin@123", ct);
-                    if (!string.IsNullOrEmpty(token)) _credStore.SetDestinationToken(token);
-                }
-                catch { }
-            }
+            live = await client.GetItemsAsync(tenantId, "Report", ct);
+        }
+        catch (Exception ex)
+        {
+            return StatusCode(502, new { success = false, message = $"Failed to list reports on Bold Reports: {ex.Message}" });
         }
 
-        var deletedCount = 0;
-        var errors = new List<string>();
+        // Which local reports are in scope, and which remote reports must be deleted.
+        List<CatalogItem> localTargets;
+        var remoteTargets = new Dictionary<string, DestinationItemInfo>();
 
-        // Scenario 1: Bulk Delete ALL reports from Bold Reports Server
         if (req.DeleteAll)
         {
-            if (client != null)
-            {
-                try
-                {
-                    // Fetch every live report directly from Bold Reports Server
-                    var liveReports = await client.GetItemsAsync(tenantId, "Report", ct);
-                    foreach (var remote in liveReports)
-                    {
-                        try
-                        {
-                            var ok = await client.DeleteItemAsync(tenantId, remote.Id, ct);
-                            if (ok) deletedCount++;
-                        }
-                        catch (Exception ex)
-                        {
-                            errors.Add($"Error deleting '{remote.Name}': {ex.Message}");
-                        }
-                    }
-                }
-                catch (Exception ex)
-                {
-                    errors.Add($"Failed to query live reports from Bold Reports: {ex.Message}");
-                }
-            }
-
-            // Reset all local database records
-            foreach (var r in allReports)
-            {
-                r.DestinationItemId = null;
-                await _store.UpdateCatalogItemAsync(r, ct);
-                if (records.TryGetValue(r.Id, out var rec))
-                {
-                    rec.State = ReportState.Analysed;
-                    rec.UploadAttempts = 0;
-                    await _store.UpdateReportRecordAsync(rec, ct);
-                }
-            }
-
-            if (deletedCount == 0 && allReports.Count > 0)
-            {
-                deletedCount = allReports.Count;
-            }
+            localTargets = allReports;
+            foreach (var r in live) remoteTargets[r.Id] = r;
         }
-        // Scenario 2: Multi-Section Delete (by folder/category)
-        else if (req.Sections != null && req.Sections.Length > 0)
+        else if (req.Sections?.Length > 0)
         {
-            var sectionSet = new HashSet<string>(req.Sections, StringComparer.OrdinalIgnoreCase);
-            var normalizedSections = req.Sections.Select(s => s.Trim('/')).ToHashSet(StringComparer.OrdinalIgnoreCase);
-
-            var targets = allReports.Where(r =>
-            {
-                var norm = string.IsNullOrEmpty(r.ParentPath) ? "/" : r.ParentPath;
-                return sectionSet.Contains(norm) || sectionSet.Contains(r.ParentPath) || normalizedSections.Contains(norm.Trim('/'));
-            }).ToList();
-
-            if (client != null)
-            {
-                try
-                {
-                    var liveReports = await client.GetItemsAsync(tenantId, "Report", ct);
-                    foreach (var remote in liveReports)
-                    {
-                        var matchesCategory = !string.IsNullOrEmpty(remote.CategoryName) &&
-                            (normalizedSections.Contains(remote.CategoryName) || sectionSet.Contains(remote.CategoryName) || sectionSet.Contains($"/{remote.CategoryName}"));
-                        var matchesLocalTarget = targets.Any(t => string.Equals(t.Name, remote.Name, StringComparison.OrdinalIgnoreCase) || t.DestinationItemId == remote.Id);
-
-                        if (matchesCategory || matchesLocalTarget)
-                        {
-                            try
-                            {
-                                var ok = await client.DeleteItemAsync(tenantId, remote.Id, ct);
-                                if (ok) deletedCount++;
-                            }
-                            catch (Exception ex)
-                            {
-                                errors.Add($"Error deleting '{remote.Name}': {ex.Message}");
-                            }
-                        }
-                    }
-                }
-                catch (Exception ex)
-                {
-                    errors.Add($"Error scanning remote section reports: {ex.Message}");
-                }
-            }
-
-            // Also delete by known destination item IDs in local targets
-            foreach (var r in targets)
-            {
-                if (client != null && !string.IsNullOrEmpty(r.DestinationItemId))
-                {
-                    try
-                    {
-                        await client.DeleteItemAsync(tenantId, r.DestinationItemId, ct);
-                    }
-                    catch { }
-                }
-
-                r.DestinationItemId = null;
-                await _store.UpdateCatalogItemAsync(r, ct);
-                if (records.TryGetValue(r.Id, out var rec))
-                {
-                    rec.State = ReportState.Analysed;
-                    rec.UploadAttempts = 0;
-                    await _store.UpdateReportRecordAsync(rec, ct);
-                }
-            }
-
-            if (deletedCount == 0 && targets.Count > 0)
-            {
-                deletedCount = targets.Count;
-            }
-        }
-        // Scenario 3: Selected specific reports
-        else if (req.ReportIds != null && req.ReportIds.Length > 0)
-        {
-            var idSet = new HashSet<Guid>(req.ReportIds);
-            var targets = allReports.Where(r => idSet.Contains(r.Id)).ToList();
-
-            foreach (var r in targets)
-            {
-                if (client != null)
-                {
-                    if (!string.IsNullOrEmpty(r.DestinationItemId))
-                    {
-                        try
-                        {
-                            var ok = await client.DeleteItemAsync(tenantId, r.DestinationItemId, ct);
-                            if (ok) deletedCount++;
-                        }
-                        catch (Exception ex)
-                        {
-                            errors.Add($"Failed to delete '{r.Name}': {ex.Message}");
-                        }
-                    }
-                    else
-                    {
-                        // Try matching by name on remote server
-                        try
-                        {
-                            var liveReports = await client.GetItemsAsync(tenantId, "Report", ct);
-                            var match = liveReports.FirstOrDefault(lr => string.Equals(lr.Name, r.Name, StringComparison.OrdinalIgnoreCase));
-                            if (match != null)
-                            {
-                                var ok = await client.DeleteItemAsync(tenantId, match.Id, ct);
-                                if (ok) deletedCount++;
-                            }
-                        }
-                        catch { }
-                    }
-                }
-
-                r.DestinationItemId = null;
-                await _store.UpdateCatalogItemAsync(r, ct);
-                if (records.TryGetValue(r.Id, out var rec))
-                {
-                    rec.State = ReportState.Analysed;
-                    rec.UploadAttempts = 0;
-                    await _store.UpdateReportRecordAsync(rec, ct);
-                }
-            }
-
-            if (deletedCount == 0 && targets.Count > 0)
-            {
-                deletedCount = targets.Count;
-            }
+            var sections = req.Sections.Select(s => s.Trim().Trim('/')).ToHashSet(StringComparer.OrdinalIgnoreCase);
+            localTargets = allReports.Where(r => sections.Contains((r.ParentPath ?? "").Trim('/'))).ToList();
+            foreach (var r in live.Where(r => !string.IsNullOrEmpty(r.CategoryName) && sections.Contains(r.CategoryName.Trim('/'))))
+                remoteTargets[r.Id] = r;
+            foreach (var t in localTargets) AddRemoteMatch(t, live, remoteTargets);
         }
         else
         {
-            return BadRequest(new { success = false, message = "Specify ReportIds, Sections, or set DeleteAll to true." });
+            var idSet = new HashSet<Guid>(req.ReportIds!);
+            localTargets = allReports.Where(r => idSet.Contains(r.Id)).ToList();
+            foreach (var t in localTargets) AddRemoteMatch(t, live, remoteTargets);
         }
 
-        // Delete categories if requested
-        if (req.DeleteCategories && client != null)
+        var deletedIds = new HashSet<string>();
+        var failedIds = new HashSet<string>();
+        var errors = new List<string>();
+
+        foreach (var remote in remoteTargets.Values)
+        {
+            try
+            {
+                if (await client.DeleteItemAsync(tenantId, remote.Id, ct)) deletedIds.Add(remote.Id);
+                else { failedIds.Add(remote.Id); errors.Add($"Server refused to delete '{remote.Name}'."); }
+            }
+            catch (Exception ex)
+            {
+                failedIds.Add(remote.Id);
+                errors.Add($"Error deleting '{remote.Name}': {ex.Message}");
+            }
+        }
+
+        // Reset local state only for reports whose remote copy is gone (or never existed).
+        foreach (var r in localTargets)
+        {
+            var remoteId = !string.IsNullOrEmpty(r.DestinationItemId) ? r.DestinationItemId
+                : live.FirstOrDefault(l => string.Equals(l.Name, r.Name, StringComparison.OrdinalIgnoreCase))?.Id;
+            if (remoteId != null && failedIds.Contains(remoteId)) continue;
+
+            r.DestinationItemId = null;
+            await _store.UpdateCatalogItemAsync(r, ct);
+            if (records.TryGetValue(r.Id, out var rec))
+            {
+                rec.State = ReportState.Analysed;
+                rec.UploadAttempts = 0;
+                await _store.UpdateReportRecordAsync(rec, ct);
+            }
+        }
+
+        // Delete categories only when everything else succeeded.
+        if (req.DeleteCategories && errors.Count == 0)
         {
             try
             {
@@ -1072,39 +1085,53 @@ public class MigrationController : ControllerBase
                 var protectedCats = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "General", "Sample Reports", "Solution Reports" };
                 foreach (var cat in liveCats.Where(c => !protectedCats.Contains(c.Name)))
                 {
-                    if (req.DeleteAll || (req.Sections != null && req.Sections.Any(s => s.Trim().Trim('/').Equals(cat.Name, StringComparison.OrdinalIgnoreCase))))
+                    if (req.DeleteAll || (req.Sections?.Any(s => s.Trim().Trim('/').Equals(cat.Name, StringComparison.OrdinalIgnoreCase)) ?? false))
                     {
-                        try
-                        {
-                            await client.DeleteItemAsync(tenantId, cat.Id, ct);
-                        }
-                        catch { }
+                        try { await client.DeleteItemAsync(tenantId, cat.Id, ct); }
+                        catch (Exception ex) { errors.Add($"Could not delete category '{cat.Name}': {ex.Message}"); }
                     }
                 }
             }
-            catch { }
+            catch (Exception ex)
+            {
+                errors.Add($"Could not list categories: {ex.Message}");
+            }
         }
 
         var scopeDesc = req.DeleteAll ? "All reports" :
-                        req.Sections != null && req.Sections.Length > 0 ? $"{req.Sections.Length} section(s)" :
-                        $"{deletedCount} selected report(s)";
+                        req.Sections?.Length > 0 ? $"{req.Sections.Length} section(s)" :
+                        $"{localTargets.Count} selected report(s)";
 
-        _logger.Log(LogLevel.Information, "DEST-DEL", id, $"Bulk deleted {deletedCount} reports ({scopeDesc}) from Bold Reports Server.");
+        var level = errors.Count > 0 ? LogLevel.Warning : LogLevel.Information;
+        _logger.Log(level, "DEST-DEL", id, $"Bulk delete ({scopeDesc}): {deletedIds.Count} deleted, {failedIds.Count} failed.");
+        foreach (var e in errors) _logger.Log(LogLevel.Warning, "DEST-DEL", id, e);
 
         return Ok(new
         {
-            success = true,
-            deletedCount = deletedCount,
+            success = errors.Count == 0,
+            deletedCount = deletedIds.Count,
+            failedCount = failedIds.Count,
             scope = scopeDesc,
-            message = $"Successfully deleted {deletedCount} report(s) ({scopeDesc}) from Bold Reports Server.",
+            message = errors.Count == 0
+                ? $"Deleted {deletedIds.Count} report(s) ({scopeDesc}) from Bold Reports Server."
+                : $"Deleted {deletedIds.Count} report(s); {errors.Count} problem(s). See details.",
             errors = errors.Count > 0 ? errors : null
         });
+    }
+
+    private static void AddRemoteMatch(CatalogItem local, List<DestinationItemInfo> live, Dictionary<string, DestinationItemInfo> into)
+    {
+        var match = !string.IsNullOrEmpty(local.DestinationItemId)
+            ? live.FirstOrDefault(l => l.Id == local.DestinationItemId)
+            : live.FirstOrDefault(l => string.Equals(l.Name, local.Name, StringComparison.OrdinalIgnoreCase));
+        if (match != null) into[match.Id] = match;
     }
 }
 
 public record CreateRunRequest(string? Name, string? SourceUrl);
 public record ConnectRequest(string SourceUrl, string? Username = null, string? Password = null, string? AuthMode = "Integrated");
 public record ConnectDestinationRequest(string DestinationUrl, string? Email = null, string? Password = null, string? BearerToken = null);
+public record DataSourceCredentialRequest(string? UserName = null, string? Password = null);
 public record ApproveRequest(string? UserId, string? UserName, string? Comment);
 public record SelectReportsRequest(Guid[]? SelectedReportIds);
 public record DeleteDestinationReportsRequest(Guid[]? ReportIds = null, string[]? Sections = null, bool DeleteAll = false, bool DeleteCategories = false);

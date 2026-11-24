@@ -7,8 +7,14 @@ public interface ICredentialStore : IDisposable
     void SetSourceCredential(string key, NetworkCredential credential);
     NetworkCredential? GetSourceCredential(string key);
 
-    void SetDataSourcePassword(string dataSourceName, string password);
-    string? GetDataSourcePassword(string dataSourceName);
+    /// <summary>
+    /// Stores the account a shared data source connects with. SSRS never exports stored
+    /// data source passwords, so these are entered in Step 1 and reused by the local
+    /// report viewer/designer. Keyed by the data source's catalog item id.
+    /// </summary>
+    void SetDataSourceCredential(string dataSourceKey, NetworkCredential credential);
+    NetworkCredential? GetDataSourceCredential(string dataSourceKey);
+    void RemoveDataSourceCredential(string dataSourceKey);
 
     void SetDestinationToken(string token);
     string? GetDestinationToken();
@@ -19,7 +25,8 @@ public interface ICredentialStore : IDisposable
 public class InMemoryCredentialStore : ICredentialStore
 {
     private readonly Dictionary<string, NetworkCredential> _sourceCreds = new(StringComparer.OrdinalIgnoreCase);
-    private readonly Dictionary<string, string> _dsPasswords = new(StringComparer.OrdinalIgnoreCase);
+    private readonly Dictionary<string, NetworkCredential> _dsCreds = new(StringComparer.OrdinalIgnoreCase);
+    private readonly object _dsLock = new();
     private string? _destinationToken;
     private bool _disposed;
 
@@ -34,15 +41,21 @@ public class InMemoryCredentialStore : ICredentialStore
         return cred;
     }
 
-    public void SetDataSourcePassword(string dataSourceName, string password)
+    // The viewer and designer read these from request threads while Step 1 writes them,
+    // so access is serialised.
+    public void SetDataSourceCredential(string dataSourceKey, NetworkCredential credential)
     {
-        _dsPasswords[dataSourceName] = password;
+        lock (_dsLock) _dsCreds[dataSourceKey] = credential;
     }
 
-    public string? GetDataSourcePassword(string dataSourceName)
+    public NetworkCredential? GetDataSourceCredential(string dataSourceKey)
     {
-        _dsPasswords.TryGetValue(dataSourceName, out var pwd);
-        return pwd;
+        lock (_dsLock) return _dsCreds.TryGetValue(dataSourceKey, out var cred) ? cred : null;
+    }
+
+    public void RemoveDataSourceCredential(string dataSourceKey)
+    {
+        lock (_dsLock) _dsCreds.Remove(dataSourceKey);
     }
 
     public void SetDestinationToken(string token)
@@ -55,7 +68,7 @@ public class InMemoryCredentialStore : ICredentialStore
     public void ClearAll()
     {
         _sourceCreds.Clear();
-        _dsPasswords.Clear();
+        lock (_dsLock) _dsCreds.Clear();
         _destinationToken = null;
     }
 

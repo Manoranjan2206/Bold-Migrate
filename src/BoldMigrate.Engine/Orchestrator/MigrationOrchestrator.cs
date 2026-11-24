@@ -152,8 +152,13 @@ public class MigrationOrchestrator : BackgroundService, IMigrationOrchestrator
 
         var catalogItems = new List<CatalogItem>();
         var reportRecords = new List<ReportRecord>();
+        // Re-running discovery must not add the same items again: skip anything this run already has.
+        var existing = await store.GetCatalogItemsAsync(runId, null, ct);
+        var known = new HashSet<string>(
+            existing.Select(e => $"{(int)e.ItemType}|{e.SourcePath}"), StringComparer.OrdinalIgnoreCase);
         foreach (var s in sourceItems)
         {
+            if (!known.Add($"{(int)s.ItemType}|{s.Path}")) continue;
             var cid = Guid.NewGuid();
             var item = new CatalogItem
             {

@@ -10,8 +10,8 @@
   <!-- Bold Reports Designer Dependencies Styles -->
   <link href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.37.0/codemirror.min.css" rel="stylesheet" />
   <link href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.37.0/addon/hint/show-hint.min.css" rel="stylesheet" />
-  <link href="https://cdn.boldreports.com/13.1.26/content/material/bold.reports.all.min.css" rel="stylesheet" />
-  <link href="https://cdn.boldreports.com/13.1.26/content/material/bold.reportdesigner.min.css" rel="stylesheet" />
+  <link href="https://cdn.boldreports.com/15.1.17/content/v2.0/tailwind-light/bold.report-viewer.min.css" rel="stylesheet" />
+  <link href="https://cdn.boldreports.com/15.1.17/content/v2.0/tailwind-light/bold.report-designer.min.css" rel="stylesheet" />
 </head>
 
 <body>
@@ -217,6 +217,13 @@
           <div class="step-text">
             <span class="step-title">AI Expression Tester</span>
             <small class="step-sub">Formula compatibility</small>
+          </div>
+        </div>
+        <div class="step" id="nav-bold-delete" onclick="switchTab('bold-delete')">
+          <b>D</b>
+          <div class="step-text">
+            <span class="step-title">Bulk Delete Reports</span>
+            <small class="step-sub">Clean up Bold Reports</small>
           </div>
         </div>
         <div class="step" id="nav-settings" onclick="switchTab('settings')">
@@ -884,6 +891,7 @@
               <!-- Dynamically populated from real reports -->
             </select>
             <div class="seg">
+              <button id="seg-staged" onclick="setDiffView('staged')">Staged Reports</button>
               <button class="sel" id="seg-side-by-side" onclick="setDiffView('side-by-side')">Side by side</button>
               <button id="seg-rdl-diff" onclick="setDiffView('rdl')">RDL Code Diff</button>
               <button id="seg-designer" onclick="setDiffView('designer')">Web Report Designer</button>
@@ -1268,6 +1276,39 @@
       <!-- =====================================================================
            TOOL 3: SETTINGS
            ===================================================================== -->
+      <section id="tab-bold-delete" class="tab-pane" style="display:none;">
+        <div class="main-header">
+          <div>
+            <h1>Bulk Delete Reports</h1>
+            <p class="sub">Connect to a Bold Reports server, pick reports, and permanently delete them. Independent of any migration run.</p>
+          </div>
+        </div>
+        <div class="card" style="padding:16px;margin-bottom:14px;">
+          <div style="display:grid;grid-template-columns:2fr 1.5fr 1.5fr auto;gap:10px;align-items:end;">
+            <label>Bold Reports URL<input id="bd-url" type="text" placeholder="https://reports.example.com" style="width:100%;height:36px;border:1px solid #CBD5E1;border-radius:6px;padding:0 10px;"></label>
+            <label>Email<input id="bd-email" type="text" autocomplete="off" style="width:100%;height:36px;border:1px solid #CBD5E1;border-radius:6px;padding:0 10px;"></label>
+            <label>Password<input id="bd-password" type="password" autocomplete="new-password" style="width:100%;height:36px;border:1px solid #CBD5E1;border-radius:6px;padding:0 10px;"></label>
+            <button class="btn" onclick="bdLoadReports()">Load Reports</button>
+          </div>
+        </div>
+        <div class="card" style="padding:16px;">
+          <div style="display:flex;gap:10px;align-items:center;margin-bottom:10px;flex-wrap:wrap;">
+            <input id="bd-filter" type="text" placeholder="Filter by name or folder..." oninput="bdRender()" style="height:34px;border:1px solid #CBD5E1;border-radius:6px;padding:0 10px;min-width:260px;">
+            <a href="javascript:void(0)" onclick="bdSelectVisible(true)">Select visible</a>
+            <a href="javascript:void(0)" onclick="bdSelectVisible(false)">Clear</a>
+            <span style="flex:1"></span>
+            <span id="bd-status" style="font-size:12.5px;color:#64748B;"></span>
+            <button class="btn2 btn-danger" id="bd-delete-btn" onclick="bdDeleteSelected()" disabled>Delete Selected (0)</button>
+          </div>
+          <div style="max-height:480px;overflow:auto;">
+            <table style="width:100%;border-collapse:collapse;">
+              <thead><tr style="text-align:left;"><th style="width:32px;"></th><th>Report</th><th>Folder</th></tr></thead>
+              <tbody id="bd-body"><tr><td colspan="3" style="color:#94A3B8;padding:12px;">Load reports to begin.</td></tr></tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+
       <section id="tab-settings" class="tab-pane" style="display:none;">
         <div class="main-header">
           <div>
@@ -1408,19 +1449,21 @@
   </div>
 
   <!-- Bold Reports Designer Dependencies Scripts (Official CDN) -->
-  <script src="https://cdn.boldreports.com/external/jquery-1.10.2.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jquery/3.6.0/jquery.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.37.0/codemirror.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.37.0/addon/hint/show-hint.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.37.0/addon/hint/sql-hint.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.37.0/mode/sql/sql.min.js"></script>
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.44.0/mode/vb/vb.min.js"></script>
-  <script src="https://cdn.boldreports.com/13.1.26/scripts/v2.0/common/bold.reports.common.min.js"></script>
-  <script src="https://cdn.boldreports.com/13.1.26/scripts/v2.0/common/bold.reports.widgets.min.js"></script>
-  <script src="https://cdn.boldreports.com/13.1.26/scripts/v2.0/bold.report-viewer.min.js"></script>
-  <script src="https://cdn.boldreports.com/13.1.26/scripts/v2.0/bold.report-designer.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.37.0/mode/vb/vb.min.js"></script>
+  <script src="https://cdn.boldreports.com/15.1.17/scripts/v2.0/common/bold.reports.common.min.js"></script>
+  <script src="https://cdn.boldreports.com/15.1.17/scripts/v2.0/common/bold.reports.widgets.min.js"></script>
+  <script src="https://cdn.boldreports.com/15.1.17/scripts/v2.0/bold.report-viewer.min.js"></script>
+  <script src="https://cdn.boldreports.com/15.1.17/scripts/v2.0/bold.report-designer.min.js"></script>
 
-  <script src="/js/api.js?v=2.3"></script>
-  <script src="/js/app.js?v=2.3"></script>
+  <script src="/js/api.js?v=2.5"></script>
+  <script src="/js/app.js?v=2.5"></script>
+  <script src="/js/preview.js?v=3"></script>
+  <script src="/js/bolddelete.js?v=1"></script>
 </body>
 
 </html>

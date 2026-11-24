@@ -47,6 +47,19 @@ public class ReportRecord
     [JsonPropertyName("excludedReason")]
     public string? ExcludedReason { get; set; }
 
+    /// <summary>
+    /// When the staged definition was last saved from the local Report Designer (Step 5).
+    /// A locally edited report is never re-staged from the source server.
+    /// </summary>
+    [JsonPropertyName("localEditUtc")]
+    public DateTime? LocalEditUtc { get; set; }
+
+    /// <summary>
+    /// True when a local edit has not yet been sent to Bold Reports Server.
+    /// </summary>
+    [JsonPropertyName("localEditPendingUpload")]
+    public bool LocalEditPendingUpload { get; set; }
+
     [JsonIgnore]
     public CatalogItem? CatalogItem { get; set; }
 }

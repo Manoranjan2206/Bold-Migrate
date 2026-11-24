@@ -538,6 +538,105 @@ public class DestinationClient
         throw new HttpRequestException($"Upload of report '{name}' failed on Bold Reports ({status}): {lastError}");
     }
 
+    /// <summary>
+    /// Replaces the definition of a report that already exists on Bold Reports Server
+    /// (PUT /v1.0/reports), keeping its id, URL and permissions. Used for reports edited in the
+    /// local designer after they were uploaded.
+    /// </summary>
+    public async Task UpdateReportAsync(
+        string tenantId,
+        string reportId,
+        string base64Content,
+        string? categoryId,
+        CancellationToken ct = default)
+    {
+        var payload = new Dictionary<string, object>
+        {
+            { "ItemId", reportId },
+            { "ItemContent", base64Content },
+            { "IsPublic", false }
+        };
+
+        if (!string.IsNullOrWhiteSpace(categoryId))
+        {
+            payload["CategoryId"] = categoryId;
+        }
+
+        var json = JsonSerializer.Serialize(payload, _relaxedJsonOptions);
+
+        var urls = new[]
+        {
+            $"{_serverUrl}/reporting/api/site/{tenantId}/v1.0/reports",
+            $"{_serverUrl}/api/site/{tenantId}/v1.0/reports",
+            $"{_serverUrl}/api/v1.0/reports"
+        };
+
+        HttpResponseMessage? lastRes = null;
+        string? lastError = null;
+
+        foreach (var url in urls)
+        {
+            try
+            {
+                using var req = new HttpRequestMessage(HttpMethod.Put, url)
+                {
+                    Content = new StringContent(json, Encoding.UTF8, "application/json")
+                };
+                if (!string.IsNullOrEmpty(_bearerToken))
+                {
+                    req.Headers.Authorization = new AuthenticationHeaderValue("Bearer", _bearerToken);
+                }
+
+                var res = await _httpClient.SendAsync(req, ct);
+                lastRes = res;
+                var body = await res.Content.ReadAsStringAsync(ct);
+
+                if (res.IsSuccessStatusCode)
+                {
+                    // The server reports a failed update in-band with HTTP 200.
+                    if (TryReadFailure(body, out var failure))
+                    {
+                        lastError = failure;
+                        break;
+                    }
+                    return;
+                }
+
+                // 404/405 means this route is not the API; anything else is a real answer.
+                lastError = body;
+                if (res.StatusCode is not (HttpStatusCode.NotFound or HttpStatusCode.MethodNotAllowed)) break;
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                lastError = ex.Message;
+            }
+        }
+
+        var status = lastRes != null ? $"HTTP {(int)lastRes.StatusCode}" : "Unreachable";
+        throw new HttpRequestException($"Update of report '{reportId}' failed on Bold Reports ({status}): {lastError}");
+    }
+
+    private static bool TryReadFailure(string body, out string? message)
+    {
+        message = null;
+        try
+        {
+            using var doc = JsonDocument.Parse(body);
+            if (doc.RootElement.ValueKind == JsonValueKind.Object &&
+                doc.RootElement.TryGetProperty("Status", out var status) &&
+                status.ValueKind == JsonValueKind.False)
+            {
+                message = doc.RootElement.TryGetProperty("StatusMessage", out var msg) ? msg.GetString() : "Status false";
+                return true;
+            }
+        }
+        catch (JsonException)
+        {
+            // Non-JSON success body: treat as success.
+        }
+        return false;
+    }
+
     public async Task<Dictionary<string, string>> GetDataSetsAsync(string tenantId, CancellationToken ct = default)
     {
         var lookup = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
@@ -876,7 +975,16 @@ public class UploadLayer
         var key = ComputeIdempotencyKey(runId, item.ItemType, item.SourcePath);
         if (!string.IsNullOrEmpty(item.DestinationItemId) && !item.DestinationItemId.StartsWith("dest-") && !item.DestinationItemId.StartsWith("rep-"))
         {
-            // Already uploaded with genuine destination ID
+            // Already uploaded with a genuine destination ID. A report edited in the local
+            // designer since then is pushed again so Bold Reports gets the edited definition.
+            if (item.ItemType == ItemType.Report)
+            {
+                var edited = await _store.GetReportRecordAsync(item.Id, ct);
+                if (edited?.LocalEditPendingUpload == true)
+                {
+                    return await PushLocalEditAsync(runId, item, edited, client, ct);
+                }
+            }
             return true;
         }
 
@@ -948,6 +1056,17 @@ public class UploadLayer
                 sw.Stop();
                 item.DestinationItemId = destId;
                 await _store.UpdateCatalogItemAsync(item, ct);
+
+                // The upload read the staged file, so any local designer edit has now been sent.
+                if (item.ItemType == ItemType.Report)
+                {
+                    var uploadedRecord = await _store.GetReportRecordAsync(item.Id, ct);
+                    if (uploadedRecord?.LocalEditPendingUpload == true)
+                    {
+                        uploadedRecord.LocalEditPendingUpload = false;
+                        await _store.UpdateReportRecordAsync(uploadedRecord, ct);
+                    }
+                }
 
                 await _store.AddUploadAttemptAsync(new UploadAttempt
                 {
@@ -1026,5 +1145,79 @@ public class UploadLayer
         }
 
         return false;
+    }
+
+    /// <summary>
+    /// Sends a locally edited report over the copy already on Bold Reports Server. The edited
+    /// definition comes from staging; nothing is fetched from the source server again.
+    /// </summary>
+    private async Task<bool> PushLocalEditAsync(
+        Guid runId,
+        CatalogItem item,
+        ReportRecord record,
+        DestinationClient client,
+        CancellationToken ct)
+    {
+        var sw = System.Diagnostics.Stopwatch.StartNew();
+        try
+        {
+            if (string.IsNullOrEmpty(item.StagedFilePath) || !File.Exists(item.StagedFilePath))
+            {
+                throw new FileNotFoundException($"The edited definition of '{item.Name}' is missing from staging.", item.StagedFilePath);
+            }
+
+            var content = await File.ReadAllBytesAsync(item.StagedFilePath, ct);
+            var tenantId = client.GetTenantId();
+            var categoryName = string.IsNullOrEmpty(item.ParentPath) ? "General" : item.ParentPath.Trim('/');
+            var categoryId = await client.GetOrCreateCategoryAsync(tenantId, categoryName, null, ct);
+
+            await client.UpdateReportAsync(tenantId, item.DestinationItemId!, Convert.ToBase64String(content), categoryId, ct);
+            sw.Stop();
+
+            record.LocalEditPendingUpload = false;
+            await _store.UpdateReportRecordAsync(record, ct);
+
+            await _store.AddUploadAttemptAsync(new UploadAttempt
+            {
+                Id = Guid.NewGuid(),
+                ReportId = item.Id,
+                AttemptNumber = 1,
+                HttpStatus = 200,
+                DurationMs = sw.ElapsedMilliseconds
+            }, ct);
+
+            _logger.Log(
+                Microsoft.Extensions.Logging.LogLevel.Information,
+                "UPLD-EDIT",
+                runId,
+                $"Sent the locally edited definition of '{item.Name}' to Bold Reports (report {item.DestinationItemId}).",
+                itemPath: item.SourcePath,
+                durationMs: sw.ElapsedMilliseconds,
+                outcome: "Success");
+            return true;
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            sw.Stop();
+            await _store.AddUploadAttemptAsync(new UploadAttempt
+            {
+                Id = Guid.NewGuid(),
+                ReportId = item.Id,
+                AttemptNumber = 1,
+                HttpStatus = 500,
+                DurationMs = sw.ElapsedMilliseconds,
+                ErrorCode = ex.Message
+            }, ct);
+
+            // The edit stays pending so the next upload or retry sends it again.
+            _logger.Log(
+                Microsoft.Extensions.Logging.LogLevel.Error,
+                "UPLD-EDIT-FAIL",
+                runId,
+                $"Could not send the locally edited definition of '{item.Name}' to Bold Reports: {ex.Message}",
+                itemPath: item.SourcePath,
+                outcome: "Failure");
+            return false;
+        }
     }
 }
