@@ -175,21 +175,21 @@
           </div>
         </div>
 
-        <!-- Step 4: Migration Pipeline -->
-        <div class="step" id="nav-migration" onclick="switchTab('migration')">
+        <!-- Step 4: Validation & Preview -->
+        <div class="step" id="nav-validation" onclick="switchTab('validation')">
           <b>4</b>
           <div class="step-text">
-            <span class="step-title">Migration Pipeline</span>
-            <small class="step-sub" id="side-step4-sub">4-stage batch upload</small>
+            <span class="step-title">Validation & Preview</span>
+            <small class="step-sub" id="side-step4-sub">Side-by-side & edit</small>
           </div>
         </div>
 
-        <!-- Step 5: Validation & Diff -->
-        <div class="step" id="nav-validation" onclick="switchTab('validation')">
+        <!-- Step 5: Migration Pipeline -->
+        <div class="step" id="nav-migration" onclick="switchTab('migration')">
           <b>5</b>
           <div class="step-text">
-            <span class="step-title">Validation & Diff</span>
-            <small class="step-sub" id="side-step5-sub">Side-by-side compare</small>
+            <span class="step-title">Migration Pipeline</span>
+            <small class="step-sub" id="side-step5-sub">4-stage batch upload</small>
           </div>
         </div>
 
@@ -277,14 +277,14 @@
             <span class="jstep-name">Assessment</span>
           </div>
           <div class="jstep-divider" id="jdiv-3"></div>
-          <div class="journey-step" onclick="switchTab('migration')">
+          <div class="journey-step" onclick="switchTab('validation')">
             <span class="jstep-num">4</span>
-            <span class="jstep-name">Upload</span>
+            <span class="jstep-name">Validate</span>
           </div>
           <div class="jstep-divider" id="jdiv-4"></div>
-          <div class="journey-step" onclick="switchTab('validation')">
+          <div class="journey-step" onclick="switchTab('migration')">
             <span class="jstep-num">5</span>
-            <span class="jstep-name">Validate</span>
+            <span class="jstep-name">Upload</span>
           </div>
           <div class="jstep-divider" id="jdiv-5"></div>
           <div class="journey-step" onclick="switchTab('cutover')">
@@ -473,14 +473,14 @@
             <span class="jstep-name">Assessment</span>
           </div>
           <div class="jstep-divider"></div>
-          <div class="journey-step" onclick="switchTab('migration')">
+          <div class="journey-step" onclick="switchTab('validation')">
             <span class="jstep-num">4</span>
-            <span class="jstep-name">Upload</span>
+            <span class="jstep-name">Validate</span>
           </div>
           <div class="jstep-divider"></div>
-          <div class="journey-step" onclick="switchTab('validation')">
+          <div class="journey-step" onclick="switchTab('migration')">
             <span class="jstep-num">5</span>
-            <span class="jstep-name">Validate</span>
+            <span class="jstep-name">Upload</span>
           </div>
           <div class="jstep-divider"></div>
           <div class="journey-step" onclick="switchTab('cutover')">
@@ -599,14 +599,14 @@
             <span class="jstep-name">Assessment</span>
           </div>
           <div class="jstep-divider"></div>
-          <div class="journey-step" onclick="switchTab('migration')">
+          <div class="journey-step" onclick="switchTab('validation')">
             <span class="jstep-num">4</span>
-            <span class="jstep-name">Upload</span>
+            <span class="jstep-name">Validate</span>
           </div>
           <div class="jstep-divider"></div>
-          <div class="journey-step" onclick="switchTab('validation')">
+          <div class="journey-step" onclick="switchTab('migration')">
             <span class="jstep-num">5</span>
-            <span class="jstep-name">Validate</span>
+            <span class="jstep-name">Upload</span>
           </div>
           <div class="jstep-divider"></div>
           <div class="journey-step" onclick="switchTab('cutover')">
@@ -623,7 +623,7 @@
           </div>
           <div style="display:flex;gap:10px;">
             <button class="btn2" onclick="recheckEstate()">Re-run Assessment</button>
-            <button class="btn" style="background:#059669;" onclick="startMigrationWithSelected()"><span id="btn-dash-migrate-text">Start Migration (0) →</span></button>
+            <button class="btn" style="background:#059669;" onclick="startMigrationWithSelected()"><span id="btn-dash-migrate-text">Proceed to Validation (0) →</span></button>
           </div>
         </div>
 
@@ -709,13 +709,126 @@
           <div class="jnav-info">
             <span id="dash-footer-readiness">Run the assessment to calculate a readiness score.</span>
           </div>
-          <button class="btn" style="background:#059669;" onclick="startMigrationWithSelected()"><span id="btn-dash-footer-migrate">Start Migration Pipeline (0) →</span></button>
+          <button class="btn" style="background:#059669;" onclick="startMigrationWithSelected()"><span id="btn-dash-footer-migrate">Proceed to Validation & Preview (0) →</span></button>
         </div>
       </section>
 
 
       <!-- =====================================================================
-           STEP 4: MIGRATION PIPELINE
+           STEP 4: VALIDATION & PREVIEW
+           ===================================================================== -->
+      <section id="tab-validation" class="tab-pane" style="display:none;">
+        <!-- Top Journey Stepper -->
+        <div class="journey-stepper">
+          <div class="journey-step completed" onclick="switchTab('connections')">
+            <span class="jstep-num">✓</span>
+            <span class="jstep-name">Connect & Discover</span>
+          </div>
+          <div class="jstep-divider completed"></div>
+          <div class="journey-step completed" onclick="switchTab('library')">
+            <span class="jstep-num">✓</span>
+            <span class="jstep-name">Report Library</span>
+          </div>
+          <div class="jstep-divider completed"></div>
+          <div class="journey-step completed" onclick="switchTab('dashboard')">
+            <span class="jstep-num">✓</span>
+            <span class="jstep-name">Assessment</span>
+          </div>
+          <div class="jstep-divider completed"></div>
+          <div class="journey-step active" onclick="switchTab('validation')">
+            <span class="jstep-num">4</span>
+            <span class="jstep-name">Validate</span>
+          </div>
+          <div class="jstep-divider"></div>
+          <div class="journey-step" onclick="switchTab('migration')">
+            <span class="jstep-num">5</span>
+            <span class="jstep-name">Upload</span>
+          </div>
+          <div class="jstep-divider"></div>
+          <div class="journey-step" onclick="switchTab('cutover')">
+            <span class="jstep-num">6</span>
+            <span class="jstep-name">Cutover</span>
+          </div>
+        </div>
+
+        <!-- Header -->
+        <div class="main-header">
+          <div>
+            <h1 id="val-report-title">Step 4: Output Validation & Side-by-Side Diff</h1>
+            <p class="sub">Compare staged SSRS report output against source before uploading to Bold Reports.</p>
+          </div>
+          <div style="display:flex;align-items:center;gap:12px;">
+            <button class="btn" id="btn-run-validation" onclick="runValidationPass()">Run Validation</button>
+            <select id="val-report-selector" style="height:38px;border:1px solid #CBD5E1;border-radius:6px;padding:0 12px;font-weight:600;" onchange="loadReportValidation(this.value)">
+              <!-- Dynamically populated from real reports -->
+            </select>
+            <div class="seg">
+              <button id="seg-staged" onclick="setDiffView('staged')">Staged Reports</button>
+              <button class="sel" id="seg-side-by-side" onclick="setDiffView('side-by-side')">Side by side</button>
+              <button id="seg-rdl-diff" onclick="setDiffView('rdl')">RDL Code Diff</button>
+              <button id="seg-designer" onclick="setDiffView('designer')">Web Report Designer</button>
+              <button id="seg-pixel-diff" onclick="setDiffView('pixel')">Layout</button>
+              <button id="seg-data-diff" onclick="setDiffView('data')">Data diff</button>
+            </div>
+          </div>
+        </div>
+
+        <!-- Selected Report Metadata Bar -->
+        <div class="report-meta-bar" id="val-report-meta-bar">
+          <span>Folder: <code id="val-meta-folder">—</code></span>
+          <span>Size: <strong id="val-meta-size">—</strong></span>
+          <span>Parameters: <strong id="val-meta-params">—</strong></span>
+          <span>Bucket: <span class="pill" id="val-meta-bucket">—</span></span>
+          <span id="val-meta-blocker" style="color:#DC2626;font-weight:600;display:none;"></span>
+        </div>
+
+        <!-- 4 Metric Tiles -->
+        <div class="tiles">
+          <div class="card tile">
+            <div class="n" id="val-data-acc" style="color:#059669;">—</div>
+            <div class="l">Data Accuracy</div>
+          </div>
+          <div class="card tile">
+            <div class="n" id="val-vis-sim" style="color:#2563EB;">—</div>
+            <div class="l">Pages (dest / source)</div>
+          </div>
+          <div class="card tile">
+            <div class="n" id="val-rows-matched">—</div>
+            <div class="l">Rows Matched</div>
+          </div>
+          <div class="card tile">
+            <div class="n" id="val-state" style="font-size:20px;">Not validated</div>
+            <div class="l">Validation State</div>
+          </div>
+        </div>
+
+        <!-- Visual Side-by-Side Comparison Grid -->
+        <div class="grid" id="val-viewport-grid">
+          <!-- Populated by JavaScript -->
+        </div>
+
+        <!-- Foot Actions -->
+        <div class="foot" style="margin-top:10px;">
+          <button class="btn2" onclick="openDesignerSimulation()">Open in Web Report Designer</button>
+          <div style="display:flex;gap:10px;">
+            <button class="btn2" onclick="flagReportReview()">Flag for Review</button>
+            <button class="btn" onclick="approveReportValidation()">Approve Report</button>
+          </div>
+        </div>
+
+        <!-- Journey Navigation Footer -->
+        <div class="journey-nav-bar">
+          <button class="btn2" onclick="switchTab('dashboard')">← Back to Assessment</button>
+          <div class="jnav-info">
+            <span>Validation verification active.</span>
+          </div>
+          <button class="btn" onclick="switchTab('migration')">Proceed to Migration Pipeline →</button>
+        </div>
+      </section>
+
+
+      <!-- =====================================================================
+           STEP 5: MIGRATION PIPELINE
            ===================================================================== -->
       <section id="tab-migration" class="tab-pane" style="display:none;">
         <!-- Top Journey Stepper -->
@@ -735,14 +848,14 @@
             <span class="jstep-name">Assessment</span>
           </div>
           <div class="jstep-divider completed"></div>
-          <div class="journey-step active" onclick="switchTab('migration')">
-            <span class="jstep-num">4</span>
-            <span class="jstep-name">Upload</span>
-          </div>
-          <div class="jstep-divider"></div>
-          <div class="journey-step" onclick="switchTab('validation')">
-            <span class="jstep-num">5</span>
+          <div class="journey-step completed" onclick="switchTab('validation')">
+            <span class="jstep-num">✓</span>
             <span class="jstep-name">Validate</span>
+          </div>
+          <div class="jstep-divider completed"></div>
+          <div class="journey-step active" onclick="switchTab('migration')">
+            <span class="jstep-num">5</span>
+            <span class="jstep-name">Upload</span>
           </div>
           <div class="jstep-divider"></div>
           <div class="journey-step" onclick="switchTab('cutover')">
@@ -754,7 +867,7 @@
         <!-- Header -->
         <div class="main-header">
           <div>
-            <h1>Step 4: Batch Migration Pipeline</h1>
+            <h1>Step 5: Batch Migration Pipeline</h1>
             <p class="sub">Batch extraction and upload to Bold Reports in strict dependency order.</p>
           </div>
           <div style="display:flex;gap:10px;">
@@ -833,124 +946,11 @@
 
         <!-- Journey Navigation Footer -->
         <div class="journey-nav-bar">
-          <button class="btn2" onclick="switchTab('dashboard')">← Back to Assessment</button>
+          <button class="btn2" onclick="switchTab('validation')">← Back to Validation & Preview</button>
           <div class="jnav-info">
             <span id="migration-footer-info">Nothing discovered yet.</span>
           </div>
           <button class="btn" onclick="switchTab('validation')">Proceed to Validation & Diff →</button>
-        </div>
-      </section>
-
-
-      <!-- =====================================================================
-           STEP 5: VALIDATION & DIFF
-           ===================================================================== -->
-      <section id="tab-validation" class="tab-pane" style="display:none;">
-        <!-- Top Journey Stepper -->
-        <div class="journey-stepper">
-          <div class="journey-step completed" onclick="switchTab('connections')">
-            <span class="jstep-num">✓</span>
-            <span class="jstep-name">Connect & Discover</span>
-          </div>
-          <div class="jstep-divider completed"></div>
-          <div class="journey-step completed" onclick="switchTab('library')">
-            <span class="jstep-num">✓</span>
-            <span class="jstep-name">Report Library</span>
-          </div>
-          <div class="jstep-divider completed"></div>
-          <div class="journey-step completed" onclick="switchTab('dashboard')">
-            <span class="jstep-num">✓</span>
-            <span class="jstep-name">Assessment</span>
-          </div>
-          <div class="jstep-divider completed"></div>
-          <div class="journey-step completed" onclick="switchTab('migration')">
-            <span class="jstep-num">✓</span>
-            <span class="jstep-name">Upload</span>
-          </div>
-          <div class="jstep-divider completed"></div>
-          <div class="journey-step active" onclick="switchTab('validation')">
-            <span class="jstep-num">5</span>
-            <span class="jstep-name">Validate</span>
-          </div>
-          <div class="jstep-divider"></div>
-          <div class="journey-step" onclick="switchTab('cutover')">
-            <span class="jstep-num">6</span>
-            <span class="jstep-name">Cutover</span>
-          </div>
-        </div>
-
-        <!-- Header -->
-        <div class="main-header">
-          <div>
-            <h1 id="val-report-title">Step 5: Output Validation & Side-by-Side Diff</h1>
-            <p class="sub">Compare SSRS and Bold Reports output side-by-side with identical parameters.</p>
-          </div>
-          <div style="display:flex;align-items:center;gap:12px;">
-            <button class="btn" id="btn-run-validation" onclick="runValidationPass()">Run Validation</button>
-            <select id="val-report-selector" style="height:38px;border:1px solid #CBD5E1;border-radius:6px;padding:0 12px;font-weight:600;" onchange="loadReportValidation(this.value)">
-              <!-- Dynamically populated from real reports -->
-            </select>
-            <div class="seg">
-              <button id="seg-staged" onclick="setDiffView('staged')">Staged Reports</button>
-              <button class="sel" id="seg-side-by-side" onclick="setDiffView('side-by-side')">Side by side</button>
-              <button id="seg-rdl-diff" onclick="setDiffView('rdl')">RDL Code Diff</button>
-              <button id="seg-designer" onclick="setDiffView('designer')">Web Report Designer</button>
-              <button id="seg-pixel-diff" onclick="setDiffView('pixel')">Layout</button>
-              <button id="seg-data-diff" onclick="setDiffView('data')">Data diff</button>
-            </div>
-          </div>
-        </div>
-
-        <!-- Selected Report Metadata Bar -->
-        <div class="report-meta-bar" id="val-report-meta-bar">
-          <span>Folder: <code id="val-meta-folder">—</code></span>
-          <span>Size: <strong id="val-meta-size">—</strong></span>
-          <span>Parameters: <strong id="val-meta-params">—</strong></span>
-          <span>Bucket: <span class="pill" id="val-meta-bucket">—</span></span>
-          <span id="val-meta-blocker" style="color:#DC2626;font-weight:600;display:none;"></span>
-        </div>
-
-        <!-- 4 Metric Tiles -->
-        <div class="tiles">
-          <div class="card tile">
-            <div class="n" id="val-data-acc" style="color:#059669;">—</div>
-            <div class="l">Data Accuracy</div>
-          </div>
-          <div class="card tile">
-            <div class="n" id="val-vis-sim" style="color:#2563EB;">—</div>
-            <div class="l">Pages (dest / source)</div>
-          </div>
-          <div class="card tile">
-            <div class="n" id="val-rows-matched">—</div>
-            <div class="l">Rows Matched</div>
-          </div>
-          <div class="card tile">
-            <div class="n" id="val-state" style="font-size:20px;">Not validated</div>
-            <div class="l">Validation State</div>
-          </div>
-        </div>
-
-        <!-- Visual Side-by-Side Comparison Grid -->
-        <div class="grid" id="val-viewport-grid">
-          <!-- Populated by JavaScript -->
-        </div>
-
-        <!-- Foot Actions -->
-        <div class="foot" style="margin-top:10px;">
-          <button class="btn2" onclick="openDesignerSimulation()">Open in Web Report Designer</button>
-          <div style="display:flex;gap:10px;">
-            <button class="btn2" onclick="flagReportReview()">Flag for Review</button>
-            <button class="btn" onclick="approveReportValidation()">Approve Report</button>
-          </div>
-        </div>
-
-        <!-- Journey Navigation Footer -->
-        <div class="journey-nav-bar">
-          <button class="btn2" onclick="switchTab('migration')">← Back to Migration Pipeline</button>
-          <div class="jnav-info">
-            <span>Validation verification active.</span>
-          </div>
-          <button class="btn" onclick="switchTab('cutover')">Proceed to Production Cutover →</button>
         </div>
       </section>
 
@@ -976,14 +976,14 @@
             <span class="jstep-name">Assessment</span>
           </div>
           <div class="jstep-divider completed"></div>
-          <div class="journey-step completed" onclick="switchTab('migration')">
-            <span class="jstep-num">✓</span>
-            <span class="jstep-name">Upload</span>
-          </div>
-          <div class="jstep-divider completed"></div>
           <div class="journey-step completed" onclick="switchTab('validation')">
             <span class="jstep-num">✓</span>
             <span class="jstep-name">Validate</span>
+          </div>
+          <div class="jstep-divider completed"></div>
+          <div class="journey-step completed" onclick="switchTab('migration')">
+            <span class="jstep-num">✓</span>
+            <span class="jstep-name">Upload</span>
           </div>
           <div class="jstep-divider completed"></div>
           <div class="journey-step active" onclick="switchTab('cutover')">

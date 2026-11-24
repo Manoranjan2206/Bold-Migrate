@@ -48,7 +48,7 @@ public class ReportRecord
     public string? ExcludedReason { get; set; }
 
     /// <summary>
-    /// When the staged definition was last saved from the local Report Designer (Step 5).
+    /// When the staged definition was last saved from the local Report Designer (Step 4).
     /// A locally edited report is never re-staged from the source server.
     /// </summary>
     [JsonPropertyName("localEditUtc")]

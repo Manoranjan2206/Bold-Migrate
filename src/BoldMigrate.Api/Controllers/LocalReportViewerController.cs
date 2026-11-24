@@ -8,7 +8,7 @@ using Microsoft.Extensions.Caching.Memory;
 namespace BoldMigrate.Api.Controllers;
 
 /// <summary>
-/// Report Viewer service for Step 5. Renders a migration run's staged reports straight from
+/// Report Viewer service for Step 4. Renders a migration run's staged reports straight from
 /// local staging (<c>/api/preview/runs/{runId}/...</c>), so they can be previewed before upload. Data source
 /// credentials come from Step 1; when none were given, the viewer prompts at run time.
 /// </summary>
@@ -84,5 +84,5 @@ public class LocalReportViewerController : ControllerBase, IReportController, IR
     }
 
     private NotFoundObjectResult RunNotFound() =>
-        NotFound(new { message = "Unknown or missing runId. Open the viewer from Step 5 of an active migration run." });
+        NotFound(new { message = "Unknown or missing runId. Open the viewer from Step 4 of an active migration run." });
 }

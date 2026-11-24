@@ -287,10 +287,10 @@ public class MigrationOrchestrator : BackgroundService, IMigrationOrchestrator
 
         var run = await store.GetRunAsync(runId, ct) ?? throw new KeyNotFoundException("Run not found.");
         run.Status = RunStatus.Uploading;
-        run.CurrentStep = 4;
+        run.CurrentStep = 5;
         await store.UpdateRunAsync(run, ct);
 
-        logger.Log(LogLevel.Information, "UPLD-STAGE", runId, "Starting 4-stage upload to Bold Reports Server.", step: 4);
+        logger.Log(LogLevel.Information, "UPLD-STAGE", runId, "Starting 4-stage upload to Bold Reports Server.", step: 5);
 
         var destUrl = !string.IsNullOrEmpty(run.DestinationServerUrl) ? run.DestinationServerUrl : run.SourceServerUrl;
         var token = _credStore.GetDestinationToken();
@@ -310,36 +310,30 @@ public class MigrationOrchestrator : BackgroundService, IMigrationOrchestrator
 
         var run = await store.GetRunAsync(runId, ct) ?? throw new KeyNotFoundException("Run not found.");
         run.Status = RunStatus.Validating;
-        run.CurrentStep = 5;
+        run.CurrentStep = 4;
         await store.UpdateRunAsync(run, ct);
 
-        logger.Log(LogLevel.Information, "VALD-START", runId, "Starting verification pass on both servers.", step: 5);
+        logger.Log(LogLevel.Information, "VALD-START", runId, "Starting verification pass on staged reports and SSRS source.", step: 4);
 
         var cred = _credStore.GetSourceCredential(runId.ToString());
         var adapter = SourceAdapterFactory.Create(run.SourceServerUrl, run.SourceApi, cred);
         var reports = await store.GetCatalogItemsAsync(runId, ItemType.Report, ct);
 
-        // Validation renders each report on the destination too, so it needs an authenticated
-        // Bold Reports client. Without a token there is nothing to compare against.
         var destToken = _credStore.GetDestinationToken();
         DestinationClient? destClient = null;
         if (!string.IsNullOrEmpty(run.DestinationServerUrl) && !string.IsNullOrEmpty(destToken))
         {
             destClient = new DestinationClient(run.DestinationServerUrl, destToken);
         }
-        else
-        {
-            logger.Log(LogLevel.Warning, "VALD-NO-DEST", runId,
-                "No authenticated Bold Reports connection available. Reports will be flagged for manual "
-                + "review instead of validated. Re-connect the destination server in Step 1.", step: 5);
-        }
+
+        var stagedRenderer = scope.ServiceProvider.GetService<IStagedReportRenderer>();
 
         foreach (var r in reports)
         {
             var record = await store.GetReportRecordAsync(r.Id, ct);
             if (record == null || record.State == ReportState.Blocked || record.State == ReportState.Excluded) continue;
 
-            await validation.ValidateReportAsync(runId, r, record, adapter, destClient, ct);
+            await validation.ValidateReportAsync(runId, r, record, adapter, destClient, stagedRenderer, ct);
         }
 
         run.Status = RunStatus.Validated;

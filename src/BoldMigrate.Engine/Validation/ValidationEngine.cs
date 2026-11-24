@@ -4,6 +4,7 @@ using BoldMigrate.Core.Configuration;
 using BoldMigrate.Core.Enums;
 using BoldMigrate.Core.Interfaces;
 using BoldMigrate.Core.Models;
+using BoldMigrate.Core.StateMachine;
 using BoldMigrate.Engine.Logging;
 
 namespace BoldMigrate.Engine.Validation;
@@ -14,18 +15,21 @@ public class ValidationEngine
     private readonly IStagingStore _staging;
     private readonly MigrationLogger _logger;
     private readonly MigrationSettings _settings;
+    private readonly IStagedReportRenderer? _stagedRenderer;
     private bool _calibrated;
 
     public ValidationEngine(
         IMigrationStore store,
         IStagingStore staging,
         MigrationLogger logger,
-        MigrationSettings? settings = null)
+        MigrationSettings? settings = null,
+        IStagedReportRenderer? stagedRenderer = null)
     {
         _store = store;
         _staging = staging;
         _logger = logger;
         _settings = settings ?? new MigrationSettings();
+        _stagedRenderer = stagedRenderer;
     }
 
     public static string ComputeParameterSetHash(IDictionary<string, string> parameters)
@@ -55,28 +59,56 @@ public class ValidationEngine
         return Task.FromResult(true);
     }
 
+    public Task ValidateReportAsync(
+        Guid runId,
+        CatalogItem reportItem,
+        ReportRecord reportRecord,
+        ISourceCatalog source,
+        BoldMigrate.Engine.Upload.DestinationClient? destination,
+        CancellationToken ct) =>
+        ValidateReportAsync(runId, reportItem, reportRecord, source, destination, stagedRendererOverride: null, ct);
+
     public async Task ValidateReportAsync(
         Guid runId,
         CatalogItem reportItem,
         ReportRecord reportRecord,
         ISourceCatalog source,
         BoldMigrate.Engine.Upload.DestinationClient? destination = null,
+        IStagedReportRenderer? stagedRendererOverride = null,
         CancellationToken ct = default)
     {
-        // Enforce that report must actually have been uploaded to destination
-        if (string.IsNullOrEmpty(reportItem.DestinationItemId) ||
-            reportItem.DestinationItemId.StartsWith("dest-") ||
-            reportItem.DestinationItemId.StartsWith("rep-"))
+        // Step 4 Validation: verify report is staged locally or exists on destination
+        var stagedExists = !string.IsNullOrEmpty(reportItem.StagedFilePath) && File.Exists(reportItem.StagedFilePath);
+        if (!stagedExists)
         {
-            reportRecord.State = ReportState.UploadFailed;
+            var fallbackPath = Path.Combine(_staging.GetRunStagingPath(runId), reportItem.SourcePath.TrimStart('/').Replace('/', Path.DirectorySeparatorChar));
+            if (!fallbackPath.EndsWith(".rdl", StringComparison.OrdinalIgnoreCase))
+            {
+                fallbackPath += ".rdl";
+            }
+            if (File.Exists(fallbackPath))
+            {
+                reportItem.StagedFilePath = fallbackPath;
+                stagedExists = true;
+            }
+        }
+
+        var destinationUploaded = destination != null &&
+            !string.IsNullOrEmpty(reportItem.DestinationItemId) &&
+            !reportItem.DestinationItemId.StartsWith("dest-") &&
+            !reportItem.DestinationItemId.StartsWith("rep-");
+
+        if (!stagedExists && !destinationUploaded)
+        {
+            reportRecord.State = ReportState.AwaitingReview;
             await _store.UpdateReportRecordAsync(reportRecord, ct);
             _logger.Log(
                 Microsoft.Extensions.Logging.LogLevel.Warning,
-                "VALD-NO-UPLOAD",
+                "VALD-NO-STAGED-FILE",
                 runId,
-                $"Cannot validate '{reportItem.Name}' because it has not been uploaded to Bold Reports Server yet.",
+                $"Cannot validate '{reportItem.Name}' because its staged definition file is missing. Complete Step 2 discovery/staging first.",
                 itemPath: reportItem.SourcePath,
-                outcome: "UploadRequired");
+                outcome: "StagedFileMissing");
             return;
         }
 
@@ -88,9 +120,7 @@ public class ValidationEngine
         var paramDict = new Dictionary<string, string>();
         var paramHash = ComputeParameterSetHash(paramDict);
 
-        // Render the report on BOTH servers with the same parameter set. The destination
-        // render must come from Bold Reports itself — comparing the source against itself
-        // would make every report pass regardless of whether the migration actually worked.
+        // Render the report on SSRS source
         byte[] sourceBytes;
         try
         {
@@ -111,30 +141,41 @@ public class ValidationEngine
             return;
         }
 
-        if (destination == null)
+        // Render staged report locally via IStagedReportRenderer (Step 4 pre-upload) or Bold Reports destination (Step 5 post-upload)
+        byte[]? destBytes = null;
+        var renderer = stagedRendererOverride ?? _stagedRenderer;
+
+        if (renderer != null && !string.IsNullOrEmpty(reportItem.StagedFilePath) && File.Exists(reportItem.StagedFilePath))
         {
-            reportRecord.State = ReportState.AwaitingReview;
-            await _store.UpdateReportRecordAsync(reportRecord, ct);
-            _logger.Log(
-                Microsoft.Extensions.Logging.LogLevel.Warning,
-                "VALD-NO-DEST-CLIENT",
-                runId,
-                $"Cannot validate '{reportItem.Name}': no authenticated Bold Reports connection is available to render the destination copy. Re-connect the destination server and re-run validation.",
-                itemPath: reportItem.SourcePath,
-                outcome: "DestinationUnavailable");
-            return;
+            try
+            {
+                destBytes = await renderer.RenderStagedReportAsync(runId, reportItem.SourcePath, "CSV", paramDict, ct);
+            }
+            catch (Exception ex)
+            {
+                _logger.Log(
+                    Microsoft.Extensions.Logging.LogLevel.Warning,
+                    "VALD-STAGED-RENDER-ERR",
+                    runId,
+                    $"Local render of staged report '{reportItem.Name}' encountered error: {ex.Message}. Falling back to destination if available.",
+                    itemPath: reportItem.SourcePath,
+                    outcome: "StagedRenderError");
+            }
         }
 
-        var destBytes = await destination.ExportReportAsync(
-            destination.GetTenantId(),
-            reportItem.DestinationItemId,
-            "CSV",
-            paramDict,
-            ct);
-
-        if (destBytes == null)
+        if ((destBytes == null || destBytes.Length == 0) && destinationUploaded)
         {
-            // Fail closed: an unrenderable destination copy is a validation failure,
+            destBytes = await destination!.ExportReportAsync(
+                destination.GetTenantId(),
+                reportItem.DestinationItemId!,
+                "CSV",
+                paramDict,
+                ct);
+        }
+
+        if (destBytes == null || destBytes.Length == 0)
+        {
+            // Fail closed: an unrenderable report copy is routed to review queue,
             // never an automatic pass.
             reportRecord.State = ReportState.AwaitingReview;
             await _store.UpdateReportRecordAsync(reportRecord, ct);
@@ -142,7 +183,7 @@ public class ValidationEngine
                 Microsoft.Extensions.Logging.LogLevel.Warning,
                 "VALD-NO-DEST-RENDER",
                 runId,
-                $"Report '{reportItem.Name}' uploaded but Bold Reports could not render it for comparison. Flagged for manual review — not auto-passed.",
+                $"Report '{reportItem.Name}' staged but could not be rendered for comparison. Flagged for manual review — not auto-passed.",
                 itemPath: reportItem.SourcePath,
                 outcome: "DestinationRenderFailed");
             return;
@@ -154,8 +195,7 @@ public class ValidationEngine
         var dataComp = DataComparer.CompareCsvData(sourceCsv, destCsv, _settings.ValidationSampleRowLimit);
 
         // Layout is checked by rendering to PDF on both servers and comparing pagination.
-        // No pixel percentage is produced — see PdfStructureComparer for why that would be fiction.
-        var render = await CompareRendersAsync(reportItem, source, destination, paramDict, ct);
+        var render = await CompareRendersAsync(runId, reportItem, source, destination, renderer, paramDict, ct);
 
         var result = new ValidationResult
         {
@@ -239,9 +279,11 @@ public class ValidationEngine
     /// neither render could be obtained.
     /// </summary>
     private async Task<RenderComparisonResult?> CompareRendersAsync(
+        Guid runId,
         CatalogItem reportItem,
         ISourceCatalog source,
-        BoldMigrate.Engine.Upload.DestinationClient destination,
+        BoldMigrate.Engine.Upload.DestinationClient? destination,
+        IStagedReportRenderer? renderer,
         IDictionary<string, string> paramDict,
         CancellationToken ct)
     {
@@ -255,8 +297,28 @@ public class ValidationEngine
             // Leave null; the comparison reports which side was missing.
         }
 
-        var destPdf = await destination.ExportReportAsync(
-            destination.GetTenantId(), reportItem.DestinationItemId, "PDF", paramDict, ct);
+        byte[]? destPdf = null;
+        if (renderer != null && !string.IsNullOrEmpty(reportItem.StagedFilePath) && File.Exists(reportItem.StagedFilePath))
+        {
+            try
+            {
+                destPdf = await renderer.RenderStagedReportAsync(runId, reportItem.SourcePath, "PDF", paramDict, ct);
+            }
+            catch
+            {
+                // Fall back to destination
+            }
+        }
+
+        if ((destPdf == null || destPdf.Length == 0) &&
+            destination != null &&
+            !string.IsNullOrEmpty(reportItem.DestinationItemId) &&
+            !reportItem.DestinationItemId.StartsWith("dest-") &&
+            !reportItem.DestinationItemId.StartsWith("rep-"))
+        {
+            destPdf = await destination.ExportReportAsync(
+                destination.GetTenantId(), reportItem.DestinationItemId, "PDF", paramDict, ct);
+        }
 
         if ((sourcePdf == null || sourcePdf.Length == 0) && (destPdf == null || destPdf.Length == 0))
         {

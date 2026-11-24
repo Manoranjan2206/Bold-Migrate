@@ -74,7 +74,7 @@ public class DeltaSyncEngine
                     (await _store.GetReportRecordAsync(stored.Id, ct))?.LocalEditUtc != null)
                 {
                     _logger.Log(Microsoft.Extensions.Logging.LogLevel.Warning, "CUT-DELTA-EDIT", runId,
-                        $"'{stored.Name}' changed on the source server but was edited locally in Step 5. "
+                        $"'{stored.Name}' changed on the source server but was edited locally in Step 4. "
                         + "The local edit was kept; merge the source change manually if it is needed.",
                         itemPath: stored.SourcePath);
                     continue;

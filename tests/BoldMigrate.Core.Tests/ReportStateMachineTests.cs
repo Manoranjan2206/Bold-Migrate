@@ -12,7 +12,9 @@ public class ReportStateMachineTests
     [InlineData(ReportState.Staged, ReportState.Analysed)]
     [InlineData(ReportState.Analysed, ReportState.Blocked)]
     [InlineData(ReportState.Analysed, ReportState.Queued)]
+    [InlineData(ReportState.Analysed, ReportState.Validating)]
     [InlineData(ReportState.Analysed, ReportState.Excluded)]
+    [InlineData(ReportState.Queued, ReportState.Validating)]
     [InlineData(ReportState.Queued, ReportState.Uploading)]
     [InlineData(ReportState.Uploading, ReportState.Uploaded)]
     [InlineData(ReportState.Uploading, ReportState.UploadFailed)]
@@ -21,9 +23,17 @@ public class ReportStateMachineTests
     [InlineData(ReportState.Validating, ReportState.AutoPassed)]
     [InlineData(ReportState.Validating, ReportState.AwaitingReview)]
     [InlineData(ReportState.Validating, ReportState.ValidationFailed)]
+    [InlineData(ReportState.ValidationFailed, ReportState.Validating)]
+    [InlineData(ReportState.ValidationFailed, ReportState.AwaitingReview)]
     [InlineData(ReportState.AwaitingReview, ReportState.Approved)]
     [InlineData(ReportState.AwaitingReview, ReportState.Flagged)]
     [InlineData(ReportState.Flagged, ReportState.Validating)]
+    [InlineData(ReportState.Flagged, ReportState.AwaitingReview)]
+    [InlineData(ReportState.AutoPassed, ReportState.Approved)]
+    [InlineData(ReportState.AutoPassed, ReportState.Queued)]
+    [InlineData(ReportState.AutoPassed, ReportState.Uploading)]
+    [InlineData(ReportState.Approved, ReportState.Queued)]
+    [InlineData(ReportState.Approved, ReportState.Uploading)]
     public void CanTransition_LegalTransitions_ReturnTrue(ReportState from, ReportState to)
     {
         Assert.True(ReportStateMachine.CanTransition(from, to));
@@ -33,7 +43,7 @@ public class ReportStateMachineTests
     [InlineData(ReportState.Discovered, ReportState.Uploaded)]
     [InlineData(ReportState.Discovered, ReportState.AutoPassed)]
     [InlineData(ReportState.Uploading, ReportState.Approved)]
-    [InlineData(ReportState.AutoPassed, ReportState.Uploading)]
+    [InlineData(ReportState.ValidationFailed, ReportState.Uploading)]
     [InlineData(ReportState.Approved, ReportState.Discovered)]
     public void CanTransition_IllegalTransitions_ReturnFalse(ReportState from, ReportState to)
     {

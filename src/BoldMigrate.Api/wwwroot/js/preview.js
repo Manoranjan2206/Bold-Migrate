@@ -1,4 +1,4 @@
-// Step 5: local preview & edit of staged reports.
+// Step 4: local preview & edit of staged reports.
 //
 // Every converted report is served from local staging by the Bold Migrate server itself
 // (api/preview/viewer, api/preview/designer), so it can be viewed and edited before it is
@@ -191,7 +191,7 @@ const Preview = {
           </div>
         </div>
         ${isDesigner ? `<div style="background:#FEF3C7;color:#92400E;font-size:12.5px;padding:6px 16px;">
-          Save writes the report back into staging. It is sent to Bold Reports on the next upload (Step 4) — SSRS is not contacted again.</div>` : ""}
+          Save writes the report back into staging. It is sent to Bold Reports on the next upload (Step 5) — SSRS is not contacted again.</div>` : ""}
         <div id="preview-widget" style="flex:1;width:100%;min-height:680px;"></div>
       </div>`;
 
