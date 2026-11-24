@@ -108,8 +108,8 @@ Stages in detail:
 2. **Fetch (discover)** — `/fetch` lists folders, data sources, datasets and reports into `CatalogItems` and stages RDL/RSDS/RSD files in the staging store.
 3. **Check (transform)** — `/check` runs `TransformEngine` with rules loaded by `CompatibilityRulesLoader`. Each report gets a bucket (Clean, AutoFixed, NeedsReview, Blocked, Excluded) and a list of transform actions.
 4. **Library** — the user filters the catalog and selects reports (`/select-reports`). Blocked and excluded reports are not uploaded.
-5. **Upload** — `/upload` runs `UploadLayer` in four stages: Folders (categories), DataSources, DataSets, Reports. Uploads use an idempotency key per item, retry with attempts recorded, and treat a 409 as "already exists". The run can be paused/resumed in the UI and failed items retried (`/retry`).
-6. **Validate** — `/validate` runs `ValidationEngine`: font calibration, pixel comparison, PDF structure comparison and data comparison. Results show side by side in the Validation tab. Reviewers approve or flag (`/approve`, `/flag`, `/bulk-approve`).
+5. **Validate** — `/validate` runs `ValidationEngine`: validates staged reports locally using `IStagedReportRenderer` compared against SSRS source render (and destination if already uploaded). Results show side by side in the Validation tab. Reviewers preview, edit in local designer, and approve or flag (`/approve`, `/flag`, `/bulk-approve`).
+6. **Upload** — `/upload` runs `UploadLayer` in four stages: Folders (categories), DataSources, DataSets, Reports. In Stage 4, report uploads are gated so only validated and approved reports proceed to Bold Reports Server. Uploads use an idempotency key per item, retry with attempts recorded, and treat a 409 as "already exists". The run can be paused/resumed in the UI and failed items retried (`/retry`).
 7. **Cutover** — `GET /cutover` evaluates the gates; `POST /cutover` completes it. `UrlShimMiddleware` maps old SSRS URLs to the Bold Reports URLs recorded in `UrlMapping`. A PDF report and a support bundle are downloadable from `DiagnosticsController`.
 
 `/delta-sync` re-scans the source and uploads only items that changed. `/abandon` closes a run.
@@ -124,10 +124,10 @@ stateDiagram-v2
     Draft --> Connected
     Connected --> Discovered
     Discovered --> Analysed
-    Analysed --> Uploading
-    Uploading --> Uploaded
-    Uploaded --> Validating
+    Analysed --> Validating
     Validating --> Validated
+    Validated --> Uploading
+    Uploading --> Uploaded
     Validated --> CutOver
     Draft --> Abandoned
     Connected --> Abandoned
@@ -149,17 +149,19 @@ stateDiagram-v2
     Analysed --> Blocked
     Analysed --> Excluded
     Analysed --> Queued
-    Queued --> Uploading
-    Uploading --> Uploaded
-    Uploading --> UploadFailed
-    UploadFailed --> Queued: retry
-    Uploaded --> Validating
+    Analysed --> Validating
+    Queued --> Validating
     Validating --> AutoPassed
     Validating --> AwaitingReview
     Validating --> ValidationFailed
     AwaitingReview --> Approved
     AwaitingReview --> Flagged
     AutoPassed --> Approved
+    AutoPassed --> Uploading
+    Approved --> Uploading
+    Uploading --> Uploaded
+    Uploading --> UploadFailed
+    UploadFailed --> Queued: retry
 ```
 
 This diagram shows the intended main path. The authoritative transition table is in `ReportStateMachine.cs`.

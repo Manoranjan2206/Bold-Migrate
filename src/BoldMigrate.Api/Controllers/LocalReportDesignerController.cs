@@ -10,7 +10,7 @@ using Microsoft.Extensions.Caching.Memory;
 namespace BoldMigrate.Api.Controllers;
 
 /// <summary>
-/// Report Designer service for Step 5. Opens a migration run's staged reports (<c>/api/preview/runs/{runId}/...</c>)
+/// Report Designer service for Step 4. Opens a migration run's staged reports (<c>/api/preview/runs/{runId}/...</c>)
 /// for editing; Save writes the report back into staging and marks it for the next upload.
 /// </summary>
 [Route("api/preview/runs/{runId:guid}/designer/[action]")]
@@ -183,5 +183,5 @@ public class LocalReportDesignerController : ControllerBase, IReportDesignerCont
     }
 
     private NotFoundObjectResult RunNotFound() =>
-        NotFound(new { message = "Unknown or missing runId. Open the designer from Step 5 of an active migration run." });
+        NotFound(new { message = "Unknown or missing runId. Open the designer from Step 4 of an active migration run." });
 }

@@ -84,7 +84,7 @@ function switchTab(tabName) {
 }
 
 function updateStepperProgression(activeTab) {
-  const stepOrder = ["connections", "library", "dashboard", "migration", "validation", "cutover"];
+  const stepOrder = ["connections", "library", "dashboard", "validation", "migration", "cutover"];
   const activeIdx = stepOrder.indexOf(activeTab);
 
   document.querySelectorAll(".journey-stepper").forEach(stepper => {
@@ -241,7 +241,7 @@ function renderDataSourcesTable() {
   `).join("");
 }
 
-// Credentials stay in server memory for this session. The local Step 5 viewer/designer use
+// Credentials stay in server memory for this session. The local Step 4 viewer/designer use
 // them; data sources without credentials prompt for them when a report runs.
 async function saveDataSourceCredentials(dsId) {
   if (!currentRun) return;
@@ -806,14 +806,14 @@ async function startMigrationWithSelected() {
     return;
   }
 
-  showToast(`Saving selection of ${selectedReportIds.size} reports and initiating upload pipeline...`);
+  showToast(`Saving selection of ${selectedReportIds.size} reports and navigating to validation & preview...`);
 
   try {
     await Api.selectReports(currentRun.id, Array.from(selectedReportIds));
-    switchTab("migration");
-    await startBatchUpload();
+    switchTab("validation");
+    await initValidationTab();
   } catch (err) {
-    showToast("Migration start error: " + err.message);
+    showToast("Validation navigation error: " + err.message);
   }
 }
 
@@ -958,7 +958,7 @@ async function recheckEstate() {
 }
 
 // -----------------------------------------------------------------------------
-// Step 4: Migration Pipeline
+// Step 5: Migration Pipeline
 // -----------------------------------------------------------------------------
 async function refreshMigrationState(knownPoll) {
   if (!currentRun) return;
@@ -1101,7 +1101,7 @@ function clearLiveLogViewer() {
 }
 
 // -----------------------------------------------------------------------------
-// Step 5: Validation & Diff
+// Step 4: Validation & Diff
 // -----------------------------------------------------------------------------
 function selectReportForValidation(reportId) {
   selectedValidationReportId = reportId;
@@ -1161,7 +1161,7 @@ async function loadReportValidation(reportId) {
   const report = reportsCache.find(r => r.id === reportId) || reportsCache[0];
   if (!report) return;
 
-  document.getElementById("val-report-title").innerText = `Step 5: Output Validation — ${report.name}`;
+  document.getElementById("val-report-title").innerText = `Step 4: Output Validation — ${report.name}`;
 
   // Update metadata bar
   document.getElementById("val-meta-folder").innerText = report.folder;
@@ -1649,7 +1649,7 @@ async function refreshCutoverState() {
     if (btnCutover) {
       btnCutover.disabled = !(gatesRes && gatesRes.ready);
       btnCutover.style.opacity = gatesRes && gatesRes.ready ? "1" : "0.55";
-      btnCutover.title = gatesRes && gatesRes.ready ? "Confirm production cutover" : "Upload reports in Step 4 before cutover";
+      btnCutover.title = gatesRes && gatesRes.ready ? "Confirm production cutover" : "Upload reports in Step 5 before cutover";
     }
   } catch { }
 }
@@ -1658,7 +1658,7 @@ async function handleConfirmCutover() {
   if (!currentRun) return;
   const gatesRes = await Api.getCutoverGates(currentRun.id);
   if (!gatesRes || !gatesRes.ready) {
-    alert("⚠️ Cutover Blocked:\n\nNo reports have been uploaded to Bold Reports Server yet.\n\nPlease connect to Bold Reports in Step 1 and execute Step 4: Upload Pipeline first.");
+    alert("⚠️ Cutover Blocked:\n\nNo reports have been uploaded to Bold Reports Server yet.\n\nPlease connect to Bold Reports in Step 1 and execute Step 5: Upload Pipeline first.");
     return;
   }
 
@@ -1937,8 +1937,21 @@ function updateJourneyBadges(poll) {
   }
 
   const step4Sub = document.getElementById("side-step4-sub");
-  if (step4Sub && poll.reportsUploaded > 0) {
-    step4Sub.innerText = `${poll.reportsUploaded}/${poll.reportsTotal} uploaded`;
+  if (step4Sub) {
+    if (poll.reportsValidated > 0) {
+      step4Sub.innerText = `${poll.reportsValidated}/${poll.reportsTotal || 0} validated`;
+    } else {
+      step4Sub.innerText = "Side-by-side & edit";
+    }
+  }
+
+  const step5Sub = document.getElementById("side-step5-sub");
+  if (step5Sub) {
+    if (poll.reportsUploaded > 0) {
+      step5Sub.innerText = `${poll.reportsUploaded}/${poll.reportsTotal || 0} uploaded`;
+    } else {
+      step5Sub.innerText = "4-stage batch upload";
+    }
   }
 }
 

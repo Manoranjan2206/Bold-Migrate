@@ -628,7 +628,7 @@ public class MigrationController : ControllerBase
                 passed = actuallyUploaded > 0,
                 detail = actuallyUploaded > 0
                     ? $"{actuallyUploaded} of {catalogReports.Count} reports uploaded to Bold Reports"
-                    : "0 reports uploaded. Complete Step 4 (Upload Pipeline) with valid Bold Reports credentials first."
+                    : "0 reports uploaded. Complete Step 5 (Upload Pipeline) with valid Bold Reports credentials first."
             },
             new
             {
@@ -695,7 +695,7 @@ public class MigrationController : ControllerBase
             return BadRequest(new
             {
                 success = false,
-                message = "Cannot cutover: 0 reports have been uploaded to Bold Reports. Connect to Bold Reports in Step 1 and execute Step 4: Upload Pipeline first."
+                message = "Cannot cutover: 0 reports have been uploaded to Bold Reports. Connect to Bold Reports in Step 1 and execute Step 5: Upload Pipeline first."
             });
         }
 
@@ -727,7 +727,8 @@ public class MigrationController : ControllerBase
             datasourcesCount = items.Count(i => i.ItemType == ItemType.DataSource),
             datasetsCount = items.Count(i => i.ItemType == ItemType.DataSet),
             reportsTotal = reports.Count,
-            reportsUploaded = reports.Count(r => r.State is ReportState.Uploaded or ReportState.AutoPassed or ReportState.Approved or ReportState.AwaitingReview or ReportState.Validating),
+            reportsUploaded = reports.Count(r => r.State == ReportState.Uploaded),
+            reportsValidated = reports.Count(r => r.State is ReportState.AutoPassed or ReportState.Approved or ReportState.AwaitingReview or ReportState.ValidationFailed or ReportState.Flagged or ReportState.Uploaded),
             reportsAutoPassed = reports.Count(r => r.State == ReportState.AutoPassed),
             reportsAwaitingReview = reports.Count(r => r.State == ReportState.AwaitingReview),
             reportsApproved = reports.Count(r => r.State == ReportState.Approved),
@@ -766,7 +767,7 @@ public class MigrationController : ControllerBase
     }
 
     /// <summary>
-    /// Step 5: every staged report with the shared data sources and datasets it uses, as they
+    /// Step 4: every staged report with the shared data sources and datasets it uses, as they
     /// resolve inside the staged SSRS folder tree. Drives the local Viewer / Designer list.
     /// </summary>
     [HttpGet("runs/{id:guid}/preview/reports")]
@@ -966,7 +967,7 @@ public class MigrationController : ControllerBase
                     section = g.Key,
                     totalReports = g.Count(),
                     uploadedReports = Math.Max(remoteInSec, g.Count(r => !string.IsNullOrEmpty(r.DestinationItemId) ||
-                        (records.TryGetValue(r.Id, out var rec) && rec.State is ReportState.Uploaded or ReportState.AutoPassed or ReportState.Approved or ReportState.AwaitingReview))),
+                        (records.TryGetValue(r.Id, out var rec) && rec.State == ReportState.Uploaded))),
                     remoteLiveCount = remoteInSec,
                     reports = g.Select(r => new
                     {

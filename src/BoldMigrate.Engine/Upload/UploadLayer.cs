@@ -1,3 +1,4 @@
+using BoldMigrate.Core.StateMachine;
 using System.Net;
 using System.Net.Http.Headers;
 using System.Security.Cryptography;
@@ -879,6 +880,9 @@ public class UploadLayer
         _logger = logger;
     }
 
+    public static bool IsEligibleForUpload(ReportState state) =>
+        state is ReportState.AutoPassed or ReportState.Approved or ReportState.Queued or ReportState.Uploaded;
+
     public static string ComputeIdempotencyKey(Guid runId, ItemType itemType, string sourcePath)
     {
         var input = $"{runId}|{itemType}|{sourcePath}";
@@ -936,9 +940,22 @@ public class UploadLayer
                 continue; // Skip blocked or excluded reports
             }
 
+            // Gating: in Step 5 (Upload Pipeline), only upload reports that are validated or approved
+            if (record != null && !IsEligibleForUpload(record.State))
+            {
+                _logger.Log(
+                    Microsoft.Extensions.Logging.LogLevel.Information,
+                    "UPLD-GATE-SKIP",
+                    runId,
+                    $"Skipping report '{report.Name}' (state: {record.State}): reports must be validated or approved in Step 4 before upload to Bold Reports.",
+                    itemPath: report.SourcePath,
+                    outcome: "SkippedNotValidated");
+                continue;
+            }
+
             if (record != null)
             {
-                record.State = ReportState.Uploading;
+                ReportStateMachine.Transition(record, ReportState.Uploading);
                 await _store.UpdateReportRecordAsync(record, ct);
             }
 
@@ -948,7 +965,7 @@ public class UploadLayer
                 uploadedCount++;
                 if (record != null)
                 {
-                    record.State = ReportState.Uploaded;
+                    ReportStateMachine.Transition(record, ReportState.Uploaded);
                     await _store.UpdateReportRecordAsync(record, ct);
                 }
             }
@@ -956,7 +973,7 @@ public class UploadLayer
             {
                 if (record != null)
                 {
-                    record.State = ReportState.UploadFailed;
+                    ReportStateMachine.Transition(record, ReportState.UploadFailed);
                     await _store.UpdateReportRecordAsync(record, ct);
                 }
             }

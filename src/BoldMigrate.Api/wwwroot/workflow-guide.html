@@ -745,10 +745,53 @@ POST /api/migration/runs
       </div>
 
       <!-- Step 4 -->
-      <div class="step-card">
+      <div class="step-card" id="designer">
         <div class="step-header">
           <div class="step-num-title">
             <div class="step-badge">4</div>
+            <div>
+              <div class="step-title-text">Automated Validation &amp; Official Web Report Designer</div>
+              <div class="step-sub-text">Data Parity, Pixel Diff &amp; Live In-Browser Report Designer</div>
+            </div>
+          </div>
+          <div class="step-chips">
+            <span class="step-chip">Data Parity Check</span>
+            <span class="step-chip">XML Diff Viewer</span>
+            <span class="step-chip">Embedded Designer</span>
+            <span class="step-chip">Sign-off Workflow</span>
+          </div>
+        </div>
+        <div class="step-content-grid">
+          <div class="step-desc">
+            <p>
+              Validates migrated reports using multi-tier comparative analysis and provides four specialized review tools:
+            </p>
+            <ul class="feature-list">
+              <li><strong>Automated Data Parity:</strong> Compares row counts, column structures, and cell value fingerprints between SSRS and Bold Reports.</li>
+              <li><strong>XML Diff Viewer:</strong> Side-by-side view showing original SSRS RDL vs transformed Bold Reports RDL with line-by-line additions and modifications highlighted.</li>
+              <li><strong>Visual Comparison:</strong> Pixel-by-pixel rendering diff detecting layout shifts, margin inconsistencies, and font discrepancies.</li>
+              <li><strong>Official Bold Reports Web Report Designer (Server-Integrated):</strong>
+                Full visual report designer embedded directly in the application using official Syncfusion CDN scripts. Connects via live OAuth2 token to open, preview, edit, and save reports directly back to Bold Reports Server!
+              </li>
+            </ul>
+          </div>
+          <div class="step-side-card">
+            <h4>Designer Integration Config</h4>
+            <div class="code-box">
+serviceUrl: "/reporting/reportservice/api/Designer"
+reportServerUrl: "/reporting/api/site/{tenant}"
+serviceAuthorizationToken: "bearer &lt;token&gt;"
+reportPath: "/Finance/QuarterlyRevenue"
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Step 5 -->
+      <div class="step-card">
+        <div class="step-header">
+          <div class="step-num-title">
+            <div class="step-badge">5</div>
             <div>
               <div class="step-title-text">Batch Upload &amp; Live Execution Engine</div>
               <div class="step-sub-text">Streaming Progress, Live Logging &amp; Bulk Destination Cleanup</div>
@@ -788,49 +831,6 @@ POST /api/migration/runs/{id}/delete-destination
   "deleteAll": true,
   "deleteCategories": true
 }
-            </div>
-          </div>
-        </div>
-      </div>
-
-      <!-- Step 5 -->
-      <div class="step-card" id="designer">
-        <div class="step-header">
-          <div class="step-num-title">
-            <div class="step-badge">5</div>
-            <div>
-              <div class="step-title-text">Automated Validation &amp; Official Web Report Designer</div>
-              <div class="step-sub-text">Data Parity, Pixel Diff &amp; Live In-Browser Report Designer</div>
-            </div>
-          </div>
-          <div class="step-chips">
-            <span class="step-chip">Data Parity Check</span>
-            <span class="step-chip">XML Diff Viewer</span>
-            <span class="step-chip">Embedded Designer</span>
-            <span class="step-chip">Sign-off Workflow</span>
-          </div>
-        </div>
-        <div class="step-content-grid">
-          <div class="step-desc">
-            <p>
-              Validates migrated reports using multi-tier comparative analysis and provides four specialized review tools:
-            </p>
-            <ul class="feature-list">
-              <li><strong>Automated Data Parity:</strong> Compares row counts, column structures, and cell value fingerprints between SSRS and Bold Reports.</li>
-              <li><strong>XML Diff Viewer:</strong> Side-by-side view showing original SSRS RDL vs transformed Bold Reports RDL with line-by-line additions and modifications highlighted.</li>
-              <li><strong>Visual Comparison:</strong> Pixel-by-pixel rendering diff detecting layout shifts, margin inconsistencies, and font discrepancies.</li>
-              <li><strong>Official Bold Reports Web Report Designer (Server-Integrated):</strong>
-                Full visual report designer embedded directly in the application using official Syncfusion CDN scripts. Connects via live OAuth2 token to open, preview, edit, and save reports directly back to Bold Reports Server!
-              </li>
-            </ul>
-          </div>
-          <div class="step-side-card">
-            <h4>Designer Integration Config</h4>
-            <div class="code-box">
-serviceUrl: "/reporting/reportservice/api/Designer"
-reportServerUrl: "/reporting/api/site/{tenant}"
-serviceAuthorizationToken: "bearer &lt;token&gt;"
-reportPath: "/Finance/QuarterlyRevenue"
             </div>
           </div>
         </div>

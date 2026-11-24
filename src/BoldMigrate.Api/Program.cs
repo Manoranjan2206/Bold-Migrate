@@ -80,6 +80,7 @@ builder.Services.AddScoped<MigrationLogger>(sp =>
 // Engine services
 builder.Services.AddScoped<TransformEngine>();
 builder.Services.AddScoped<UploadLayer>();
+builder.Services.AddScoped<BoldMigrate.Core.Interfaces.IStagedReportRenderer, BoldMigrate.Api.Preview.StagedReportRenderer>();
 builder.Services.AddScoped<ValidationEngine>();
 builder.Services.AddScoped<DeltaSyncEngine>();
 builder.Services.AddScoped<BoldMigrate.Api.Preview.StagedReportSession>();
@@ -186,7 +187,7 @@ using (var scope = app.Services.CreateScope())
         app.Logger.LogError(ex, "Could not remove duplicate catalog items.");
     }
 
-    // ReportRecords gained local-edit tracking for the Step 5 designer. The columns are added
+    // ReportRecords gained local-edit tracking for the Step 4 designer. The columns are added
     // in place (nullable / defaulted) so existing run data is kept.
     try
     {
@@ -217,7 +218,7 @@ using (var scope = app.Services.CreateScope())
     }
 }
 
-// Bold Reports data extensions for the Step 5 local viewer/designer. SQL Server is built in;
+// Bold Reports data extensions for the Step 4 local viewer/designer. SQL Server is built in;
 // these let previews, and designer data-source changes, run against every other provider.
 BoldReports.Web.ReportConfig.DefaultSettings = new BoldReports.Web.ReportSettings().RegisterExtensions(new List<string>
 {

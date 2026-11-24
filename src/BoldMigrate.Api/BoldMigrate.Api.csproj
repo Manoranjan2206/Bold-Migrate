@@ -11,7 +11,7 @@
     <PackageReference Include="Microsoft.AspNetCore.OpenApi" Version="10.0.5" />
     <PackageReference Include="Microsoft.EntityFrameworkCore.Sqlite" Version="9.0.0" />
     <PackageReference Include="Microsoft.Extensions.Diagnostics.HealthChecks" Version="9.0.0" />
-    <!-- Bold Reports viewer/designer server side, used by Step 5 to preview and edit staged reports locally.
+    <!-- Bold Reports viewer/designer server side, used by Step 4 to preview and edit staged reports locally.
          SQL Server support is built in; the data extensions let the designer query every other provider
          Bold Reports supports. Keep the version in step with the CDN scripts in wwwroot/index.html. -->
     <PackageReference Include="BoldReports.AspNet.Core" Version="15.1.17" />
