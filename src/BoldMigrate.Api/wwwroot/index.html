@@ -515,7 +515,7 @@
             <span>of <strong id="lib-total-count">0</strong> reports selected for migration</span>
           </div>
           <div class="selection-actions">
-            <button class="btn2 btn-sm" onclick="selectAllCleanAndAutoFix()"><span id="btn-select-clean-text">Select Clean & Auto-Fixed Only</span></button>
+            <button class="btn2 btn-sm" onclick="selectAllReady()"><span id="btn-select-clean-text">Select Ready for Migration</span></button>
             <button class="btn2 btn-sm" onclick="toggleSelectAllReports(true)">Select All</button>
             <button class="btn2 btn-sm" onclick="toggleSelectAllReports(false)">Deselect All</button>
             <button class="btn2 btn-danger btn-sm" onclick="openDeleteReportsModal('selected')" title="Delete selected reports from Bold Reports">
@@ -531,9 +531,8 @@
         <!-- Filter Chips -->
         <div class="chips" id="library-filter-chips">
           <span class="chip active" data-filter="all" onclick="setLibraryFilter('all', this)">All (<span id="lib-count-all">0</span>)</span>
-          <span class="chip" data-filter="clean" onclick="setLibraryFilter('clean', this)">Clean (<span id="lib-count-clean">0</span>)</span>
+          <span class="chip" data-filter="clean" onclick="setLibraryFilter('clean', this)">Clean &amp; Ready (<span id="lib-count-clean">0</span>)</span>
           <span class="chip" data-filter="autofix" onclick="setLibraryFilter('autofix', this)">Auto-Fixed (<span id="lib-count-autofix">0</span>)</span>
-          <span class="chip" data-filter="review" onclick="setLibraryFilter('review', this)">Needs Review (<span id="lib-count-review">0</span>)</span>
           <span class="chip" data-filter="blocked" onclick="setLibraryFilter('blocked', this)">Blocked (<span id="lib-count-blocked">0</span>)</span>
         </div>
 
@@ -775,16 +774,16 @@
             <div class="l">Passed (Visual Snapshot OK)</div>
           </div>
           <div class="card tile">
+            <div class="n" id="val-stat-offline" style="color:#2563EB;">0</div>
+            <div class="l">Data Source Offline (RDL Valid)</div>
+          </div>
+          <div class="card tile">
             <div class="n" id="val-stat-manual" style="color:#D97706;">0</div>
             <div class="l">Needs Manual Check (Params)</div>
           </div>
           <div class="card tile">
             <div class="n" id="val-stat-failed" style="color:#DC2626;">0</div>
-            <div class="l">Render Errors</div>
-          </div>
-          <div class="card tile">
-            <div class="n" id="val-stat-total" style="font-size:24px;color:#0F172A;">0</div>
-            <div class="l">Total Staged Reports</div>
+            <div class="l">Render Errors (Syntax)</div>
           </div>
         </div>
 
@@ -794,6 +793,7 @@
             <span style="font-size:13px;font-weight:600;color:#64748B;margin-right:4px;">Filter:</span>
             <button class="btn2 btn-sm filter-active" id="val-btn-filter-all" onclick="filterValidationCards('all')">All (<span id="val-pill-all">0</span>)</button>
             <button class="btn2 btn-sm" id="val-btn-filter-passed" onclick="filterValidationCards('passed')" style="color:#059669;">Passed (<span id="val-pill-passed">0</span>)</button>
+            <button class="btn2 btn-sm" id="val-btn-filter-offline" onclick="filterValidationCards('offline')" style="color:#2563EB;">Data Source Offline (<span id="val-pill-offline">0</span>)</button>
             <button class="btn2 btn-sm" id="val-btn-filter-manual" onclick="filterValidationCards('manual')" style="color:#D97706;">Needs Params (<span id="val-pill-manual">0</span>)</button>
             <button class="btn2 btn-sm" id="val-btn-filter-failed" onclick="filterValidationCards('failed')" style="color:#DC2626;">Errors (<span id="val-pill-failed">0</span>)</button>
           </div>

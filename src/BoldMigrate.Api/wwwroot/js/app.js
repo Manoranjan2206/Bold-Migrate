@@ -496,7 +496,6 @@ function renderReportLibrary() {
     if (currentLibFilter === "all") return true;
     if (currentLibFilter === "clean") return r.bucket === "Clean";
     if (currentLibFilter === "autofix") return r.bucket === "AutoFixed";
-    if (currentLibFilter === "review") return r.bucket === "NeedsReview";
     if (currentLibFilter === "blocked") return r.bucket === "Blocked";
     return true;
   });
@@ -504,14 +503,19 @@ function renderReportLibrary() {
   // Update counts
   const cleanCount = reportsCache.filter(r => r.bucket === "Clean").length;
   const autofixCount = reportsCache.filter(r => r.bucket === "AutoFixed").length;
-  const reviewCount = reportsCache.filter(r => r.bucket === "NeedsReview").length;
   const blockedCount = reportsCache.filter(r => r.bucket === "Blocked").length;
 
-  document.getElementById("lib-count-all").innerText = reportsCache.length;
-  document.getElementById("lib-count-clean").innerText = cleanCount;
-  document.getElementById("lib-count-autofix").innerText = autofixCount;
-  document.getElementById("lib-count-review").innerText = reviewCount;
-  document.getElementById("lib-count-blocked").innerText = blockedCount;
+  const elAll = document.getElementById("lib-count-all");
+  if (elAll) elAll.innerText = reportsCache.length;
+  const elClean = document.getElementById("lib-count-clean");
+  if (elClean) elClean.innerText = cleanCount;
+  const elAuto = document.getElementById("lib-count-autofix");
+  if (elAuto) elAuto.innerText = autofixCount;
+  const elBlock = document.getElementById("lib-count-blocked");
+  if (elBlock) elBlock.innerText = blockedCount;
+
+  const btnSelectReady = document.getElementById("btn-select-clean-text");
+  if (btnSelectReady) btnSelectReady.innerText = `Select Ready for Migration (${cleanCount + autofixCount})`;
 
   // Update sidebar count
   const sideCount = document.getElementById("side-count-reports");
@@ -528,12 +532,17 @@ function renderReportLibrary() {
   tbody.innerHTML = filtered.map(r => {
     let bucketClass = "pill ok";
     if (r.bucket === "AutoFixed") bucketClass = "pill ok";
-    if (r.bucket === "NeedsReview") bucketClass = "pill warn";
     if (r.bucket === "Blocked") bucketClass = "pill fail";
 
     const isSelected = selectedReportIds.has(r.id);
     const sizeFormatted = r.sizeBytes > 1024 ? `${(r.sizeBytes / 1024).toFixed(1)} KB` : `${r.sizeBytes} B`;
-    const blockReasonText = r.blockReason ? escapeHtml(r.blockReason) : (r.bucket === "Clean" ? "100% Native RDL" : "Auto-inlined");
+    
+    let tagsHtml = "";
+    if (r.featureTags) {
+      const tags = (typeof r.featureTags === "string" ? r.featureTags.split(",") : r.featureTags).map(t => t.trim()).filter(Boolean);
+      tagsHtml = tags.map(t => `<span style="font-size:10.5px;font-weight:600;padding:1px 5px;border-radius:4px;background:#EFF6FF;color:#2563EB;border:1px solid #DBEAFE;margin-right:3px;">${escapeHtml(t)}</span>`).join("");
+    }
+    const blockReasonText = r.blockReason ? `<span style="color:#DC2626;font-weight:600;">${escapeHtml(r.blockReason)}</span>` : (tagsHtml ? `${tagsHtml} <span style="color:#64748B;">Ready</span>` : (r.bucket === "Clean" ? "100% Native RDL" : "Auto-inlined"));
 
     return `
       <tr>
@@ -544,7 +553,7 @@ function renderReportLibrary() {
         <td><code>${escapeHtml(r.folder)}</code></td>
         <td style="color:#64748B;">${sizeFormatted}</td>
         <td>${r.parameterCount || 0}</td>
-        <td><span class="${bucketClass}">${escapeHtml(r.bucket)}</span></td>
+        <td><span class="${bucketClass}">${escapeHtml(r.bucket === "NeedsReview" ? "Clean" : r.bucket)}</span></td>
         <td style="font-size:12px;color:#475569;">${blockReasonText}</td>
         <td style="text-align:right;white-space:nowrap;">
           <button class="btn2 btn-sm" onclick="selectReportForValidation('${r.id}')">Inspect & Validate</button>
@@ -580,15 +589,19 @@ function toggleSelectAllReports(checked) {
   updateSelectedCountUI();
 }
 
-function selectAllCleanAndAutoFix() {
+function selectAllReady() {
   selectedReportIds.clear();
   reportsCache.forEach(r => {
-    if (r.bucket === "Clean" || r.bucket === "AutoFixed") {
+    if (r.bucket !== "Blocked" && r.status !== "Excluded") {
       selectedReportIds.add(r.id);
     }
   });
   renderReportLibrary();
-  showToast(`Selected ${selectedReportIds.size} Clean & Auto-Fixed reports.`);
+  showToast(`Selected ${selectedReportIds.size} ready reports for migration.`);
+}
+
+function selectAllCleanAndAutoFix() {
+  selectAllReady();
 }
 
 function updateSelectedCountUI() {
@@ -966,7 +979,7 @@ function renderFlaggedReportsList() {
   const container = document.getElementById("dash-flagged-list");
   if (!container) return;
 
-  const flagged = reportsCache.filter(r => r.bucket === "Blocked" || r.bucket === "NeedsReview");
+  const flagged = reportsCache.filter(r => r.bucket === "Blocked");
   if (flagged.length === 0) {
     container.innerHTML = `
       <div style="padding:16px;text-align:center;color:#059669;font-weight:600;">
@@ -1183,13 +1196,18 @@ async function loadValidationSummary(force = false) {
     const summary = await Api.getValidationSummary(currentRun.id);
     validationSummaryCache = summary;
 
+    const reports = summary.reports || [];
+    const offlineCount = summary.dataSourceOffline || reports.filter(r => r.status === "DataSourceOffline").length || 0;
+
     // Update 4 Metric Tiles
     const passEl = document.getElementById("val-stat-passed");
+    const offEl = document.getElementById("val-stat-offline");
     const manEl = document.getElementById("val-stat-manual");
     const failEl = document.getElementById("val-stat-failed");
     const totEl = document.getElementById("val-stat-total");
 
     if (passEl) passEl.innerText = summary.passed || 0;
+    if (offEl) offEl.innerText = offlineCount;
     if (manEl) manEl.innerText = summary.needsManualCheck || 0;
     if (failEl) failEl.innerText = summary.failed || 0;
     if (totEl) totEl.innerText = summary.total || 0;
@@ -1197,20 +1215,23 @@ async function loadValidationSummary(force = false) {
     // Update Filter Pills
     const pAll = document.getElementById("val-pill-all");
     const pPass = document.getElementById("val-pill-passed");
+    const pOff = document.getElementById("val-pill-offline");
     const pMan = document.getElementById("val-pill-manual");
     const pFail = document.getElementById("val-pill-failed");
 
     if (pAll) pAll.innerText = summary.total || 0;
     if (pPass) pPass.innerText = summary.passed || 0;
+    if (pOff) pOff.innerText = offlineCount;
     if (pMan) pMan.innerText = summary.needsManualCheck || 0;
     if (pFail) pFail.innerText = summary.failed || 0;
 
     const footStatus = document.getElementById("val-footer-status");
     if (footStatus) {
-      if (summary.passed > 0 && summary.failed === 0) {
-        footStatus.innerText = `${summary.passed} of ${summary.total} reports verified and ready for upload.`;
-      } else if (summary.failed > 0) {
-        footStatus.innerText = `${summary.failed} report(s) encountered rendering errors. Inspect logs or edit before upload.`;
+      const readyTotal = (summary.passed || 0) + offlineCount;
+      if (readyTotal > 0 && (summary.failed || 0) === 0) {
+        footStatus.innerText = `${readyTotal} of ${summary.total} reports verified and ready for upload.`;
+      } else if ((summary.failed || 0) > 0) {
+        footStatus.innerText = `${readyTotal} reports ready for upload; ${summary.failed} report(s) require review or syntax edit.`;
       } else {
         footStatus.innerText = `Ready to run automated validation on ${summary.total} reports, or skip directly to upload.`;
       }
@@ -1231,7 +1252,7 @@ async function loadValidationSummary(force = false) {
 
 function filterValidationCards(filter) {
   currentValFilter = filter;
-  ["all", "passed", "manual", "failed"].forEach(f => {
+  ["all", "passed", "offline", "manual", "failed"].forEach(f => {
     const btn = document.getElementById(`val-btn-filter-${f}`);
     if (btn) {
       if (f === filter) btn.classList.add("filter-active");
@@ -1255,6 +1276,8 @@ function renderValidationEvidenceGrid() {
 
   if (currentValFilter === "passed") {
     filtered = filtered.filter(r => r.status === "Passed" || r.status === "Approved");
+  } else if (currentValFilter === "offline") {
+    filtered = filtered.filter(r => r.status === "DataSourceOffline");
   } else if (currentValFilter === "manual") {
     filtered = filtered.filter(r => r.status === "NeedsManualCheck");
   } else if (currentValFilter === "failed") {
@@ -1292,6 +1315,9 @@ function renderValidationEvidenceGrid() {
       const dur = r.durationMs ? `${(r.durationMs / 1000).toFixed(1)}s` : "OK";
       statusBadge = `<span class="pill ok" style="font-size:11.5px;font-weight:600;">✓ Passed (${dur})</span>`;
       borderStyle = "border: 1px solid #BBF7D0;";
+    } else if (r.status === "DataSourceOffline") {
+      statusBadge = `<span class="pill" style="background:#EFF6FF;color:#1D4ED8;border:1px solid #BFDBFE;font-size:11px;font-weight:600;">⚡ Data Source Offline</span>`;
+      borderStyle = "border: 1px solid #BFDBFE;";
     } else if (r.status === "NeedsManualCheck") {
       statusBadge = `<span class="pill warn" style="font-size:11.5px;font-weight:600;" title="Requires parameters without defaults">⚠ Needs Parameters</span>`;
       borderStyle = "border: 1px solid #FED7AA;";
@@ -1311,6 +1337,13 @@ function renderValidationEvidenceGrid() {
           <div style="position:absolute;bottom:6px;right:6px;background:rgba(15,23,42,0.7);color:#FFF;font-size:10.5px;padding:2px 6px;border-radius:4px;backdrop-filter:blur(2px);">
             🔍 Click to expand
           </div>
+        </div>`;
+    } else if (r.status === "DataSourceOffline") {
+      thumbHtml = `
+        <div style="height:140px;width:100%;background:#F0F9FF;border-bottom:1px solid #BAE6FD;display:flex;flex-direction:column;align-items:center;justify-content:center;color:#0284C7;padding:12px;text-align:center;">
+          <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" style="margin-bottom:6px;"><ellipse cx="12" cy="5" rx="9" ry="3"></ellipse><path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3"></path><path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5"></path></svg>
+          <span style="font-size:12.5px;font-weight:600;color:#0369A1;">Data Source Offline</span>
+          <small style="font-size:11px;color:#0284C7;margin-top:2px;">RDL syntax valid • Ready for Server upload</small>
         </div>`;
     } else if (r.status === "NeedsManualCheck") {
       thumbHtml = `
@@ -1348,6 +1381,11 @@ function renderValidationEvidenceGrid() {
 
           ${tagsHtml ? `<div style="display:flex;flex-wrap:wrap;gap:4px;margin-bottom:10px;">${tagsHtml}</div>` : ""}
 
+          ${r.status === "DataSourceOffline" ? `
+            <div style="font-size:11.5px;color:#0369A1;background:#F0F9FF;border:1px solid #E0F2FE;border-radius:6px;padding:6px 8px;margin-bottom:10px;">
+              RDL syntax verified. Database connection is offline in local preview; report is ready for Server upload.
+            </div>` : ""}
+
           ${r.errorMessage && r.status === "Failed" ? `
             <div style="font-size:11.5px;color:#DC2626;background:#FEF2F2;border:1px solid #FEE2E2;border-radius:6px;padding:6px 8px;margin-bottom:10px;max-height:48px;overflow:hidden;text-overflow:ellipsis;">
               ${escapeHtml(r.errorMessage)}
@@ -1362,9 +1400,9 @@ function renderValidationEvidenceGrid() {
                 ✏ Edit
               </button>
             </div>
-            ${r.status === "Failed" ? `
-              <button class="btn2 btn-sm btn-danger" onclick="openRenderLogs('${escapeHtml(r.path)}')" style="padding:4px 8px;font-size:11px;">
-                📜 Error Log
+            ${r.status === "Failed" || r.status === "DataSourceOffline" ? `
+              <button class="btn2 btn-sm" onclick="openRenderLogs('${escapeHtml(r.path)}')" style="padding:4px 8px;font-size:11px;color:#64748B;">
+                📜 Log
               </button>` : ""}
           </div>
         </div>

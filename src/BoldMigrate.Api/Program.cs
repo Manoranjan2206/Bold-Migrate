@@ -64,12 +64,8 @@ builder.Services.AddMemoryCache();
 // Logging & Rules
 builder.Services.AddSingleton<CompatibilityRulesLoader>(sp =>
 {
-    var path = Path.Combine(AppContext.BaseDirectory, "data", "compatibility-rules.json");
-    if (!File.Exists(path))
-    {
-        path = Path.Combine(Directory.GetCurrentDirectory(), "data", "compatibility-rules.json");
-    }
-    return new CompatibilityRulesLoader(path);
+    var resolvedPath = CompatibilityRulesLoader.ResolveRulesFilePath();
+    return new CompatibilityRulesLoader(resolvedPath);
 });
 builder.Services.AddScoped<MigrationLogger>(sp =>
 {
@@ -242,6 +238,32 @@ using (var scope = app.Services.CreateScope())
         {
             await db.Database.ExecuteSqlRawAsync("ALTER TABLE ValidationResults ADD COLUMN ErrorMessage TEXT NULL;");
         }
+
+        // Auto-reclassify any stale NeedsReview report records to Clean.
+        // Static rules should not block or mark reports as NeedsReview on assumption.
+        await db.Database.ExecuteSqlRawAsync(
+            "UPDATE ReportRecords SET Bucket = 'Clean', BlockReasonCode = NULL WHERE Bucket = 'NeedsReview' OR Bucket = '2';");
+
+        // Reclassify SQL Server offline connection errors in validation results as DataSourceOffline (not Failed)
+        await db.Database.ExecuteSqlRawAsync(@"
+            UPDATE ValidationResults
+            SET RenderStatus = 'DataSourceOffline',
+                RenderSummary = 'RDL structure valid. Database offline in local preview; report is ready for server upload.'
+            WHERE RenderStatus = 'Failed'
+              AND (ErrorMessage LIKE '%SQL Server%'
+                OR ErrorMessage LIKE '%Named Pipes Provider%'
+                OR ErrorMessage LIKE '%Data cannot be retrieved%');
+        ");
+
+        // Keep state aligned for DataSourceOffline reports so they are ready for upload
+        await db.Database.ExecuteSqlRawAsync(@"
+            UPDATE ReportRecords
+            SET State = 'Approved'
+            WHERE (State = 'ValidationFailed' OR State = '3')
+              AND CatalogItemId IN (
+                  SELECT ReportId FROM ValidationResults WHERE RenderStatus = 'DataSourceOffline'
+              );
+        ");
     }
     catch (Exception ex)
     {

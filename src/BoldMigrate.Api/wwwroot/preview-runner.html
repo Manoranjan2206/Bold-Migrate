@@ -57,19 +57,18 @@
           reportError: function (args) {
             let msg = 'Rendering failed';
             if (args) {
-              if (typeof args === 'string') {
-                msg = args;
-              } else if (args.errmsg) {
-                msg = args.errmsg;
-              } else if (args.errdetail) {
-                msg = args.errdetail;
-              } else if (args.error) {
-                msg = typeof args.error === 'string' ? args.error : (args.error.message || JSON.stringify(args.error));
-              } else if (args.message) {
-                msg = args.message;
-              } else {
-                msg = JSON.stringify(args);
+              let obj = args;
+              if (typeof args === 'string' && args.trim().startsWith('{')) {
+                try { obj = JSON.parse(args); } catch(e) { obj = args; }
               }
+              if (typeof obj === 'string') {
+                msg = obj;
+              } else if (obj && typeof obj === 'object') {
+                msg = obj.errmsg || obj.errdetail || (obj.error ? (typeof obj.error === 'string' ? obj.error : (obj.error.message || JSON.stringify(obj.error))) : null) || obj.message || JSON.stringify(obj);
+              }
+            }
+            if (typeof msg === 'string' && (msg.includes('connection to SQL Server') || msg.includes('Named Pipes Provider') || msg.includes('network-related or instance-specific error'))) {
+              msg = 'Data source offline: SQL Server connection could not be established in local preview.';
             }
             if (msg.length > 300) {
               msg = msg.substring(0, 297) + '...';

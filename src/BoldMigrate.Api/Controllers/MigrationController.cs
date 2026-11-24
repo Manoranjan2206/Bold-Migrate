@@ -360,6 +360,7 @@ public class MigrationController : ControllerBase
                 status = r.State.ToString(),
                 bucket = r.Bucket.ToString(),
                 blockReason = r.BlockReasonCode,
+                featureTags = r.FeatureTags,
                 parameterCount = r.ParameterCount,
                 dataSourceRefs = r.DataSourceRefs,
                 uploadAttempts = r.UploadAttempts
@@ -642,6 +643,7 @@ public class MigrationController : ControllerBase
             var s = (string)((dynamic)c).status;
             return s == "Passed" || s == "Approved";
         });
+        var dsOffline = cards.Count(c => (string)((dynamic)c).status == "DataSourceOffline");
         var failed = cards.Count(c => (string)((dynamic)c).status == "Failed");
         var needsManual = cards.Count(c => (string)((dynamic)c).status == "NeedsManualCheck");
         var skipped = cards.Count(c => (string)((dynamic)c).status == "Skipped");
@@ -651,6 +653,7 @@ public class MigrationController : ControllerBase
             runId = id,
             total,
             passed,
+            dataSourceOffline = dsOffline,
             failed,
             needsManualCheck = needsManual,
             skipped,
