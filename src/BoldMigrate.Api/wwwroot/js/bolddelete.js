@@ -48,7 +48,7 @@ function bdRender() {
     ? rows.map(r => `<tr>
         <td><input type="checkbox" ${bdSelected.has(r.id) ? "checked" : ""} onchange="bdToggle('${escapeHtml(r.id)}', this.checked)"></td>
         <td>${escapeHtml(r.name)}</td><td>${escapeHtml(r.category)}</td></tr>`).join("")
-    : `<tr><td colspan="3" style="color:#94A3B8;padding:12px;">No reports.</td></tr>`;
+    : `<tr><td colspan="3" style="color:var(--br-text-subtle);padding:12px;">No reports.</td></tr>`;
   bdUpdateButton();
 }
 

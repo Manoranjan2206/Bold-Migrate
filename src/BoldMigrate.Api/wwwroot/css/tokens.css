@@ -1,60 +1,111 @@
+/* ============================================================
+   Bold Migrate — design tokens
+   Derived from boldreports.com and the Bold Reports colour logo:
+     logo mark    #FF4800
+     logo word    #273B5F
+     site ink     #020202   buttons, headings
+     site body    #4D4947
+     site line    #E5E5E5   hairline, 0.8px
+     typeface     Geist / Geist Mono
+   Every name from the previous token set is kept, so nothing
+   downstream breaks; only the values moved.
+   ============================================================ */
+
 :root {
-  /* Bold Reports Enterprise Brand Tokens */
-  --br-primary: #1D4ED8;
-  --br-primary-hover: #1E40AF;
-  --br-primary-active: #172554;
-  --br-primary-soft: #EFF6FF;
-  --br-primary-subtle: #DBEAFE;
-  --br-primary-border: #93C5FD;
+  /* --- Brand ------------------------------------------------
+     Orange is an accent: fills, rails and indicators only.
+     On white it measures ~3.2:1, so where orange has to carry
+     words use --br-accent-text (~4.6:1) instead. */
+  --br-accent: #FF4800;
+  --br-accent-hover: #E04000;
+  --br-accent-text: #C2410C;
+  --br-accent-soft: #FFF1EB;
+  --br-accent-border: #FBD5C3;
+  --br-brand-navy: #273B5F;
 
-  /* Surfaces & Neutrals */
+  /* --- Primary action --------------------------------------
+     Near-black, as the site's "Try it Free" pill. */
+  --br-primary: #020202;
+  --br-primary-hover: #2B2B2B;
+  --br-primary-active: #000000;
+  --br-primary-soft: #F1F1F0;
+  --br-primary-subtle: #E8E8E7;
+  --br-primary-border: #D6D3D2;
+
+  /* --- Surfaces & neutrals --------------------------------- */
   --br-surface: #FFFFFF;
-  --br-surface-alt: #F8FAFC;
+  --br-surface-alt: #FAFAFA;
   --br-surface-card: #FFFFFF;
-  --br-background: #F1F5F9;
-  --br-navy: #0F172A;
-  --br-navy-surface: #1E293B;
-  --br-navy-border: #334155;
+  --br-surface-hover: #F1F1F0;
+  --br-background: #F7F7F8;
 
-  /* Borders & Dividers */
-  --br-border: #E2E8F0;
-  --br-border-subtle: #F1F5F9;
-  --br-border-strong: #CBD5E1;
-  --br-border-focus: #3B82F6;
+  /* Dark rail. Kept dark in this phase; the light rail is a
+     separate, layout-affecting change. */
+  --br-navy: #0D1420;
+  --br-navy-surface: #161F30;
+  --br-navy-active: #1E2838;
+  --br-navy-border: #2B3345;
 
-  /* Typography Colors */
-  --br-text: #0F172A;
-  --br-text-secondary: #475569;
-  --br-text-muted: #64748B;
-  --br-text-subtle: #94A3B8;
+  /* --- Borders & dividers ---------------------------------- */
+  --br-border: #E5E5E5;
+  --br-border-subtle: #F1F1F0;
+  --br-border-strong: #D6D3D2;
+  --br-border-focus: #273B5F;
+
+  /* --- Text ------------------------------------------------- */
+  --br-text: #020202;
+  --br-text-secondary: #4D4947;
+  --br-text-muted: #6E6A64;
+  --br-text-subtle: #9A958F;
   --br-text-inverse: #FFFFFF;
+  --br-text-on-dark: #B9C4D4;
+  --br-text-on-dark-muted: #8A97AB;
 
-  /* Status Colors & Backgrounds */
-  --br-success: #059669;
-  --br-success-bg: #ECFDF5;
-  --br-success-border: #A7F3D0;
-  --br-success-text: #065F46;
+  /* --- Status -----------------------------------------------
+     Each one always travels with a word or an icon, so nothing
+     depends on hue alone. */
+  --br-success: #087443;
+  --br-success-bg: #E8F5EE;
+  --br-success-border: #BFE3D0;
+  --br-success-text: #066638;
 
-  --br-warning: #D97706;
+  --br-warning: #B45309;
   --br-warning-bg: #FFFBEB;
   --br-warning-border: #FDE68A;
   --br-warning-text: #92400E;
 
-  --br-danger: #DC2626;
-  --br-danger-bg: #FEF2F2;
-  --br-danger-border: #FECACA;
-  --br-danger-text: #991B1B;
+  --br-danger: #B42318;
+  --br-danger-hover: #912018;
+  --br-danger-bg: #FEF3F2;
+  --br-danger-border: #FECDCA;
+  --br-danger-text: #912018;
 
-  --br-info: #0284C7;
-  --br-info-bg: #F0F9FF;
-  --br-info-border: #BAE6FD;
-  --br-info-text: #075985;
+  --br-info: #175CD3;
+  --br-info-bg: #EFF8FF;
+  --br-info-border: #B2DDFF;
+  --br-info-text: #0F4CBF;
 
-  /* Font Stacks */
-  --br-font-sans: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
-  --br-font-mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+  /* --- Log console ------------------------------------------
+     The log already spoke a terminal palette; these are the colours
+     it was written for, on the dark ground they assume. Every one
+     clears 4.5:1 against --br-log-bg. */
+  --br-log-bg: #10192A;
+  --br-log-border: #1E293B;
+  --br-log-text: #CBD5E1;
+  --br-log-meta: #8A97AB;
+  --br-log-stage: #38BDF8;
+  --br-log-info: #34D399;
+  --br-log-warn: #FBBF24;
+  --br-log-err: #F87171;
 
-  /* Shapes & Radii */
+  /* --- Font stacks ------------------------------------------ */
+  --br-font-sans: 'Geist', 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  --br-font-mono: 'Geist Mono', ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+
+  /* --- Shapes & radii ---------------------------------------
+     Unchanged this phase: app.css still hardcodes its radii, and
+     scanner.html reads these, so retargeting them here would move
+     that page's geometry on its own. */
   --br-radius-sm: 6px;
   --br-radius-input: 8px;
   --br-radius-inner: 10px;
@@ -62,13 +113,15 @@
   --br-radius-lg: 16px;
   --br-radius-pill: 9999px;
 
-  /* Refined Enterprise Shadows */
+  /* --- Shadows ----------------------------------------------
+     Unchanged this phase. The target system is hairline-first,
+     with shadow kept for modals and menus only. */
   --br-shadow-xs: 0 1px 2px 0 rgba(15, 23, 42, 0.05);
   --br-shadow-sm: 0 1px 3px 0 rgba(15, 23, 42, 0.08), 0 1px 2px -1px rgba(15, 23, 42, 0.06);
   --br-shadow-md: 0 4px 6px -1px rgba(15, 23, 42, 0.08), 0 2px 4px -2px rgba(15, 23, 42, 0.05);
   --br-shadow-lg: 0 10px 15px -3px rgba(15, 23, 42, 0.08), 0 4px 6px -4px rgba(15, 23, 42, 0.04);
   --br-shadow-xl: 0 20px 25px -5px rgba(15, 23, 42, 0.1), 0 8px 10px -6px rgba(15, 23, 42, 0.05);
 
-  /* Transitions */
+  /* --- Transitions ------------------------------------------ */
   --br-transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
 }

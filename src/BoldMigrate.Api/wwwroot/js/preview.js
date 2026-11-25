@@ -23,7 +23,7 @@ const Preview = {
       grid.innerHTML = `
         <div class="card" style="grid-column: 1 / -1; padding: 20px;">
           <h2>Staged Reports</h2>
-          <p class="sub" style="color:#DC2626;">${escapeHtml(err.message)}</p>
+          <p class="sub" style="color:var(--br-danger);">${escapeHtml(err.message)}</p>
         </div>`;
       return;
     }
@@ -60,7 +60,7 @@ const Preview = {
             <label class="sr-only" for="preview-filter">Filter staged reports</label>
             <input id="preview-filter" type="search" placeholder="Filter by name or folder" value="${escapeHtml(this.filter)}"
                    oninput="Preview.setFilter(this.value)"
-                   style="height:34px;width:240px;padding:0 10px;border:1px solid #CBD5E1;border-radius:6px;">
+                   style="height:34px;width:240px;padding:0 10px;border:1px solid var(--br-border-strong);border-radius:6px;">
           </div>
         </div>
         <table>
@@ -85,11 +85,11 @@ const Preview = {
       !term || r.name.toLowerCase().includes(term) || r.folder.toLowerCase().includes(term));
 
     if (this.data.reports.length === 0) {
-      return `<tr><td colspan="6" style="text-align:center;color:#64748B;padding:20px;">
+      return `<tr><td colspan="6" style="text-align:center;color:var(--br-text-muted);padding:20px;">
         No reports are staged yet. Run Step 1: Connect &amp; Discover to download them from SSRS.</td></tr>`;
     }
     if (rows.length === 0) {
-      return `<tr><td colspan="6" style="text-align:center;color:#64748B;padding:20px;">No reports match the filter.</td></tr>`;
+      return `<tr><td colspan="6" style="text-align:center;color:var(--br-text-muted);padding:20px;">No reports match the filter.</td></tr>`;
     }
 
     return rows.map(r => {
@@ -110,7 +110,7 @@ const Preview = {
   },
 
   dataSourcesHtml(r) {
-    if (!r.dataSources.length) return `<span style="color:#94A3B8;">—</span>`;
+    if (!r.dataSources.length) return `<span style="color:var(--br-text-subtle);">—</span>`;
     const label = {
       InReport: ["Embedded", "ok"],
       Stored: ["Credentials stored", "ok"],
@@ -128,7 +128,7 @@ const Preview = {
   },
 
   dataSetsHtml(r) {
-    if (!r.dataSets.length) return `<span style="color:#94A3B8;">—</span>`;
+    if (!r.dataSets.length) return `<span style="color:var(--br-text-subtle);">—</span>`;
     return r.dataSets.map(ds => `<div style="margin:2px 0;" title="${escapeHtml(ds.resolvedPath || ds.reference)}">
       ${escapeHtml(ds.name)} ${ds.resolved ? "" : `<span class="pill fail" style="font-size:11px;">Not found in staging</span>`}</div>`).join("");
   },
@@ -179,25 +179,25 @@ const Preview = {
 
     grid.innerHTML = `
       <div class="card" style="grid-column: 1 / -1; padding: 0; overflow: hidden; display: flex; flex-direction: column; height: 800px;">
-        <div style="background:#0F172A;color:#fff;padding:10px 16px;display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;">
+        <div style="background:var(--br-navy);color:var(--br-text-inverse);padding:10px 16px;display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;">
           <div style="display:flex;align-items:center;gap:12px;min-width:0;">
-            <span style="font-size:15px;font-weight:700;color:#38BDF8;">${isDesigner ? "Report Designer" : "Report Viewer"} · local staging</span>
+            <span style="font-size:15px;font-weight:700;color:var(--br-log-stage);">${isDesigner ? "Report Designer" : "Report Viewer"} · local staging</span>
             <span class="pill ok" style="font-size:11.5px;">${escapeHtml(report.name)}</span>
-            <code style="font-size:11.5px;color:#94A3B8;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${escapeHtml(report.path)}</code>
+            <code style="font-size:11.5px;color:var(--br-text-subtle);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${escapeHtml(report.path)}</code>
           </div>
           <div style="display:flex;gap:10px;">
             <button class="btn2 btn-sm" onclick="Preview.openReport('${report.id}', '${other}')">Open in ${isDesigner ? "Viewer" : "Designer"}</button>
             <button class="btn2 btn-sm" onclick="Preview.close()">Back to staged reports</button>
           </div>
         </div>
-        ${isDesigner ? `<div style="background:#FEF3C7;color:#92400E;font-size:12.5px;padding:6px 16px;">
+        ${isDesigner ? `<div style="background:var(--br-warning-bg);color:var(--br-warning-text);font-size:12.5px;padding:6px 16px;">
           Save writes the report back into staging. It is sent to Bold Reports on the next upload (Step 5) — SSRS is not contacted again.</div>` : ""}
         <div id="preview-widget" style="flex:1;width:100%;min-height:680px;"></div>
       </div>`;
 
     if (!window.jQuery || typeof window.jQuery.fn.boldReportViewer !== "function") {
       document.getElementById("preview-widget").innerHTML = `
-        <p class="sub" style="padding:24px;color:#DC2626;">The Bold Reports scripts did not load. Check network access to cdn.boldreports.com and reload.</p>`;
+        <p class="sub" style="padding:24px;color:var(--br-danger);">The Bold Reports scripts did not load. Check network access to cdn.boldreports.com and reload.</p>`;
       return;
     }
 

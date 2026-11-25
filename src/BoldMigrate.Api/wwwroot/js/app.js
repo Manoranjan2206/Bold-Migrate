@@ -16,6 +16,9 @@ let selectedValidationReportId = null;
 let latestValidation = null;
 
 document.addEventListener("DOMContentLoaded", async () => {
+  // Chrome first: these are pure DOM and must not depend on the API coming up.
+  renderSteppers();
+  watchStatTiles();
   await initApp();
 });
 
@@ -83,6 +86,50 @@ function switchTab(tabName) {
   if (tabName === "settings") loadSettingsView();
 }
 
+// The six step panes each carry an empty .journey-stepper placeholder; this
+// fills them from one definition, so the rail is edited in a single place
+// instead of six hand-maintained copies.
+const JOURNEY_STEPS = [
+  { tab: "connections", name: "Connect & Discover" },
+  { tab: "library",     name: "Report Library" },
+  { tab: "dashboard",   name: "Assessment" },
+  { tab: "validation",  name: "Validate" },
+  { tab: "migration",   name: "Upload" },
+  { tab: "cutover",     name: "Cutover" },
+];
+
+function renderSteppers() {
+  const markup = JOURNEY_STEPS.map((s, i) =>
+    `<div class="journey-step" onclick="switchTab('${s.tab}')">` +
+      `<span class="jstep-num">${i + 1}</span>` +
+      `<span class="jstep-name">${s.name}</span>` +
+    `</div>`
+  ).join('<div class="jstep-divider"></div>');
+
+  document.querySelectorAll(".journey-stepper[data-stepper]").forEach(el => {
+    el.innerHTML = markup;
+  });
+}
+
+// A stat of zero carries no information, so it drops to grey and only a
+// non-zero count keeps its status colour. Watching the tiles avoids hooking
+// each of the ~7 places that write these numbers.
+function greyZeroStats() {
+  document.querySelectorAll(".tile .n").forEach(el => {
+    const raw = (el.innerText || "").trim();
+    const zero = raw === "0" || raw === "—" || raw === "-" || /^0\s*\/\s*\d+$/.test(raw);
+    el.classList.toggle("is-zero", zero);
+  });
+}
+
+function watchStatTiles() {
+  greyZeroStats();
+  const obs = new MutationObserver(() => greyZeroStats());
+  document.querySelectorAll(".tiles").forEach(t =>
+    obs.observe(t, { childList: true, characterData: true, subtree: true })
+  );
+}
+
 function updateStepperProgression(activeTab) {
   const stepOrder = ["connections", "library", "dashboard", "validation", "migration", "cutover"];
   const activeIdx = stepOrder.indexOf(activeTab);
@@ -120,6 +167,8 @@ function showLandingView() {
 function showAppView(initialTab = "connections") {
   document.getElementById("view-landing").style.display = "none";
   document.getElementById("app-shell").style.display = "flex";
+  renderSteppers();
+  watchStatTiles();
   switchTab(initialTab);
 }
 
@@ -199,7 +248,7 @@ function setConnectionIndicator(pillId, dotId, textId, ok, label) {
   const text = document.getElementById(textId);
   if (text) text.innerText = ok ? "Connected" : "Not connected";
   const dot = document.getElementById(dotId);
-  if (dot) dot.style.background = ok ? "#10B981" : "#94A3B8";
+  if (dot) dot.style.background = ok ? "var(--br-success)" : "var(--br-text-subtle)";
 }
 
 function renderDataSourcesTable() {
@@ -209,7 +258,7 @@ function renderDataSourcesTable() {
   if (!dataSourcesCache || dataSourcesCache.length === 0) {
     tbody.innerHTML = `
       <tr>
-        <td colspan="7" style="text-align:center;color:#64748B;padding:20px;">
+        <td colspan="7" style="text-align:center;color:var(--br-text-muted);padding:20px;">
           No data sources discovered yet. Click "Save & Discover Catalog" to scan SSRS.
         </td>
       </tr>
@@ -226,12 +275,12 @@ function renderDataSourcesTable() {
 
     return `
     <tr>
-      <td><strong>${escapeHtml(ds.name)}</strong><br><small style="color:#64748B;">${escapeHtml(ds.sourcePath || ds.parentPath || "/")}</small></td>
+      <td><strong>${escapeHtml(ds.name)}</strong><br><small style="color:var(--br-text-muted);">${escapeHtml(ds.sourcePath || ds.parentPath || "/")}</small></td>
       <td>
         <div style="display:flex;align-items:center;gap:4px;">
           <input id="ds-conn-${ds.id}" class="ds-conn-str" value="${escapeHtml(ds.connectString || "")}"
                  placeholder="Server=...;Database=..."
-                 style="width:220px;padding:4px 8px;border:1px solid #CBD5E1;border-radius:4px;font-family:monospace;font-size:12px;">
+                 style="width:220px;padding:4px 8px;border:1px solid var(--br-border-strong);border-radius:4px;font-family:monospace;font-size:12px;">
           ${(ds.connectString && (ds.connectString.toLowerCase().includes("localhost") || ds.connectString.includes("127.0.0.1"))) ? `
             <button type="button" class="btn2 btn-sm" style="font-size:10px;padding:2px 6px;white-space:nowrap;" title="Replace localhost with host.docker.internal for Bold Reports in Docker" onclick="replaceLocalhostWithDocker('${ds.id}')">Docker Fix</button>
           ` : ''}
@@ -240,7 +289,7 @@ function renderDataSourcesTable() {
       <td><span class="pill" style="font-size:11px;">${escapeHtml(ds.serverType || ds.itemType || "SQL")}</span></td>
       <td>
         <select id="ds-mode-${ds.id}" onchange="onDataSourceModeChange('${ds.id}')"
-                style="padding:4px 6px;border:1px solid #CBD5E1;border-radius:4px;font-size:12px;">
+                style="padding:4px 6px;border:1px solid var(--br-border-strong);border-radius:4px;font-size:12px;">
           <option value="Integrated" ${isIntegrated ? "selected" : ""}>Integrated (Windows Login)</option>
           <option value="Store" ${isStore ? "selected" : ""}>Store (Saved Account)</option>
           <option value="Prompt" ${isPrompt ? "selected" : ""}>Prompt (At Runtime)</option>
@@ -251,7 +300,7 @@ function renderDataSourcesTable() {
         <input id="ds-user-${ds.id}" data-ds-id="${ds.id}" class="ds-cred-user" placeholder="${isStore ? "e.g. sa or DOMAIN\\user" : "N/A"}"
                value="${escapeHtml(ds.userName || "")}" aria-label="User for ${escapeHtml(ds.name)}"
                ${!isStore ? "disabled" : ""}
-               style="width:130px;padding:4px 8px;border:1px solid #CBD5E1;border-radius:4px;${!isStore ? "background:#F1F5F9;opacity:0.6;" : ""}">
+               style="width:130px;padding:4px 8px;border:1px solid var(--br-border-strong);border-radius:4px;${!isStore ? "background:var(--br-surface-hover);opacity:0.6;" : ""}">
       </td>
       <td>
         <input type="password" id="ds-pass-${ds.id}" data-ds-id="${ds.id}" class="ds-cred-pass"
@@ -259,7 +308,7 @@ function renderDataSourcesTable() {
                aria-label="Password for ${escapeHtml(ds.name)}"
                autocomplete="new-password"
                ${!isStore ? "disabled" : ""}
-               style="width:120px;padding:4px 8px;border:1px solid #CBD5E1;border-radius:4px;${!isStore ? "background:#F1F5F9;opacity:0.6;" : ""}">
+               style="width:120px;padding:4px 8px;border:1px solid var(--br-border-strong);border-radius:4px;${!isStore ? "background:var(--br-surface-hover);opacity:0.6;" : ""}">
       </td>
       <td style="white-space:nowrap;">
         <span class="pill ${isIntegrated || ds.hasCredentials || isNone ? "ok" : ""}" id="ds-status-${ds.id}">
@@ -279,13 +328,13 @@ function onDataSourceModeChange(dsId) {
 
   if (userEl) {
     userEl.disabled = !isStore;
-    userEl.style.background = isStore ? "" : "#F1F5F9";
+    userEl.style.background = isStore ? "" : "var(--br-surface-hover)";
     userEl.style.opacity = isStore ? "1" : "0.6";
     userEl.placeholder = isStore ? "e.g. sa or DOMAIN\\user" : "N/A";
   }
   if (passEl) {
     passEl.disabled = !isStore;
-    passEl.style.background = isStore ? "" : "#F1F5F9";
+    passEl.style.background = isStore ? "" : "var(--br-surface-hover)";
     passEl.style.opacity = isStore ? "1" : "0.6";
     passEl.placeholder = isStore ? "Password" : "N/A";
   }
@@ -480,7 +529,7 @@ function renderReportLibrary() {
   if (!reportsCache || reportsCache.length === 0) {
     tbody.innerHTML = `
       <tr>
-        <td colspan="8" style="text-align:center;color:#64748B;padding:32px;">
+        <td colspan="8" style="text-align:center;color:var(--br-text-muted);padding:32px;">
           No reports found. Connect your SSRS server in Step 1 to discover catalog items.
         </td>
       </tr>
@@ -536,14 +585,14 @@ function renderReportLibrary() {
     let tagsHtml = "";
     if (r.featureTags) {
       const tags = (typeof r.featureTags === "string" ? r.featureTags.split(",") : r.featureTags).map(t => t.trim()).filter(Boolean);
-      tagsHtml = tags.map(t => `<span style="font-size:10.5px;font-weight:600;padding:1px 5px;border-radius:4px;background:#EFF6FF;color:#2563EB;border:1px solid #DBEAFE;margin-right:3px;">${escapeHtml(t)}</span>`).join("");
+      tagsHtml = tags.map(t => `<span style="font-size:10.5px;font-weight:600;padding:1px 5px;border-radius:4px;background:var(--br-info-bg);color:var(--br-primary);border:1px solid var(--br-info-border);margin-right:3px;">${escapeHtml(t)}</span>`).join("");
     }
     const reviewMsg = (r.blockReason === "CF-ASSEMBLY" || (r.featureTags && String(r.featureTags).includes("CustomAssembly")))
       ? "Uses custom assemblies — needs review"
       : (r.blockReason ? escapeHtml(r.blockReason) : "Requires review");
     const blockReasonText = isReview
-      ? `<span style="color:#B45309;font-weight:600;">${reviewMsg}</span>`
-      : (tagsHtml ? `${tagsHtml} <span style="color:#64748B;">Compatible</span>` : "100% Native RDL");
+      ? `<span style="color:var(--br-warning-text);font-weight:600;">${reviewMsg}</span>`
+      : (tagsHtml ? `${tagsHtml} <span style="color:var(--br-text-muted);">Compatible</span>` : "100% Native RDL");
 
     return `
       <tr>
@@ -552,10 +601,10 @@ function renderReportLibrary() {
         </td>
         <td><strong>${escapeHtml(r.name)}</strong></td>
         <td><code>${escapeHtml(r.folder)}</code></td>
-        <td style="color:#64748B;">${sizeFormatted}</td>
+        <td style="color:var(--br-text-muted);">${sizeFormatted}</td>
         <td>${r.parameterCount || 0}</td>
         <td><span class="${bucketClass}">${bucketLabel}</span></td>
-        <td style="font-size:12px;color:#475569;">${blockReasonText}</td>
+        <td style="font-size:12px;color:var(--br-text-secondary);">${blockReasonText}</td>
         <td style="text-align:right;white-space:nowrap;">
           <button class="btn2 btn-sm" onclick="selectReportForValidation('${r.id}')">Inspect & Validate</button>
           <button class="btn2 btn-danger btn-sm" onclick="deleteSingleBoldReport('${r.id}', '${escapeHtml(r.name).replace(/'/g, "\\'")}')" title="Delete this report from Bold Reports destination" style="margin-left:4px;padding:4px 8px;">
@@ -742,13 +791,13 @@ async function loadSectionsForDeleteModal() {
           <input type="checkbox" class="del-section-cb" value="${escapeHtml(s.section)}" checked>
           <strong>${escapeHtml(s.section)}</strong>
         </span>
-        <span class="pill" style="font-size:11px;background:#E2E8F0;color:#334155;">
+        <span class="pill" style="font-size:11px;background:var(--br-surface-hover);color:var(--br-text-secondary);">
           ${s.totalReports} report${s.totalReports === 1 ? '' : 's'}
         </span>
       </label>
     `).join("");
   } catch (err) {
-    listEl.innerHTML = `<div style="color:#DC2626;font-size:12px;padding:6px;">Failed to load sections: ${err.message}</div>`;
+    listEl.innerHTML = `<div style="color:var(--br-danger);font-size:12px;padding:6px;">Failed to load sections: ${err.message}</div>`;
   }
 }
 
@@ -802,9 +851,9 @@ async function executeDeleteReports() {
   if (confirmText) confirmText.innerText = "Deleting from Bold Reports...";
   if (statusEl) {
     statusEl.style.display = "block";
-    statusEl.style.background = "#EFF6FF";
-    statusEl.style.color = "#1E40AF";
-    statusEl.style.border = "1px solid #BFDBFE";
+    statusEl.style.background = "var(--br-info-bg)";
+    statusEl.style.color = "var(--br-info-text)";
+    statusEl.style.border = "1px solid var(--br-info-border)";
     statusEl.innerHTML = `<strong>Processing:</strong> Deleting ${scopeMsg} from Bold Reports destination...`;
   }
 
@@ -812,9 +861,9 @@ async function executeDeleteReports() {
     const res = await Api.deleteDestinationReports(currentRun.id, options);
     if (res.success) {
       if (statusEl) {
-        statusEl.style.background = "#ECFDF5";
-        statusEl.style.color = "#065F46";
-        statusEl.style.border = "1px solid #A7F3D0";
+        statusEl.style.background = "var(--br-success-bg)";
+        statusEl.style.color = "var(--br-success-text)";
+        statusEl.style.border = "1px solid var(--br-success-border)";
         statusEl.innerHTML = `<strong>Success:</strong> ${res.message}`;
       }
       showToast(res.message);
@@ -835,9 +884,9 @@ async function executeDeleteReports() {
     }
   } catch (err) {
     if (statusEl) {
-      statusEl.style.background = "#FEF2F2";
-      statusEl.style.color = "#991B1B";
-      statusEl.style.border = "1px solid #FECACA";
+      statusEl.style.background = "var(--br-danger-bg)";
+      statusEl.style.color = "var(--br-danger-text)";
+      statusEl.style.border = "1px solid var(--br-danger-border)";
       statusEl.innerHTML = `<strong>Error:</strong> ${err.message}`;
     }
     showToast("Delete failed: " + err.message);
@@ -981,7 +1030,7 @@ function renderFlaggedReportsList() {
   const flagged = reportsCache.filter(r => r.bucket === "NeedsReview" || r.bucket === "Blocked");
   if (flagged.length === 0) {
     container.innerHTML = `
-      <div style="padding:16px;text-align:center;color:#059669;font-weight:600;">
+      <div style="padding:16px;text-align:center;color:var(--br-success);font-weight:600;">
         ✓ All reports are 100% compatible and ready for migration!
       </div>
     `;
@@ -997,8 +1046,8 @@ function renderFlaggedReportsList() {
       <div class="flagged-item">
         <div>
           <strong>${escapeHtml(r.name)}</strong>
-          <span style="color:#64748B;font-size:11.5px;margin-left:6px;">${escapeHtml(r.folder)}</span>
-          <div style="font-size:12px;color:#475569;margin-top:2px;">${escapeHtml(desc)}</div>
+          <span style="color:var(--br-text-muted);font-size:11.5px;margin-left:6px;">${escapeHtml(r.folder)}</span>
+          <div style="font-size:12px;color:var(--br-text-secondary);margin-top:2px;">${escapeHtml(desc)}</div>
         </div>
         <div style="display:flex;align-items:center;gap:8px;">
           <span class="pill warn">Needs Review</span>
@@ -1089,20 +1138,20 @@ async function refreshMigrationState(knownPoll) {
     if (logs && logs.length > 0) {
       const logBox = document.getElementById("migration-live-log-box");
       logBox.innerHTML = logs.map(l => {
-        if (typeof l === 'string') return `<div style="font-family:Consolas, monospace;font-size:11.5px;color:#CBD5E1;line-height:1.5;">${escapeHtml(l)}</div>`;
+        if (typeof l === 'string') return `<div class="log-line">${escapeHtml(l)}</div>`;
         const timeStr = l.timestamp ? new Date(l.timestamp).toLocaleTimeString() : "";
         const lvl = (l.level || "INFO").toUpperCase();
-        let lvlColor = "#38BDF8";
-        if (lvl.includes("ERR")) lvlColor = "#F87171";
-        else if (lvl.includes("WARN")) lvlColor = "#FBBF24";
-        else if (lvl.includes("INFO")) lvlColor = "#34D399";
+        let lvlClass = "";
+        if (lvl.includes("ERR")) lvlClass = " is-err";
+        else if (lvl.includes("WARN")) lvlClass = " is-warn";
+        else if (lvl.includes("INFO")) lvlClass = " is-info";
         const code = l.eventCode ? `[${escapeHtml(l.eventCode)}] ` : "";
         const msg = l.message || "";
-        return `<div style="line-height:1.5;margin-bottom:2px;font-family:Consolas, monospace;font-size:11.5px;color:#CBD5E1;">
-          <span style="color:#64748B;">[${timeStr}]</span> 
-          <span style="color:${lvlColor};font-weight:600;">[${escapeHtml(lvl)}]</span> 
-          <span style="color:#94A3B8;">${code}</span>
-          <span style="color:#F1F5F9;">${escapeHtml(msg)}</span>
+        return `<div class="log-line">
+          <span class="log-ts">[${timeStr}]</span> 
+          <span class="log-lvl${lvlClass}">[${escapeHtml(lvl)}]</span> 
+          <span class="log-code">${code}</span>
+          <span class="log-msg">${escapeHtml(msg)}</span>
         </div>`;
       }).join("");
       logBox.scrollTop = logBox.scrollHeight;
@@ -1165,7 +1214,7 @@ function setStagePill(elId, count, status) {
 
 function clearLiveLogViewer() {
   const box = document.getElementById("migration-live-log-box");
-  if (box) box.innerHTML = "<div style='color:#64748B;font-family:Consolas, monospace;font-size:12px;'>Log cleared.</div>";
+  if (box) box.innerHTML = "<div class='log-empty'>Log cleared.</div>";
 }
 
 // -----------------------------------------------------------------------------
@@ -1246,7 +1295,7 @@ async function loadValidationSummary(force = false) {
     console.error("Failed loading validation summary:", err);
     if (grid) {
       grid.innerHTML = `
-        <div class="card" style="grid-column: 1 / -1; padding: 24px; text-align: center; color: #DC2626;">
+        <div class="card" style="grid-column: 1 / -1; padding: 24px; text-align: center; color: var(--br-danger);">
           <p style="margin: 0; font-size: 14px;">Error loading validation summary: ${escapeHtml(err.message)}</p>
           <button class="btn2 btn-sm" onclick="loadValidationSummary(true)" style="margin-top: 10px;">Retry</button>
         </div>`;
@@ -1310,13 +1359,13 @@ function getValidationStatusBadge(r) {
     const dur = r.durationMs ? `${(r.durationMs / 1000).toFixed(1)}s` : "OK";
     return `<span class="pill ok" style="font-size:11px;font-weight:600;">✓ Passed (${dur})</span>`;
   } else if (r.status === "DataSourceOffline") {
-    return `<span class="pill" style="background:#EFF6FF;color:#1D4ED8;border:1px solid #BFDBFE;font-size:11px;font-weight:600;">⚡ Data Source Offline</span>`;
+    return `<span class="pill" style="background:var(--br-info-bg);color:var(--br-primary);border:1px solid var(--br-info-border);font-size:11px;font-weight:600;">⚡ Data Source Offline</span>`;
   } else if (r.status === "NeedsManualCheck") {
     return `<span class="pill warn" style="font-size:11px;font-weight:600;" title="Requires parameters without defaults">⚠ Needs Parameters</span>`;
   } else if (r.status === "Failed") {
     return `<span class="pill warn" style="font-size:11px;font-weight:600;cursor:pointer;" onclick="openRenderLogs('${escapeHtml(r.path)}')" title="Click to view log">⚠ Needs Review</span>`;
   }
-  return `<span class="pill" style="font-size:11px;color:#64748B;">⚪ Not Validated</span>`;
+  return `<span class="pill" style="font-size:11px;color:var(--br-text-muted);">⚪ Not Validated</span>`;
 }
 
 function renderValidationEvidenceGrid() {
@@ -1347,7 +1396,7 @@ function renderValidationEvidenceGrid() {
   if (filtered.length === 0) {
     grid.style.display = "grid";
     grid.innerHTML = `
-      <div class="card" style="grid-column: 1 / -1; padding: 36px; text-align: center; color: #64748B;">
+      <div class="card" style="grid-column: 1 / -1; padding: 36px; text-align: center; color: var(--br-text-muted);">
         <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" style="margin-bottom: 8px; opacity: 0.6;">
           <circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line>
         </svg>
@@ -1376,20 +1425,20 @@ function renderValidationEvidenceGrid() {
             ${filtered.map(r => {
               const isSel = selectedValReportIds.has(r.reportId);
               const tagsHtml = (r.featureTags || []).map(t =>
-                `<span style="font-size:10.5px;font-weight:600;padding:1px 5px;border-radius:4px;background:#EFF6FF;color:#2563EB;border:1px solid #DBEAFE;margin-right:3px;">${escapeHtml(t)}</span>`
+                `<span style="font-size:10.5px;font-weight:600;padding:1px 5px;border-radius:4px;background:var(--br-info-bg);color:var(--br-primary);border:1px solid var(--br-info-border);margin-right:3px;">${escapeHtml(t)}</span>`
               ).join("");
               const thumbCell = r.screenshotUrl
-                ? `<img src="${r.screenshotUrl}?t=${Date.now()}" alt="${escapeHtml(r.name)}" onclick="openSnapshotZoom('${r.screenshotUrl}', '${escapeHtml(r.name)}')" style="width:68px;height:42px;object-fit:cover;object-position:top;border-radius:4px;border:1px solid #E2E8F0;cursor:pointer;" title="Click to expand snapshot">`
-                : `<span style="font-size:11px;color:#94A3B8;">—</span>`;
+                ? `<img src="${r.screenshotUrl}?t=${Date.now()}" alt="${escapeHtml(r.name)}" onclick="openSnapshotZoom('${r.screenshotUrl}', '${escapeHtml(r.name)}')" style="width:68px;height:42px;object-fit:cover;object-position:top;border-radius:4px;border:1px solid var(--br-border);cursor:pointer;" title="Click to expand snapshot">`
+                : `<span style="font-size:11px;color:var(--br-text-subtle);">—</span>`;
               const detailMsg = r.status === "DataSourceOffline"
-                ? `<span style="color:#0369A1;">RDL valid (DB offline in local preview)</span>`
-                : (r.errorMessage ? `<span style="color:#92400E;">${escapeHtml(r.errorMessage)}</span>` : `<span style="color:#64748B;">Ready</span>`);
+                ? `<span style="color:var(--br-info-text);">RDL valid (DB offline in local preview)</span>`
+                : (r.errorMessage ? `<span style="color:var(--br-warning-text);">${escapeHtml(r.errorMessage)}</span>` : `<span style="color:var(--br-text-muted);">Ready</span>`);
 
               return `
                 <tr>
                   <td class="check-cell"><input type="checkbox" ${isSel ? "checked" : ""} onchange="toggleValReportSelection('${r.reportId}', this.checked)"></td>
                   <td>${thumbCell}</td>
-                  <td><strong>${escapeHtml(r.name)}</strong><br><small style="color:#64748B;font-family:monospace;">${escapeHtml(r.path)}</small></td>
+                  <td><strong>${escapeHtml(r.name)}</strong><br><small style="color:var(--br-text-muted);font-family:monospace;">${escapeHtml(r.path)}</small></td>
                   <td>${getValidationStatusBadge(r)}</td>
                   <td style="font-size:12px;max-width:340px;">${tagsHtml ? `<div style="margin-bottom:3px;">${tagsHtml}</div>` : ""}${detailMsg}</td>
                   <td style="text-align:right;white-space:nowrap;">
@@ -1412,52 +1461,52 @@ function renderValidationEvidenceGrid() {
     const isSel = selectedValReportIds.has(r.reportId);
     // Feature tags
     const tagsHtml = (r.featureTags || []).map(t =>
-      `<span style="font-size:11px;font-weight:600;padding:2px 7px;border-radius:4px;background:#EFF6FF;color:#2563EB;border:1px solid #DBEAFE;">${escapeHtml(t)}</span>`
+      `<span style="font-size:11px;font-weight:600;padding:2px 7px;border-radius:4px;background:var(--br-info-bg);color:var(--br-primary);border:1px solid var(--br-info-border);">${escapeHtml(t)}</span>`
     ).join(" ");
 
     // Status Badge & Border
     const statusBadge = getValidationStatusBadge(r);
-    let borderStyle = "border: 1px solid #E2E8F0;";
-    if (r.status === "Passed" || r.status === "Approved") borderStyle = "border: 1px solid #BBF7D0;";
-    else if (r.status === "DataSourceOffline") borderStyle = "border: 1px solid #BFDBFE;";
-    else if (r.status === "NeedsManualCheck" || r.status === "Failed") borderStyle = "border: 1px solid #FED7AA;";
+    let borderStyle = "border: 1px solid var(--br-border);";
+    if (r.status === "Passed" || r.status === "Approved") borderStyle = "border: 1px solid var(--br-success-border);";
+    else if (r.status === "DataSourceOffline") borderStyle = "border: 1px solid var(--br-info-border);";
+    else if (r.status === "NeedsManualCheck" || r.status === "Failed") borderStyle = "border: 1px solid var(--br-warning-border);";
 
     // Thumbnail Preview
     let thumbHtml = "";
     if (r.screenshotUrl) {
       thumbHtml = `
-        <div style="height:150px;width:100%;background:#F8FAFC;border-bottom:1px solid #E2E8F0;position:relative;overflow:hidden;cursor:pointer;" onclick="openSnapshotZoom('${r.screenshotUrl}', '${escapeHtml(r.name)}')">
+        <div style="height:150px;width:100%;background:var(--br-surface-alt);border-bottom:1px solid var(--br-border);position:relative;overflow:hidden;cursor:pointer;" onclick="openSnapshotZoom('${r.screenshotUrl}', '${escapeHtml(r.name)}')">
           <img src="${r.screenshotUrl}?t=${Date.now()}" alt="${escapeHtml(r.name)}" style="width:100%;height:100%;object-fit:cover;object-position:top;" loading="lazy">
-          <div style="position:absolute;bottom:6px;right:6px;background:rgba(15,23,42,0.7);color:#FFF;font-size:10.5px;padding:2px 6px;border-radius:4px;backdrop-filter:blur(2px);">
+          <div style="position:absolute;bottom:6px;right:6px;background:rgba(15,23,42,0.7);color:var(--br-text-inverse);font-size:10.5px;padding:2px 6px;border-radius:4px;backdrop-filter:blur(2px);">
             🔍 Click to expand
           </div>
         </div>`;
     } else if (r.status === "DataSourceOffline") {
       thumbHtml = `
-        <div style="height:140px;width:100%;background:#F0F9FF;border-bottom:1px solid #BAE6FD;display:flex;flex-direction:column;align-items:center;justify-content:center;color:#0284C7;padding:12px;text-align:center;">
+        <div style="height:140px;width:100%;background:var(--br-info-bg);border-bottom:1px solid var(--br-info-border);display:flex;flex-direction:column;align-items:center;justify-content:center;color:var(--br-info);padding:12px;text-align:center;">
           <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" style="margin-bottom:6px;"><ellipse cx="12" cy="5" rx="9" ry="3"></ellipse><path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3"></path><path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5"></path></svg>
-          <span style="font-size:12.5px;font-weight:600;color:#0369A1;">Data Source Offline</span>
-          <small style="font-size:11px;color:#0284C7;margin-top:2px;">RDL syntax valid • Ready for Server upload</small>
+          <span style="font-size:12.5px;font-weight:600;color:var(--br-info-text);">Data Source Offline</span>
+          <small style="font-size:11px;color:var(--br-info);margin-top:2px;">RDL syntax valid • Ready for Server upload</small>
         </div>`;
     } else if (r.status === "NeedsManualCheck") {
       thumbHtml = `
-        <div style="height:140px;width:100%;background:#FFFBEB;border-bottom:1px solid #FEF3C7;display:flex;flex-direction:column;align-items:center;justify-content:center;color:#D97706;padding:12px;text-align:center;">
+        <div style="height:140px;width:100%;background:var(--br-warning-bg);border-bottom:1px solid var(--br-warning-border);display:flex;flex-direction:column;align-items:center;justify-content:center;color:var(--br-warning);padding:12px;text-align:center;">
           <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" style="margin-bottom:6px;"><path d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/></svg>
           <span style="font-size:12.5px;font-weight:600;">Requires Parameters</span>
-          <small style="font-size:11px;color:#92400E;margin-top:2px;">Open in Viewer to supply parameters</small>
+          <small style="font-size:11px;color:var(--br-warning-text);margin-top:2px;">Open in Viewer to supply parameters</small>
         </div>`;
     } else if (r.status === "Failed") {
       thumbHtml = `
-        <div style="height:140px;width:100%;background:#FFFBEB;border-bottom:1px solid #FEF3C7;display:flex;flex-direction:column;align-items:center;justify-content:center;color:#D97706;padding:12px;text-align:center;cursor:pointer;" onclick="openRenderLogs('${escapeHtml(r.path)}')">
+        <div style="height:140px;width:100%;background:var(--br-warning-bg);border-bottom:1px solid var(--br-warning-border);display:flex;flex-direction:column;align-items:center;justify-content:center;color:var(--br-warning);padding:12px;text-align:center;cursor:pointer;" onclick="openRenderLogs('${escapeHtml(r.path)}')">
           <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" style="margin-bottom:6px;"><path d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/></svg>
           <span style="font-size:12.5px;font-weight:600;">Needs Review</span>
-          <small style="font-size:11px;color:#92400E;margin-top:2px;max-width:90%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">
+          <small style="font-size:11px;color:var(--br-warning-text);margin-top:2px;max-width:90%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">
             ${escapeHtml(r.errorMessage || "Click to inspect log")}
           </small>
         </div>`;
     } else {
       thumbHtml = `
-        <div style="height:120px;width:100%;background:#F8FAFC;border-bottom:1px solid #E2E8F0;display:flex;flex-direction:column;align-items:center;justify-content:center;color:#94A3B8;padding:12px;text-align:center;">
+        <div style="height:120px;width:100%;background:var(--br-surface-alt);border-bottom:1px solid var(--br-border);display:flex;flex-direction:column;align-items:center;justify-content:center;color:var(--br-text-subtle);padding:12px;text-align:center;">
           <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" style="margin-bottom:6px;"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="16" y1="13" x2="8" y2="13"></line><line x1="16" y1="17" x2="8" y2="17"></line><polyline points="10 9 9 9 8 9"></polyline></svg>
           <span style="font-size:12px;font-weight:500;">Not validated yet</span>
         </div>`;
@@ -1468,27 +1517,27 @@ function renderValidationEvidenceGrid() {
         ${thumbHtml}
         <div style="padding:14px;flex:1;display:flex;flex-direction:column;">
           <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:6px;gap:8px;">
-            <label style="display:flex;align-items:center;gap:6px;cursor:pointer;font-weight:700;font-size:14px;color:#0F172A;word-break:break-word;">
+            <label style="display:flex;align-items:center;gap:6px;cursor:pointer;font-weight:700;font-size:14px;color:var(--br-text);word-break:break-word;">
               <input type="checkbox" ${isSel ? "checked" : ""} onchange="toggleValReportSelection('${r.reportId}', this.checked)">
               <span>${escapeHtml(r.name)}</span>
             </label>
             ${statusBadge}
           </div>
-          <div style="font-size:12px;color:#64748B;margin-bottom:8px;font-family:monospace;">${escapeHtml(r.path)}</div>
+          <div style="font-size:12px;color:var(--br-text-muted);margin-bottom:8px;font-family:monospace;">${escapeHtml(r.path)}</div>
 
           ${tagsHtml ? `<div style="display:flex;flex-wrap:wrap;gap:4px;margin-bottom:10px;">${tagsHtml}</div>` : ""}
 
           ${r.status === "DataSourceOffline" ? `
-            <div style="font-size:11.5px;color:#0369A1;background:#F0F9FF;border:1px solid #E0F2FE;border-radius:6px;padding:6px 8px;margin-bottom:10px;">
+            <div style="font-size:11.5px;color:var(--br-info-text);background:var(--br-info-bg);border:1px solid var(--br-info-border);border-radius:6px;padding:6px 8px;margin-bottom:10px;">
               RDL syntax verified. Database connection is offline in local preview; report is ready for Server upload.
             </div>` : ""}
 
           ${r.errorMessage && r.status === "Failed" ? `
-            <div style="font-size:11.5px;color:#92400E;background:#FFFBEB;border:1px solid #FEF3C7;border-radius:6px;padding:6px 8px;margin-bottom:10px;max-height:48px;overflow:hidden;text-overflow:ellipsis;">
+            <div style="font-size:11.5px;color:var(--br-warning-text);background:var(--br-warning-bg);border:1px solid var(--br-warning-border);border-radius:6px;padding:6px 8px;margin-bottom:10px;max-height:48px;overflow:hidden;text-overflow:ellipsis;">
               ${escapeHtml(r.errorMessage)}
             </div>` : ""}
 
-          <div style="margin-top:auto;display:flex;justify-content:space-between;align-items:center;padding-top:10px;border-top:1px solid #F1F5F9;">
+          <div style="margin-top:auto;display:flex;justify-content:space-between;align-items:center;padding-top:10px;border-top:1px solid var(--br-border-subtle);">
             <div style="display:flex;gap:6px;">
               <button class="btn2 btn-sm" onclick="runSingleReportValidation('${r.reportId}')" title="Run Playwright validation on this report only">
                 ▶ Validate
@@ -1501,7 +1550,7 @@ function renderValidationEvidenceGrid() {
               </button>
             </div>
             ${r.status === "Failed" || r.status === "DataSourceOffline" ? `
-              <button class="btn2 btn-sm" onclick="openRenderLogs('${escapeHtml(r.path)}')" style="padding:4px 8px;font-size:11px;color:#64748B;">
+              <button class="btn2 btn-sm" onclick="openRenderLogs('${escapeHtml(r.path)}')" style="padding:4px 8px;font-size:11px;color:var(--br-text-muted);">
                 📜 Log
               </button>` : ""}
           </div>
@@ -1724,32 +1773,32 @@ async function openRenderLogs(reportPath) {
 
   if (!modal || !body) return;
   title.innerText = `Diagnostic Error Logs: ${reportPath || "Report"}`;
-  body.innerHTML = "<p style='color:#64748B;'>Loading error logs...</p>";
+  body.innerHTML = "<p style='color:var(--br-text-muted);'>Loading error logs...</p>";
   modal.style.display = "flex";
 
   try {
     const logs = await Api.getRenderLogs(currentRun.id, reportPath);
     if (!logs || logs.length === 0) {
       body.innerHTML = `
-        <div style="padding:20px;text-align:center;color:#64748B;">
+        <div style="padding:20px;text-align:center;color:var(--br-text-muted);">
           <p style="margin:0;font-size:14px;">No internal runtime errors logged for this report.</p>
         </div>`;
       return;
     }
 
     body.innerHTML = logs.map(e => `
-      <div style="background:#FEF2F2;border:1px solid #FEE2E2;border-radius:8px;padding:12px;margin-bottom:12px;">
+      <div style="background:var(--br-danger-bg);border:1px solid var(--br-danger-border);border-radius:8px;padding:12px;margin-bottom:12px;">
         <div style="display:flex;justify-content:space-between;margin-bottom:6px;">
-          <strong style="color:#DC2626;font-size:13px;">${escapeHtml(e.errorType || "Error")} — ${escapeHtml(e.methodName || "Render")}</strong>
-          <small style="color:#64748B;">${new Date(e.timestampUtc).toLocaleTimeString()}</small>
+          <strong style="color:var(--br-danger);font-size:13px;">${escapeHtml(e.errorType || "Error")} — ${escapeHtml(e.methodName || "Render")}</strong>
+          <small style="color:var(--br-text-muted);">${new Date(e.timestampUtc).toLocaleTimeString()}</small>
         </div>
-        <div style="font-size:13px;color:#991B1B;margin-bottom:4px;font-weight:500;">${escapeHtml(e.message)}</div>
-        ${e.exceptionMessage ? `<div style="font-size:12px;color:#7F1D1D;margin-bottom:4px;font-family:monospace;">Exception: ${escapeHtml(e.exceptionMessage)}</div>` : ""}
-        ${e.stackTrace ? `<pre style="font-size:11px;background:#FFF;border:1px solid #FECACA;border-radius:4px;padding:8px;max-height:140px;overflow:auto;margin:6px 0 0 0;color:#334155;">${escapeHtml(e.stackTrace)}</pre>` : ""}
+        <div style="font-size:13px;color:var(--br-danger-text);margin-bottom:4px;font-weight:500;">${escapeHtml(e.message)}</div>
+        ${e.exceptionMessage ? `<div style="font-size:12px;color:var(--br-danger-text);margin-bottom:4px;font-family:monospace;">Exception: ${escapeHtml(e.exceptionMessage)}</div>` : ""}
+        ${e.stackTrace ? `<pre style="font-size:11px;background:var(--br-surface);border:1px solid var(--br-danger-border);border-radius:4px;padding:8px;max-height:140px;overflow:auto;margin:6px 0 0 0;color:var(--br-text-secondary);">${escapeHtml(e.stackTrace)}</pre>` : ""}
       </div>
     `).join("");
   } catch (err) {
-    body.innerHTML = `<p style="color:#DC2626;">Failed loading error logs: ${escapeHtml(err.message)}</p>`;
+    body.innerHTML = `<p style="color:var(--br-danger);">Failed loading error logs: ${escapeHtml(err.message)}</p>`;
   }
 }
 
@@ -1787,7 +1836,7 @@ async function loadServerUploadedReports() {
     const uploaded = (res && res.reports) ? res.reports.filter(r => r.state === "Uploaded" || r.uploaded) : [];
 
     if (uploaded.length === 0) {
-      tbody.innerHTML = `<tr><td colspan="4" style="text-align:center;color:#64748B;padding:16px;">No reports have completed upload to Bold Reports Server yet.</td></tr>`;
+      tbody.innerHTML = `<tr><td colspan="4" style="text-align:center;color:var(--br-text-muted);padding:16px;">No reports have completed upload to Bold Reports Server yet.</td></tr>`;
       return;
     }
 
@@ -1871,10 +1920,10 @@ async function refreshCutoverState() {
         const label = g.passed ? "Passed" : (isAdvisory ? "Optional" : "Action Required");
         const cls = g.passed ? "ok" : (isAdvisory ? "" : "warn");
         return `
-        <div style="display:flex;align-items:center;justify-content:space-between;padding:10px 14px;background:#F8FAFC;border:1px solid #E2E8F0;border-radius:8px;">
+        <div style="display:flex;align-items:center;justify-content:space-between;padding:10px 14px;background:var(--br-surface-alt);border:1px solid var(--br-border);border-radius:8px;">
           <div>
-            <strong style="color:#0F172A;font-size:13.5px;">${escapeHtml(g.name)}</strong>
-            <div style="color:#64748B;font-size:12px;margin-top:2px;">${escapeHtml(g.detail)}</div>
+            <strong style="color:var(--br-text);font-size:13.5px;">${escapeHtml(g.name)}</strong>
+            <div style="color:var(--br-text-muted);font-size:12px;margin-top:2px;">${escapeHtml(g.detail)}</div>
           </div>
           <span class="pill ${cls}">${label}</span>
         </div>
@@ -1887,9 +1936,9 @@ async function refreshCutoverState() {
     if (footer) {
       const blocking = (gatesRes?.gates || []).filter(g => !g.passed && !advisory.has(g.name));
       if (gatesRes?.ready) {
-        footer.innerHTML = '<span style="color:#059669;font-weight:600;">✓ All blocking gates passed — ready for cutover sign-off.</span>';
+        footer.innerHTML = '<span style="color:var(--br-success);font-weight:600;">✓ All blocking gates passed — ready for cutover sign-off.</span>';
       } else {
-        footer.innerHTML = `<span style="color:#B45309;font-weight:600;">${blocking.length} gate(s) still need attention before cutover.</span>`;
+        footer.innerHTML = `<span style="color:var(--br-warning-text);font-weight:600;">${blocking.length} gate(s) still need attention before cutover.</span>`;
       }
     }
 
@@ -1989,9 +2038,9 @@ async function executeLocalFolderMigration() {
     const logs = await Api.getLocalFolderLogs();
     if (logs && logs.length > 0) {
       logBox.innerHTML = logs.map(l => {
-        if (typeof l === 'string') return `<div style="font-family:Consolas, monospace;font-size:11.5px;color:#CBD5E1;line-height:1.5;">${escapeHtml(l)}</div>`;
+        if (typeof l === 'string') return `<div class="log-line">${escapeHtml(l)}</div>`;
         const timeStr = l.timestamp ? new Date(l.timestamp).toLocaleTimeString() : "";
-        return `<div style="font-family:Consolas, monospace;font-size:11.5px;color:#CBD5E1;line-height:1.5;">[${timeStr}] ${escapeHtml(l.message || JSON.stringify(l))}</div>`;
+        return `<div class="log-line"><span class="log-ts">[${timeStr}]</span> ${escapeHtml(l.message || JSON.stringify(l))}</div>`;
       }).join("");
       logBox.scrollTop = logBox.scrollHeight;
     }
@@ -2008,9 +2057,9 @@ async function executeLocalFolderMigration() {
 
     if (res.logs && res.logs.length > 0) {
       logBox.innerHTML = res.logs.map(l => {
-        if (typeof l === 'string') return `<div style="font-family:Consolas, monospace;font-size:11.5px;color:#CBD5E1;line-height:1.5;">${escapeHtml(l)}</div>`;
+        if (typeof l === 'string') return `<div class="log-line">${escapeHtml(l)}</div>`;
         const timeStr = l.timestamp ? new Date(l.timestamp).toLocaleTimeString() : "";
-        return `<div style="font-family:Consolas, monospace;font-size:11.5px;color:#CBD5E1;line-height:1.5;">[${timeStr}] ${escapeHtml(l.message || JSON.stringify(l))}</div>`;
+        return `<div class="log-line"><span class="log-ts">[${timeStr}]</span> ${escapeHtml(l.message || JSON.stringify(l))}</div>`;
       }).join("");
       logBox.scrollTop = logBox.scrollHeight;
     }
@@ -2018,8 +2067,8 @@ async function executeLocalFolderMigration() {
     const linksDiv = document.getElementById("lf-download-links");
     linksDiv.innerHTML = `
       <span class="pill ok" style="padding:6px 12px;">Migration Completed</span>
-      ${res.resultCsvPath ? `<span class="pill" style="background:#F1F5F9;border:1px solid #CBD5E1;">CSV Summary: ${escapeHtml(res.resultCsvPath)}</span>` : ""}
-      ${res.summaryMarkdownPath ? `<span class="pill" style="background:#F1F5F9;border:1px solid #CBD5E1;">Markdown Summary: ${escapeHtml(res.summaryMarkdownPath)}</span>` : ""}
+      ${res.resultCsvPath ? `<span class="pill" style="background:var(--br-surface-hover);border:1px solid var(--br-border-strong);">CSV Summary: ${escapeHtml(res.resultCsvPath)}</span>` : ""}
+      ${res.summaryMarkdownPath ? `<span class="pill" style="background:var(--br-surface-hover);border:1px solid var(--br-border-strong);">Markdown Summary: ${escapeHtml(res.summaryMarkdownPath)}</span>` : ""}
     `;
 
     showToast("Local folder migration completed successfully.");
@@ -2144,15 +2193,15 @@ async function handleLandingFileScan(event) {
         <div style="display:flex;justify-content:space-between;align-items:center;">
           <div>
             <strong>${escapeHtml(data.fileName)}</strong>
-            <span style="color:#64748B;font-size:12px;margin-left:8px;">Schema: ${escapeHtml(data.schemaVersion)}</span>
+            <span style="color:var(--br-text-muted);font-size:12px;margin-left:8px;">Schema: ${escapeHtml(data.schemaVersion)}</span>
           </div>
           <span class="${badgeClass}">${escapeHtml(data.bucket)}</span>
         </div>
-        <p style="margin:8px 0 0;font-size:13px;color:#334155;">${escapeHtml(data.message)}</p>
+        <p style="margin:8px 0 0;font-size:13px;color:var(--br-text-secondary);">${escapeHtml(data.message)}</p>
       </div>
     `;
   } catch (err) {
-    resultsDiv.innerHTML = `<div class="card" style="padding:16px;color:#DC2626;">Scan failed: ${escapeHtml(err.message)}</div>`;
+    resultsDiv.innerHTML = `<div class="card" style="padding:16px;color:var(--br-danger);">Scan failed: ${escapeHtml(err.message)}</div>`;
   }
 }
 
@@ -2213,7 +2262,7 @@ function showToast(msg) {
   if (!toast) {
     toast = document.createElement("div");
     toast.id = "app-toast";
-    toast.style.cssText = "position:fixed;bottom:24px;right:24px;background:#0F172A;color:#FFFFFF;padding:12px 20px;border-radius:8px;font-size:13.5px;font-weight:500;box-shadow:0 10px 25px -3px rgba(0,0,0,0.25);z-index:9999;transition:opacity 0.2s ease;";
+    toast.style.cssText = "position:fixed;bottom:24px;right:24px;background:var(--br-navy);color:var(--br-text-inverse);padding:12px 20px;border-radius:8px;font-size:13.5px;font-weight:500;box-shadow:0 10px 25px -3px rgba(0,0,0,0.25);z-index:9999;transition:opacity 0.2s ease;";
     document.body.appendChild(toast);
   }
   toast.innerText = msg;
