@@ -40,6 +40,7 @@ public interface IMigrationStore
 
     Task AddValidationResultAsync(ValidationResult result, CancellationToken ct = default);
     Task<IReadOnlyList<ValidationResult>> GetValidationResultsAsync(Guid reportId, CancellationToken ct = default);
+    Task<IReadOnlyList<ValidationResult>> GetValidationResultsByRunAsync(Guid runId, CancellationToken ct = default);
 
     Task AddApprovalAsync(Approval approval, CancellationToken ct = default);
     Task<Approval?> GetApprovalAsync(Guid reportId, CancellationToken ct = default);

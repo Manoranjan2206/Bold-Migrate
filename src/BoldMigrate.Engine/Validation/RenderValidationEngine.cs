@@ -128,8 +128,8 @@ public class RenderValidationEngine
             }
         }
 
-        // Ensure screenshots staging directory exists
-        var runDir = Path.Combine(Directory.GetCurrentDirectory(), "staging", runId.ToString(), "screenshots");
+        // Ensure screenshots staging directory exists inside the run's IStagingStore folder
+        var runDir = Path.Combine(_staging.GetRunStagingPath(runId), "screenshots");
         try
         {
             Directory.CreateDirectory(runDir);

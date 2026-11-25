@@ -1,4 +1,5 @@
 using System.Text.Json;
+using BoldMigrate.Core.Configuration;
 
 namespace BoldMigrate.Engine.Transform;
 
@@ -7,10 +8,14 @@ public class CompatibilityRulesLoader
     private RulesFileFormat? _cachedRules;
     private DateTime _lastLoadedUtc = DateTime.MinValue;
     private readonly string _rulesFilePath;
+    private readonly int _refreshHours;
+    private readonly object _lock = new();
 
-    public CompatibilityRulesLoader(string? rulesFilePath = null)
+    public CompatibilityRulesLoader(string? rulesFilePath = null, MigrationSettings? settings = null)
     {
-        _rulesFilePath = ResolveRulesFilePath(rulesFilePath);
+        var configured = !string.IsNullOrWhiteSpace(rulesFilePath) ? rulesFilePath : settings?.TransformRulesUrl;
+        _rulesFilePath = ResolveRulesFilePath(configured);
+        _refreshHours = settings?.TransformRulesRefreshHours ?? 24;
     }
 
     public static string ResolveRulesFilePath(string? configuredPath = null)
@@ -46,37 +51,40 @@ public class CompatibilityRulesLoader
 
     public RulesFileFormat LoadRules(bool forceReload = false)
     {
-        if (!forceReload && _cachedRules != null && (DateTime.UtcNow - _lastLoadedUtc).TotalHours < 24)
+        lock (_lock)
         {
-            return _cachedRules;
-        }
-
-        if (File.Exists(_rulesFilePath))
-        {
-            var json = File.ReadAllText(_rulesFilePath);
-            var parsed = JsonSerializer.Deserialize<RulesFileFormat>(json);
-            if (parsed != null)
+            if (!forceReload && _cachedRules != null && (DateTime.UtcNow - _lastLoadedUtc).TotalHours < _refreshHours)
             {
-                // Validate that every rule has an article link per spec
-                foreach (var rule in parsed.Rules)
-                {
-                    if (string.IsNullOrWhiteSpace(rule.Article))
-                    {
-                        throw new InvalidOperationException($"Rule '{rule.Code}' has no knowledge base article address. All rules MUST have an article link.");
-                    }
-                }
-
-                _cachedRules = parsed;
-                _lastLoadedUtc = DateTime.UtcNow;
-                return parsed;
+                return _cachedRules;
             }
-        }
 
-        // Fallback default rules if file is missing
-        var fallback = GetFallbackRules();
-        _cachedRules = fallback;
-        _lastLoadedUtc = DateTime.UtcNow;
-        return fallback;
+            if (File.Exists(_rulesFilePath))
+            {
+                var json = File.ReadAllText(_rulesFilePath);
+                var parsed = JsonSerializer.Deserialize<RulesFileFormat>(json);
+                if (parsed != null)
+                {
+                    // Validate that every rule has an article link per spec
+                    foreach (var rule in parsed.Rules)
+                    {
+                        if (string.IsNullOrWhiteSpace(rule.Article))
+                        {
+                            throw new InvalidOperationException($"Rule '{rule.Code}' has no knowledge base article address. All rules MUST have an article link.");
+                        }
+                    }
+
+                    _cachedRules = parsed;
+                    _lastLoadedUtc = DateTime.UtcNow;
+                    return parsed;
+                }
+            }
+
+            // Fallback default rules if file is missing
+            var fallback = GetFallbackRules();
+            _cachedRules = fallback;
+            _lastLoadedUtc = DateTime.UtcNow;
+            return fallback;
+        }
     }
 
     public static RulesFileFormat GetFallbackRules()

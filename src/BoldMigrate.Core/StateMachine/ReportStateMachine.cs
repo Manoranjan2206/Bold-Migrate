@@ -40,6 +40,7 @@ public static class ReportStateMachine
         (ReportState.UploadFailed, ReportState.Queued),
         (ReportState.UploadFailed, ReportState.Uploading),
         (ReportState.Uploaded, ReportState.Validating),
+        (ReportState.Uploaded, ReportState.Uploading),
     };
 
     /// <summary>

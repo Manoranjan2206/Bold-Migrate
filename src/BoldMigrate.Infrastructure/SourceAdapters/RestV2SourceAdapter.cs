@@ -8,12 +8,13 @@ using BoldMigrate.Core.Interfaces;
 
 namespace BoldMigrate.Infrastructure.SourceAdapters;
 
-public class RestV2SourceAdapter : ISourceCatalog
+public class RestV2SourceAdapter : ISourceCatalog, IDisposable
 {
     private readonly HttpClient _httpClient;
+    private readonly SocketsHttpHandler _handler;
     private readonly string _baseUrl;
 
-    public RestV2SourceAdapter(string baseUrl, NetworkCredential? credential = null)
+    public RestV2SourceAdapter(string baseUrl, NetworkCredential? credential = null, HttpMessageHandler? handlerOverride = null)
     {
         var clean = BoldMigrate.Core.Common.HostResolver.Resolve(baseUrl).TrimEnd('/');
         if (clean.EndsWith("/ReportServer", StringComparison.OrdinalIgnoreCase))
@@ -22,22 +23,25 @@ public class RestV2SourceAdapter : ISourceCatalog
         }
         _baseUrl = clean;
 
-        var handler = new HttpClientHandler();
-        if (credential != null)
+        _handler = new SocketsHttpHandler
         {
-            handler.Credentials = credential;
-            handler.PreAuthenticate = true;
-        }
-        else
-        {
-            handler.UseDefaultCredentials = true;
-        }
-
-        _httpClient = new HttpClient(handler)
-        {
-            Timeout = TimeSpan.FromSeconds(100)
+            PooledConnectionLifetime = TimeSpan.FromMinutes(2),
+            UseCookies = false,
+            PreAuthenticate = true,
+            Credentials = credential ?? CredentialCache.DefaultCredentials
         };
+
+        _httpClient = handlerOverride != null
+            ? new HttpClient(handlerOverride, disposeHandler: false) { Timeout = TimeSpan.FromSeconds(100) }
+            : new HttpClient(_handler, disposeHandler: true) { Timeout = TimeSpan.FromSeconds(100) };
         _httpClient.DefaultRequestHeaders.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
+    }
+
+    public void Dispose()
+    {
+        _httpClient.Dispose();
+        _handler.Dispose();
+        GC.SuppressFinalize(this);
     }
 
     private string GetUrl(string relativePath) => $"{_baseUrl}/{relativePath.TrimStart('/')}";
@@ -134,52 +138,49 @@ public class RestV2SourceAdapter : ISourceCatalog
     public async Task<IReadOnlyList<CatalogItemDto>> ListItemsAsync(CancellationToken ct = default)
     {
         var items = new List<CatalogItemDto>();
-        try
+        var res = await _httpClient.GetAsync(GetUrl("api/v2.0/CatalogItems"), ct);
+        if (!res.IsSuccessStatusCode)
         {
-            var res = await _httpClient.GetAsync(GetUrl("api/v2.0/CatalogItems"), ct);
-            if (!res.IsSuccessStatusCode) return items;
+            throw new HttpRequestException($"SSRS REST v2.0 CatalogItems returned HTTP {(int)res.StatusCode} ({res.ReasonPhrase}).");
+        }
 
-            using var doc = await JsonDocument.ParseAsync(await res.Content.ReadAsStreamAsync(ct), cancellationToken: ct);
-            if (doc.RootElement.TryGetProperty("value", out var valueElem) && valueElem.ValueKind == JsonValueKind.Array)
+        using var doc = await JsonDocument.ParseAsync(await res.Content.ReadAsStreamAsync(ct), cancellationToken: ct);
+        if (doc.RootElement.TryGetProperty("value", out var valueElem) && valueElem.ValueKind == JsonValueKind.Array)
+        {
+            foreach (var item in valueElem.EnumerateArray())
             {
-                foreach (var item in valueElem.EnumerateArray())
+                var id = item.TryGetProperty("Id", out var idProp) ? idProp.GetString() ?? "" : "";
+                var name = item.TryGetProperty("Name", out var nameProp) ? nameProp.GetString() ?? "" : "";
+                var path = item.TryGetProperty("Path", out var pathProp) ? pathProp.GetString() ?? "" : "";
+                var typeStr = item.TryGetProperty("Type", out var typeProp) ? typeProp.GetString() ?? "" : "";
+                var size = item.TryGetProperty("Size", out var sizeProp) && sizeProp.TryGetInt64(out var s) ? s : 0;
+                var modDate = item.TryGetProperty("ModifiedDate", out var mdProp) && mdProp.TryGetDateTime(out var md) ? md : DateTime.UtcNow;
+
+                var itemType = typeStr switch
                 {
-                    var id = item.TryGetProperty("Id", out var idProp) ? idProp.GetString() ?? "" : "";
-                    var name = item.TryGetProperty("Name", out var nameProp) ? nameProp.GetString() ?? "" : "";
-                    var path = item.TryGetProperty("Path", out var pathProp) ? pathProp.GetString() ?? "" : "";
-                    var typeStr = item.TryGetProperty("Type", out var typeProp) ? typeProp.GetString() ?? "" : "";
-                    var size = item.TryGetProperty("Size", out var sizeProp) && sizeProp.TryGetInt64(out var s) ? s : 0;
-                    var modDate = item.TryGetProperty("ModifiedDate", out var mdProp) && mdProp.TryGetDateTime(out var md) ? md : DateTime.UtcNow;
+                    "Folder" => ItemType.Folder,
+                    "Report" => ItemType.Report,
+                    "DataSource" => ItemType.DataSource,
+                    "DataSet" => ItemType.DataSet,
+                    "Resource" => ItemType.Resource,
+                    _ => ItemType.Unsupported
+                };
 
-                    var itemType = typeStr switch
-                    {
-                        "Folder" => ItemType.Folder,
-                        "Report" => ItemType.Report,
-                        "DataSource" => ItemType.DataSource,
-                        "DataSet" => ItemType.DataSet,
-                        "Resource" => ItemType.Resource,
-                        _ => ItemType.Unsupported
-                    };
+                var parentPath = path.Contains('/') ? path[..path.LastIndexOf('/')] : "";
 
-                    var parentPath = path.Contains('/') ? path[..path.LastIndexOf('/')] : "";
-
-                    items.Add(new CatalogItemDto
-                    {
-                        Id = id,
-                        Name = name,
-                        Path = path,
-                        ParentPath = string.IsNullOrEmpty(parentPath) ? "/" : parentPath,
-                        ItemType = itemType,
-                        SizeBytes = size,
-                        ModifiedUtc = modDate
-                    });
-                }
+                items.Add(new CatalogItemDto
+                {
+                    Id = id,
+                    Name = name,
+                    Path = path,
+                    ParentPath = string.IsNullOrEmpty(parentPath) ? "/" : parentPath,
+                    ItemType = itemType,
+                    SizeBytes = size,
+                    ModifiedUtc = modDate
+                });
             }
         }
-        catch
-        {
-            // fallback
-        }
+
         return items;
     }
 

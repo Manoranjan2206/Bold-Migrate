@@ -5,7 +5,10 @@ using System.Text.Encodings.Web;
 using System.Text.Json;
 using System.Text.RegularExpressions;
 using System.Xml;
+using BoldMigrate.Core.Configuration;
 using BoldMigrate.Core.Dto;
+using BoldMigrate.Engine.Logging;
+using BoldMigrate.Engine.Preview;
 using BoldMigrate.Engine.Upload;
 using Microsoft.Extensions.Logging;
 
@@ -20,9 +23,8 @@ namespace BoldMigrate.Engine.LocalFolder;
 public class LocalFolderMigrationService
 {
     private readonly ILogger<LocalFolderMigrationService> _logger;
-    private readonly Dictionary<string, string> _datasetLookup = new(StringComparer.OrdinalIgnoreCase);
+    private readonly MigrationSettings _settings;
     private readonly List<string> _logs = new();
-    private string _logFile = string.Empty;
 
     // Matches PowerShell's ConvertTo-Json behaviour.
     // Prevents System.Text.Json from escaping '+' (and other chars) to \u002B
@@ -33,9 +35,12 @@ public class LocalFolderMigrationService
         WriteIndented = false
     };
 
-    public LocalFolderMigrationService(ILogger<LocalFolderMigrationService> logger)
+    public LocalFolderMigrationService(
+        ILogger<LocalFolderMigrationService> logger,
+        MigrationSettings? settings = null)
     {
         _logger = logger;
+        _settings = settings ?? new MigrationSettings();
     }
 
     public IReadOnlyList<string> CurrentLogs
@@ -46,20 +51,27 @@ public class LocalFolderMigrationService
         }
     }
 
-    private void WriteLog(string message, string? phaseLogFile = null)
+    private sealed class RunContext
     {
-        var line = $"{DateTime.UtcNow:yyyy-MM-dd HH:mm:ss} | {message}";
+        public string LogFile { get; init; } = string.Empty;
+        public Dictionary<string, string> DatasetLookup { get; } = new(StringComparer.OrdinalIgnoreCase);
+    }
+
+    private void WriteLog(RunContext ctx, string message, string? phaseLogFile = null)
+    {
+        var safeMsg = Redactor.RedactSecrets(message);
+        var line = $"{DateTime.UtcNow:yyyy-MM-dd HH:mm:ss} | {safeMsg}";
         lock (_logs)
         {
             _logs.Add(line);
             if (_logs.Count > 1000) _logs.RemoveAt(0);
         }
 
-        _logger.LogInformation("{Message}", message);
+        _logger.LogInformation("{Message}", safeMsg);
 
-        if (!string.IsNullOrEmpty(_logFile))
+        if (!string.IsNullOrEmpty(ctx.LogFile))
         {
-            try { File.AppendAllText(_logFile, line + Environment.NewLine); } catch { }
+            try { File.AppendAllText(ctx.LogFile, line + Environment.NewLine); } catch { }
         }
 
         if (!string.IsNullOrEmpty(phaseLogFile))
@@ -68,24 +80,67 @@ public class LocalFolderMigrationService
         }
     }
 
+    private string ValidateFolderPath(string? rawPath, string paramName)
+    {
+        if (string.IsNullOrWhiteSpace(rawPath))
+        {
+            throw new ArgumentException($"{paramName} is required.", paramName);
+        }
+
+        if (rawPath.Contains("..", StringComparison.Ordinal))
+        {
+            throw new InvalidOperationException($"{paramName} cannot contain '..' path traversal segments.");
+        }
+
+        var full = Path.GetFullPath(rawPath.Trim());
+        var roots = _settings.AllowedLocalFolderRoots;
+        if (roots is { Length: > 0 })
+        {
+            var allowed = roots
+                .Where(r => !string.IsNullOrWhiteSpace(r))
+                .Select(r => Path.GetFullPath(r).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar))
+                .Any(root => full.Equals(root, StringComparison.OrdinalIgnoreCase) ||
+                             full.StartsWith(root + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase));
+            if (!allowed)
+            {
+                throw new UnauthorizedAccessException(
+                    $"Path '{full}' for {paramName} is outside BoldMigrate:AllowedLocalFolderRoots.");
+            }
+        }
+
+        return full;
+    }
+
+    private static XmlDocument LoadXmlSafe(string filePath)
+    {
+        var xml = new XmlDocument { XmlResolver = null };
+        using var fs = File.OpenRead(filePath);
+        using var reader = XmlReader.Create(fs, new XmlReaderSettings { DtdProcessing = DtdProcessing.Prohibit });
+        xml.Load(reader);
+        return xml;
+    }
+
     public async Task<LocalFolderMigrationResult> RunMigrationAsync(LocalFolderMigrationRequest request, CancellationToken ct = default)
     {
         var result = new LocalFolderMigrationResult();
         var reportRows = new List<LocalMigrationReportRow>();
         var inventoryRecords = new List<InventoryRecord>();
         var itemResults = new List<ItemResultEntry>();
+        var ctx = new RunContext();
 
         lock (_logs) { _logs.Clear(); }
 
         try
         {
+            var reportFolder = ValidateFolderPath(request.ReportFolder, nameof(request.ReportFolder));
             var logDir = !string.IsNullOrWhiteSpace(request.LogFolder)
-                ? request.LogFolder
+                ? ValidateFolderPath(request.LogFolder, nameof(request.LogFolder))
                 : Path.Combine(Directory.GetCurrentDirectory(), "logs", $"migration-{DateTime.UtcNow:yyyyMMddHHmmss}");
 
             Directory.CreateDirectory(logDir);
-            _logFile = Path.Combine(logDir, "MigrationLog.txt");
-            result.LogFilePath = _logFile;
+            var logFile = Path.Combine(logDir, "MigrationLog.txt");
+            ctx = new RunContext { LogFile = logFile };
+            result.LogFilePath = logFile;
 
             // Phase logs matching Migration Scripts layout
             var preflightLog = Path.Combine(logDir, "preflight.log");
@@ -100,11 +155,11 @@ public class LocalFolderMigrationService
                 if (!File.Exists(plf)) File.WriteAllText(plf, $"# Phase log created {DateTime.UtcNow:O}" + Environment.NewLine);
             }
 
-            WriteLog("==================================================", preflightLog);
-            WriteLog("BOLD MIGRATE: Local Estate Migration Initiated", preflightLog);
-            WriteLog($"Target Server: {request.ServerUrl} (Tenant: {request.TenantId})", preflightLog);
-            WriteLog($"Report Folder: {request.ReportFolder}", preflightLog);
-            WriteLog("==================================================", preflightLog);
+            WriteLog(ctx, "==================================================", preflightLog);
+            WriteLog(ctx, "BOLD MIGRATE: Local Estate Migration Initiated", preflightLog);
+            WriteLog(ctx, $"Target Server: {request.ServerUrl} (Tenant: {request.TenantId})", preflightLog);
+            WriteLog(ctx, $"Report Folder: {reportFolder}", preflightLog);
+            WriteLog(ctx, "==================================================", preflightLog);
 
             // Optional Structured Output Layout (Export/Reports, Export/Datasets, Export/Datasources)
             string? exportReportsDir = null;
@@ -125,53 +180,58 @@ public class LocalFolderMigrationService
             }
 
             // 1. Backup Phase
-            if (!string.IsNullOrWhiteSpace(request.BackupFolder) && Directory.Exists(request.ReportFolder))
+            if (!string.IsNullOrWhiteSpace(request.BackupFolder) && Directory.Exists(reportFolder))
             {
-                Directory.CreateDirectory(request.BackupFolder);
-                WriteLog($"Creating backup of RDL files in: {request.BackupFolder}", exportLog);
-                var rdlFiles = Directory.GetFiles(request.ReportFolder, "*.rdl", SearchOption.AllDirectories);
+                var backupFolder = ValidateFolderPath(request.BackupFolder, nameof(request.BackupFolder));
+                Directory.CreateDirectory(backupFolder);
+                WriteLog(ctx, $"Creating backup of RDL files in: {backupFolder}", exportLog);
+                var rdlFiles = Directory.GetFiles(reportFolder, "*.rdl", SearchOption.AllDirectories);
                 foreach (var rdl in rdlFiles)
                 {
-                    var rel = Path.GetRelativePath(request.ReportFolder, rdl);
-                    var dest = Path.Combine(request.BackupFolder, rel);
+                    var rel = Path.GetRelativePath(reportFolder, rdl);
+                    var dest = Path.Combine(backupFolder, rel);
                     var destDir = Path.GetDirectoryName(dest);
                     if (!string.IsNullOrEmpty(destDir)) Directory.CreateDirectory(destDir);
                     File.Copy(rdl, dest, true);
                 }
-                WriteLog($"Backed up {rdlFiles.Length} report definitions successfully.", exportLog);
+                WriteLog(ctx, $"Backed up {rdlFiles.Length} report definitions successfully.", exportLog);
             }
 
             // 2. Authentication to Bold Reports
-            var client = new DestinationClient(request.ServerUrl, request.BearerToken);
+            using var client = new DestinationClient(request.ServerUrl, request.BearerToken);
             if (!string.IsNullOrWhiteSpace(request.BearerToken))
             {
                 client.SetBearerToken(request.BearerToken);
-                WriteLog("Authenticated with direct Bearer JWT token.", preflightLog);
+                WriteLog(ctx, "Authenticated with direct Bearer JWT token.", preflightLog);
             }
             else if (!string.IsNullOrWhiteSpace(request.Username) && !string.IsNullOrWhiteSpace(request.Password))
             {
-                WriteLog("Authenticating with Bold Reports administrator credentials...", preflightLog);
+                WriteLog(ctx, "Authenticating with Bold Reports administrator credentials...", preflightLog);
                 try
                 {
                     await client.AuthenticateAsync(request.Username, request.Password, ct);
-                    WriteLog("Authentication successful. OAuth2 bearer token obtained.", preflightLog);
+                    WriteLog(ctx, "Authentication successful. OAuth2 bearer token obtained.", preflightLog);
                 }
                 catch (Exception ex)
                 {
-                    WriteLog($"Warning: Destination authentication probing noted: {ex.Message}. Proceeding with API client.", preflightLog);
+                    WriteLog(ctx, $"Warning: Destination authentication failed: {ex.Message}", preflightLog);
                 }
             }
 
-            // 3. Upload DataSources (*.rsds)
-            var dsFolder = !string.IsNullOrWhiteSpace(request.DataSourceFolder) && Directory.Exists(request.DataSourceFolder)
-                ? request.DataSourceFolder
+            // 3. Upload DataSources (*.rsds / *.rds)
+            var dsFolder = !string.IsNullOrWhiteSpace(request.DataSourceFolder)
+                ? ValidateFolderPath(request.DataSourceFolder, nameof(request.DataSourceFolder))
                 : null;
+            if (dsFolder != null && !Directory.Exists(dsFolder)) dsFolder = null;
 
             if (dsFolder != null)
             {
-                var rsdsFiles = Directory.GetFiles(dsFolder, "*.rsds", SearchOption.AllDirectories);
+                var rsdsFiles = Directory.GetFiles(dsFolder, "*.rsds", SearchOption.AllDirectories)
+                    .Concat(Directory.GetFiles(dsFolder, "*.rds", SearchOption.AllDirectories))
+                    .Distinct(StringComparer.OrdinalIgnoreCase)
+                    .ToArray();
                 result.TotalDataSources = rsdsFiles.Length;
-                WriteLog($"Discovered {rsdsFiles.Length} DataSource (.rsds) definition(s) in {dsFolder}", datasourcesLog);
+                WriteLog(ctx, $"Discovered {rsdsFiles.Length} DataSource definition(s) in {dsFolder}", datasourcesLog);
 
                 foreach (var dsFile in rsdsFiles)
                 {
@@ -188,44 +248,45 @@ public class LocalFolderMigrationService
 
                     try
                     {
-                        var xml = new XmlDocument();
-                        xml.Load(dsFile);
+                        var rawBytes = await File.ReadAllBytesAsync(dsFile, ct);
+                        var parsed = SharedDataSourceDefinition.Parse(rawBytes);
 
-                        var connectNode = xml.SelectSingleNode("//DataSourceDefinition/ConnectString");
-                        var extNode = xml.SelectSingleNode("//DataSourceDefinition/Extension");
-                        var userNode = xml.SelectSingleNode("//DataSourceDefinition/UserName");
-                        var passNode = xml.SelectSingleNode("//DataSourceDefinition/PassWord");
-
-                        var connectString = connectNode?.InnerText?.Trim() ?? "";
-                        var extension = extNode?.InnerText?.Trim() ?? "SQL";
+                        var xml = LoadXmlSafe(dsFile);
+                        var connectString = parsed?.ConnectString
+                            ?? xml.SelectSingleNode("//*[local-name()='ConnectString']")?.InnerText?.Trim()
+                            ?? "";
+                        var extension = parsed?.Extension
+                            ?? xml.SelectSingleNode("//*[local-name()='Extension']")?.InnerText?.Trim()
+                            ?? "SQL";
                         var serverType = GetServerTypeFromExtension(extension);
-                        var userName = userNode?.InnerText?.Trim();
-                        var password = passNode?.InnerText?.Trim();
-                        var credRetrieval = !string.IsNullOrEmpty(userName) ? "Store" : "None";
+                        var userName = parsed?.UserName
+                            ?? xml.SelectSingleNode("//*[local-name()='UserName']")?.InnerText?.Trim();
+                        var password = xml.SelectSingleNode("//*[local-name()='PassWord']")?.InnerText?.Trim();
+                        var credRetrieval = parsed?.CredentialRetrieval ?? (!string.IsNullOrEmpty(userName) ? "Store" : "None");
+                        var isWindows = parsed?.WindowsCredentials ?? (!string.IsNullOrEmpty(userName) && userName.Contains('\\'));
 
-                        var isWindows = !string.IsNullOrEmpty(userName) && userName.Contains('\\');
-                        WriteLog($"Uploading DataSource: '{dsName}' (Type: {serverType})", datasourcesLog);
+                        WriteLog(ctx, $"Uploading DataSource: '{dsName}' (Type: {serverType})", datasourcesLog);
                         var (dsSuccess, publishedId) = await client.CreateDataSourceAsync(
                             request.TenantId, dsName, connectString, serverType, userName, password, credRetrieval, isWindows, false, ct);
 
                         if (dsSuccess)
                         {
                             result.MigratedDataSources++;
-                            WriteLog($"DataSource '{dsName}' created successfully. ID: {publishedId}", datasourcesLog);
+                            WriteLog(ctx, $"DataSource '{dsName}' created successfully. ID: {publishedId}", datasourcesLog);
                             inventoryRecords.Add(new InventoryRecord { Type = "DataSource", Name = dsName, Path = rel, Disposition = "Imported", Count = 1 });
                             itemResults.Add(new ItemResultEntry { SourcePath = rel, SourceType = "DataSource", SourceName = dsName, Status = "Imported", PublishedItemId = publishedId });
                         }
                         else
                         {
                             result.SkippedDataSources++;
-                            WriteLog($"DataSource '{dsName}' skipped (already exists or conflict).", datasourcesLog);
+                            WriteLog(ctx, $"DataSource '{dsName}' skipped (already exists or conflict).", datasourcesLog);
                             inventoryRecords.Add(new InventoryRecord { Type = "DataSource", Name = dsName, Path = rel, Disposition = "Skipped", Count = 1 });
                         }
                     }
                     catch (Exception ex)
                     {
                         result.FailedDataSources++;
-                        WriteLog($"DataSource '{dsName}' upload failed: {ex.Message}", datasourcesLog);
+                        WriteLog(ctx, $"DataSource '{dsName}' upload failed: {ex.Message}", datasourcesLog);
                         inventoryRecords.Add(new InventoryRecord { Type = "DataSource", Name = dsName, Path = rel, Disposition = "Failed", Count = 1 });
                         itemResults.Add(new ItemResultEntry { SourcePath = rel, SourceType = "DataSource", SourceName = dsName, Status = "Failed", Error = ex.Message });
                     }
@@ -238,21 +299,22 @@ public class LocalFolderMigrationService
                 var existingDatasets = await client.GetDataSetsAsync(request.TenantId, ct);
                 foreach (var kvp in existingDatasets)
                 {
-                    _datasetLookup[kvp.Key] = kvp.Value;
+                    ctx.DatasetLookup[kvp.Key] = kvp.Value;
                 }
             }
             catch { }
 
             // 4. Upload DataSets (*.rsd)
-            var datasetFolder = !string.IsNullOrWhiteSpace(request.DataSetFolder) && Directory.Exists(request.DataSetFolder)
-                ? request.DataSetFolder
+            var datasetFolder = !string.IsNullOrWhiteSpace(request.DataSetFolder)
+                ? ValidateFolderPath(request.DataSetFolder, nameof(request.DataSetFolder))
                 : null;
+            if (datasetFolder != null && !Directory.Exists(datasetFolder)) datasetFolder = null;
 
             if (datasetFolder != null)
             {
                 var rsdFiles = Directory.GetFiles(datasetFolder, "*.rsd", SearchOption.AllDirectories);
                 result.TotalDataSets = rsdFiles.Length;
-                WriteLog($"Discovered {rsdFiles.Length} DataSet (.rsd) definition(s) in {datasetFolder}", datasetsLog);
+                WriteLog(ctx, $"Discovered {rsdFiles.Length} DataSet (.rsd) definition(s) in {datasetFolder}", datasetsLog);
 
                 foreach (var rsdFile in rsdFiles)
                 {
@@ -269,12 +331,8 @@ public class LocalFolderMigrationService
 
                     try
                     {
-                        var xml = new XmlDocument();
-                        xml.Load(rsdFile);
-                        var nsmgr = new XmlNamespaceManager(xml.NameTable);
-                        nsmgr.AddNamespace("sds", "http://schemas.microsoft.com/sqlserver/reporting/2010/01/shareddatasetdefinition");
-
-                        var dsRefNode = xml.SelectSingleNode("/sds:SharedDataSet/sds:DataSet/sds:Query/sds:DataSourceReference", nsmgr);
+                        var xml = LoadXmlSafe(rsdFile);
+                        var dsRefNode = xml.SelectSingleNode("//*[local-name()='DataSourceReference']");
                         var targetDs = request.TargetDataSourceName ?? "SalesDB";
                         if (dsRefNode != null && !string.IsNullOrWhiteSpace(dsRefNode.InnerText))
                         {
@@ -287,28 +345,28 @@ public class LocalFolderMigrationService
                         xml.Save(ms);
                         var base64 = Convert.ToBase64String(ms.ToArray());
 
-                        WriteLog($"Uploading DataSet: '{datasetName}' mapped to DataSource '{targetDs}'", datasetsLog);
+                        WriteLog(ctx, $"Uploading DataSet: '{datasetName}' mapped to DataSource '{targetDs}'", datasetsLog);
                         var (dSuccess, publishedId) = await client.CreateDataSetAsync(request.TenantId, datasetName, base64, targetDs, ct);
 
                         if (dSuccess)
                         {
                             result.MigratedDataSets++;
-                            _datasetLookup[datasetName] = publishedId;
-                            WriteLog($"DataSet '{datasetName}' uploaded successfully. ID: {publishedId}", datasetsLog);
+                            ctx.DatasetLookup[datasetName] = publishedId;
+                            WriteLog(ctx, $"DataSet '{datasetName}' uploaded successfully. ID: {publishedId}", datasetsLog);
                             inventoryRecords.Add(new InventoryRecord { Type = "DataSet", Name = datasetName, Path = rel, Disposition = "Imported", Count = 1 });
                             itemResults.Add(new ItemResultEntry { SourcePath = rel, SourceType = "DataSet", SourceName = datasetName, Status = "Imported", PublishedItemId = publishedId });
                         }
                         else
                         {
                             result.SkippedDataSets++;
-                            WriteLog($"DataSet '{datasetName}' skipped (already exists or conflict).", datasetsLog);
+                            WriteLog(ctx, $"DataSet '{datasetName}' skipped (already exists or conflict).", datasetsLog);
                             inventoryRecords.Add(new InventoryRecord { Type = "DataSet", Name = datasetName, Path = rel, Disposition = "Skipped", Count = 1 });
                         }
                     }
                     catch (Exception ex)
                     {
                         result.FailedDataSets++;
-                        WriteLog($"DataSet '{datasetName}' upload failed: {ex.Message}", datasetsLog);
+                        WriteLog(ctx, $"DataSet '{datasetName}' upload failed: {ex.Message}", datasetsLog);
                         inventoryRecords.Add(new InventoryRecord { Type = "DataSet", Name = datasetName, Path = rel, Disposition = "Failed", Count = 1 });
                         itemResults.Add(new ItemResultEntry { SourcePath = rel, SourceType = "DataSet", SourceName = datasetName, Status = "Failed", Error = ex.Message });
                     }
@@ -316,18 +374,18 @@ public class LocalFolderMigrationService
             }
 
             // 5. Upload Reports (*.rdl)
-            if (!Directory.Exists(request.ReportFolder))
+            if (!Directory.Exists(reportFolder))
             {
-                throw new DirectoryNotFoundException($"Report folder does not exist: {request.ReportFolder}");
+                throw new DirectoryNotFoundException($"Report folder does not exist: {reportFolder}");
             }
 
-            var reportFiles = Directory.GetFiles(request.ReportFolder, "*.rdl", SearchOption.AllDirectories);
+            var reportFiles = Directory.GetFiles(reportFolder, "*.rdl", SearchOption.AllDirectories);
             result.TotalReports = reportFiles.Length;
-            WriteLog($"Discovered {reportFiles.Length} Report (.rdl) file(s) in {request.ReportFolder}", reportsLog);
+            WriteLog(ctx, $"Discovered {reportFiles.Length} Report (.rdl) file(s) in {reportFolder}", reportsLog);
 
             foreach (var rdlFile in reportFiles)
             {
-                var rel = Path.GetRelativePath(request.ReportFolder, rdlFile);
+                var rel = Path.GetRelativePath(reportFolder, rdlFile);
                 var reportName = Path.GetFileNameWithoutExtension(rdlFile);
                 var pathParts = rel.Split(new[] { '/', '\\' }, StringSplitOptions.RemoveEmptyEntries);
 
@@ -357,16 +415,14 @@ public class LocalFolderMigrationService
                     categoryId = await client.GetOrCreateCategoryAsync(request.TenantId, "Sample Reports", null, ct);
                 }
 
-                // Parse RDL XML for mappings
-                var rdlXml = new XmlDocument();
-                rdlXml.Load(rdlFile);
+                // Parse RDL XML for mappings safely (DTD prohibited)
+                var rdlXml = LoadXmlSafe(rdlFile);
 
                 var dataSourceMappings = new List<Dictionary<string, object>>();
                 var dataSetMappings = new List<Dictionary<string, object>>();
                 var dsSummaryList = new List<string>();
                 var dsetSummaryList = new List<string>();
 
-                // DataSources
                 var dsNodes = rdlXml.SelectNodes("//*[local-name()='DataSource']");
                 if (dsNodes != null)
                 {
@@ -392,7 +448,6 @@ public class LocalFolderMigrationService
                     }
                 }
 
-                // Shared DataSets
                 var dsetNodes = rdlXml.SelectNodes("//*[local-name()='DataSet']");
                 if (dsetNodes != null)
                 {
@@ -403,14 +458,23 @@ public class LocalFolderMigrationService
                         if (refNode != null && !string.IsNullOrWhiteSpace(refNode.InnerText))
                         {
                             var sharedName = CleanDataSourceRef(refNode.InnerText.Trim());
-                            var datasetId = _datasetLookup.TryGetValue(sharedName, out var id) ? id : Guid.NewGuid().ToString();
-
-                            dataSetMappings.Add(new Dictionary<string, object>
+                            if (ctx.DatasetLookup.TryGetValue(sharedName, out var datasetId))
                             {
-                                { "Name", rdlDsetName },
-                                { "DataSetName", sharedName },
-                                { "DataSetId", datasetId }
-                            });
+                                dataSetMappings.Add(new Dictionary<string, object>
+                                {
+                                    { "Name", rdlDsetName },
+                                    { "DataSetName", sharedName },
+                                    { "DataSetId", datasetId }
+                                });
+                            }
+                            else
+                            {
+                                dataSetMappings.Add(new Dictionary<string, object>
+                                {
+                                    { "Name", rdlDsetName },
+                                    { "DataSetName", sharedName }
+                                });
+                            }
                             dsetSummaryList.Add($"{rdlDsetName}->{sharedName}");
                         }
                     }
@@ -419,7 +483,7 @@ public class LocalFolderMigrationService
                 var rdlBytes = await File.ReadAllBytesAsync(rdlFile, ct);
                 var rdlBase64 = Convert.ToBase64String(rdlBytes);
 
-                WriteLog($"Uploading Report: '{reportName}' to Category '{categoryName}'", reportsLog);
+                WriteLog(ctx, $"Uploading Report: '{reportName}' to Category '{categoryName}'", reportsLog);
 
                 try
                 {
@@ -435,7 +499,7 @@ public class LocalFolderMigrationService
                     if (rSuccess)
                     {
                         result.MigratedReports++;
-                        WriteLog($"Report '{reportName}' uploaded successfully. ID: {publishedId}", reportsLog);
+                        WriteLog(ctx, $"Report '{reportName}' uploaded successfully. ID: {publishedId}", reportsLog);
                         reportRows.Add(new LocalMigrationReportRow
                         {
                             ReportName = reportName,
@@ -451,7 +515,7 @@ public class LocalFolderMigrationService
                     else
                     {
                         result.SkippedReports++;
-                        WriteLog($"Report '{reportName}' skipped (already exists or conflict).", reportsLog);
+                        WriteLog(ctx, $"Report '{reportName}' skipped (already exists or conflict).", reportsLog);
                         reportRows.Add(new LocalMigrationReportRow
                         {
                             ReportName = reportName,
@@ -467,7 +531,7 @@ public class LocalFolderMigrationService
                 catch (Exception ex)
                 {
                     result.FailedReports++;
-                    WriteLog($"Report '{reportName}' upload failed: {ex.Message}", reportsLog);
+                    WriteLog(ctx, $"Report '{reportName}' upload failed: {ex.Message}", reportsLog);
                     reportRows.Add(new LocalMigrationReportRow
                     {
                         ReportName = reportName,
@@ -485,7 +549,7 @@ public class LocalFolderMigrationService
 
             // 6. Generate Summaries, Reconciliation & Artifacts
             result.ReportRows = reportRows;
-            result.Success = result.FailedReports == 0;
+            result.Success = result.FailedReports == 0 && result.FailedDataSources == 0 && result.FailedDataSets == 0;
             result.Message = $"Migration completed: {result.MigratedReports}/{result.TotalReports} reports uploaded, {result.MigratedDataSources}/{result.TotalDataSources} datasources, {result.MigratedDataSets}/{result.TotalDataSets} datasets.";
 
             // MigrationResult.csv
@@ -532,7 +596,7 @@ public class LocalFolderMigrationService
 
 **Execution Time:** {DateTime.UtcNow:yyyy-MM-dd HH:mm:ss} UTC  
 **Target Server:** {request.ServerUrl} (Tenant: {request.TenantId})  
-**Report Folder:** `{request.ReportFolder}`  
+**Report Folder:** `{reportFolder}`  
 
 ## Estate Statistics
 
@@ -565,17 +629,17 @@ public class LocalFolderMigrationService
             File.WriteAllText(summaryMd, summaryContent);
             result.SummaryMarkdownPath = summaryMd;
 
-            WriteLog("==================================================", reconciliationLog);
-            WriteLog("MIGRATION COMPLETED SUCCESSFULLY", reconciliationLog);
-            WriteLog(result.Message, reconciliationLog);
-            WriteLog("==================================================", reconciliationLog);
+            WriteLog(ctx, "==================================================", reconciliationLog);
+            WriteLog(ctx, "MIGRATION COMPLETED", reconciliationLog);
+            WriteLog(ctx, result.Message, reconciliationLog);
+            WriteLog(ctx, "==================================================", reconciliationLog);
 
             result.Logs = CurrentLogs.ToList();
             return result;
         }
         catch (Exception ex)
         {
-            WriteLog($"FATAL MIGRATION FAILURE: {ex.Message}");
+            WriteLog(ctx, $"FATAL MIGRATION FAILURE: {ex.Message}");
             result.Success = false;
             result.Message = $"Migration aborted due to error: {ex.Message}";
             result.Logs = CurrentLogs.ToList();

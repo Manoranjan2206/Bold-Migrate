@@ -1,4 +1,5 @@
 using System.Text;
+using System.Xml;
 using System.Xml.Linq;
 using System.Xml.XPath;
 using BoldMigrate.Core.Enums;
@@ -14,6 +15,9 @@ public class TransformResult
     public ReportBucket Bucket { get; set; } = ReportBucket.Clean;
     public string? BlockReasonCode { get; set; }
     public string? Message { get; set; }
+    public int ParameterCount { get; set; }
+    public List<string> DataSourceNames { get; set; } = new();
+    public List<string> SharedDataSetReferences { get; set; } = new();
     public List<TransformAction> Actions { get; set; } = new();
     public List<string> FeatureTags { get; set; } = new();
 }
@@ -67,7 +71,8 @@ public class TransformEngine
         try
         {
             using var ms = new MemoryStream(cleanBytes);
-            doc = XDocument.Load(ms);
+            using var reader = XmlReader.Create(ms, new XmlReaderSettings { DtdProcessing = DtdProcessing.Prohibit });
+            doc = XDocument.Load(reader);
         }
         catch (Exception ex)
         {
@@ -80,6 +85,20 @@ public class TransformEngine
 
         var schemaVersion = DetectSchemaVersion(doc);
         result.SchemaVersion = schemaVersion;
+        result.ParameterCount = doc.Descendants().Count(e => e.Name.LocalName == "ReportParameter");
+        result.DataSourceNames = doc.Descendants()
+            .Where(e => e.Name.LocalName == "DataSource")
+            .Select(e => e.Attribute("Name")?.Value)
+            .Where(n => !string.IsNullOrWhiteSpace(n))
+            .Cast<string>()
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+        result.SharedDataSetReferences = doc.Descendants()
+            .Where(e => e.Name.LocalName == "SharedDataSetReference")
+            .Select(e => e.Value.Trim())
+            .Where(v => !string.IsNullOrWhiteSpace(v))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
         XNamespace defaultNs = doc.Root?.Name.Namespace ?? XNamespace.None;
 
         // Apply rewrite rules
@@ -230,12 +249,11 @@ public class TransformEngine
                     if (tag != null) featureTags.Add(tag);
 
                     // Blocked is fatal; NeedsReview tags items requiring manual attention (e.g. custom assemblies); Clean remains clean
-                    if (rule.Bucket == ReportBucket.Blocked)
+                    if (rule.Bucket == ReportBucket.Blocked && bucket != ReportBucket.Blocked)
                     {
                         bucket = ReportBucket.Blocked;
                         blockCode = rule.Code;
                         userMessage = rule.Message;
-                        break;
                     }
                     else if (rule.Bucket == ReportBucket.NeedsReview && bucket != ReportBucket.Blocked)
                     {
