@@ -1178,7 +1178,12 @@ let valPollInterval = null;
 
 function selectReportForValidation(reportId) {
   selectedValidationReportId = reportId;
-  switchTab("validation");
+  const r = (reportsCache || []).find(x => x.id === reportId);
+  if (r) {
+    openInteractiveViewer(r.id, r.path, "staged");
+  } else {
+    switchTab("validation");
+  }
 }
 
 async function refreshValidationState() {
@@ -1249,6 +1254,40 @@ async function loadValidationSummary(force = false) {
   }
 }
 
+let currentValViewMode = "details";
+let selectedValReportIds = new Set();
+
+function setValidationViewMode(mode) {
+  currentValViewMode = mode;
+  const detBtn = document.getElementById("val-view-details-btn");
+  const crdBtn = document.getElementById("val-view-cards-btn");
+  if (detBtn) detBtn.classList.toggle("filter-active", mode === "details");
+  if (crdBtn) crdBtn.classList.toggle("filter-active", mode === "cards");
+  renderValidationEvidenceGrid();
+}
+
+function toggleValReportSelection(reportId, checked) {
+  if (checked) selectedValReportIds.add(reportId);
+  else selectedValReportIds.delete(reportId);
+  updateValSelectedCountUI();
+}
+
+function toggleAllValReports(checked) {
+  const reports = (validationSummaryCache && validationSummaryCache.reports) ? validationSummaryCache.reports : [];
+  if (checked) {
+    reports.forEach(r => selectedValReportIds.add(r.reportId));
+  } else {
+    selectedValReportIds.clear();
+  }
+  renderValidationEvidenceGrid();
+  updateValSelectedCountUI();
+}
+
+function updateValSelectedCountUI() {
+  const el = document.getElementById("val-selected-count");
+  if (el) el.innerText = selectedValReportIds.size;
+}
+
 function filterValidationCards(filter) {
   currentValFilter = filter;
   ["all", "passed", "offline", "manual", "failed"].forEach(f => {
@@ -1266,10 +1305,25 @@ function onValidationSearch(query) {
   renderValidationEvidenceGrid();
 }
 
+function getValidationStatusBadge(r) {
+  if (r.status === "Passed" || r.status === "Approved") {
+    const dur = r.durationMs ? `${(r.durationMs / 1000).toFixed(1)}s` : "OK";
+    return `<span class="pill ok" style="font-size:11px;font-weight:600;">✓ Passed (${dur})</span>`;
+  } else if (r.status === "DataSourceOffline") {
+    return `<span class="pill" style="background:#EFF6FF;color:#1D4ED8;border:1px solid #BFDBFE;font-size:11px;font-weight:600;">⚡ Data Source Offline</span>`;
+  } else if (r.status === "NeedsManualCheck") {
+    return `<span class="pill warn" style="font-size:11px;font-weight:600;" title="Requires parameters without defaults">⚠ Needs Parameters</span>`;
+  } else if (r.status === "Failed") {
+    return `<span class="pill warn" style="font-size:11px;font-weight:600;cursor:pointer;" onclick="openRenderLogs('${escapeHtml(r.path)}')" title="Click to view log">⚠ Needs Review</span>`;
+  }
+  return `<span class="pill" style="font-size:11px;color:#64748B;">⚪ Not Validated</span>`;
+}
+
 function renderValidationEvidenceGrid() {
   const grid = document.getElementById("val-evidence-grid");
   if (!grid || !validationSummaryCache) return;
 
+  updateValSelectedCountUI();
   const reports = validationSummaryCache.reports || [];
   let filtered = reports;
 
@@ -1291,6 +1345,7 @@ function renderValidationEvidenceGrid() {
   }
 
   if (filtered.length === 0) {
+    grid.style.display = "grid";
     grid.innerHTML = `
       <div class="card" style="grid-column: 1 / -1; padding: 36px; text-align: center; color: #64748B;">
         <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" style="margin-bottom: 8px; opacity: 0.6;">
@@ -1301,31 +1356,71 @@ function renderValidationEvidenceGrid() {
     return;
   }
 
+  if (currentValViewMode === "details") {
+    grid.style.display = "block";
+    const allChecked = filtered.length > 0 && filtered.every(r => selectedValReportIds.has(r.reportId));
+    grid.innerHTML = `
+      <div class="card" style="padding:0;overflow:hidden;">
+        <table>
+          <thead>
+            <tr>
+              <th class="check-cell"><input type="checkbox" ${allChecked ? "checked" : ""} onchange="toggleAllValReports(this.checked)" title="Select / Deselect All"></th>
+              <th>Snapshot</th>
+              <th>Report Name</th>
+              <th>Status</th>
+              <th>Details / Features</th>
+              <th style="text-align:right;">Actions</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${filtered.map(r => {
+              const isSel = selectedValReportIds.has(r.reportId);
+              const tagsHtml = (r.featureTags || []).map(t =>
+                `<span style="font-size:10.5px;font-weight:600;padding:1px 5px;border-radius:4px;background:#EFF6FF;color:#2563EB;border:1px solid #DBEAFE;margin-right:3px;">${escapeHtml(t)}</span>`
+              ).join("");
+              const thumbCell = r.screenshotUrl
+                ? `<img src="${r.screenshotUrl}?t=${Date.now()}" alt="${escapeHtml(r.name)}" onclick="openSnapshotZoom('${r.screenshotUrl}', '${escapeHtml(r.name)}')" style="width:68px;height:42px;object-fit:cover;object-position:top;border-radius:4px;border:1px solid #E2E8F0;cursor:pointer;" title="Click to expand snapshot">`
+                : `<span style="font-size:11px;color:#94A3B8;">—</span>`;
+              const detailMsg = r.status === "DataSourceOffline"
+                ? `<span style="color:#0369A1;">RDL valid (DB offline in local preview)</span>`
+                : (r.errorMessage ? `<span style="color:#92400E;">${escapeHtml(r.errorMessage)}</span>` : `<span style="color:#64748B;">Ready</span>`);
+
+              return `
+                <tr>
+                  <td class="check-cell"><input type="checkbox" ${isSel ? "checked" : ""} onchange="toggleValReportSelection('${r.reportId}', this.checked)"></td>
+                  <td>${thumbCell}</td>
+                  <td><strong>${escapeHtml(r.name)}</strong><br><small style="color:#64748B;font-family:monospace;">${escapeHtml(r.path)}</small></td>
+                  <td>${getValidationStatusBadge(r)}</td>
+                  <td style="font-size:12px;max-width:340px;">${tagsHtml ? `<div style="margin-bottom:3px;">${tagsHtml}</div>` : ""}${detailMsg}</td>
+                  <td style="text-align:right;white-space:nowrap;">
+                    <button class="btn2 btn-sm" onclick="runSingleReportValidation('${r.reportId}')" title="Run Playwright validation on this report only">▶ Validate</button>
+                    <button class="btn2 btn-sm" onclick="openInteractiveViewer('${r.reportId}', '${escapeHtml(r.path)}', 'staged')" style="margin-left:4px;">👁 View</button>
+                    <button class="btn2 btn-sm" onclick="openInteractiveDesigner('${r.reportId}', '${escapeHtml(r.path)}', 'staged')" style="margin-left:4px;">✏ Edit</button>
+                  </td>
+                </tr>
+              `;
+            }).join("")}
+          </tbody>
+        </table>
+      </div>
+    `;
+    return;
+  }
+
+  grid.style.display = "grid";
   grid.innerHTML = filtered.map(r => {
+    const isSel = selectedValReportIds.has(r.reportId);
     // Feature tags
     const tagsHtml = (r.featureTags || []).map(t =>
       `<span style="font-size:11px;font-weight:600;padding:2px 7px;border-radius:4px;background:#EFF6FF;color:#2563EB;border:1px solid #DBEAFE;">${escapeHtml(t)}</span>`
     ).join(" ");
 
     // Status Badge & Border
-    let statusBadge = "";
+    const statusBadge = getValidationStatusBadge(r);
     let borderStyle = "border: 1px solid #E2E8F0;";
-    if (r.status === "Passed" || r.status === "Approved") {
-      const dur = r.durationMs ? `${(r.durationMs / 1000).toFixed(1)}s` : "OK";
-      statusBadge = `<span class="pill ok" style="font-size:11.5px;font-weight:600;">✓ Passed (${dur})</span>`;
-      borderStyle = "border: 1px solid #BBF7D0;";
-    } else if (r.status === "DataSourceOffline") {
-      statusBadge = `<span class="pill" style="background:#EFF6FF;color:#1D4ED8;border:1px solid #BFDBFE;font-size:11px;font-weight:600;">⚡ Data Source Offline</span>`;
-      borderStyle = "border: 1px solid #BFDBFE;";
-    } else if (r.status === "NeedsManualCheck") {
-      statusBadge = `<span class="pill warn" style="font-size:11.5px;font-weight:600;" title="Requires parameters without defaults">⚠ Needs Parameters</span>`;
-      borderStyle = "border: 1px solid #FED7AA;";
-    } else if (r.status === "Failed") {
-      statusBadge = `<span class="pill warn" style="font-size:11.5px;font-weight:600;cursor:pointer;" onclick="openRenderLogs('${escapeHtml(r.path)}')" title="Click to view log">⚠ Needs Review</span>`;
-      borderStyle = "border: 1px solid #FED7AA;";
-    } else {
-      statusBadge = `<span class="pill" style="font-size:11.5px;color:#64748B;">⚪ Not Validated</span>`;
-    }
+    if (r.status === "Passed" || r.status === "Approved") borderStyle = "border: 1px solid #BBF7D0;";
+    else if (r.status === "DataSourceOffline") borderStyle = "border: 1px solid #BFDBFE;";
+    else if (r.status === "NeedsManualCheck" || r.status === "Failed") borderStyle = "border: 1px solid #FED7AA;";
 
     // Thumbnail Preview
     let thumbHtml = "";
@@ -1373,7 +1468,10 @@ function renderValidationEvidenceGrid() {
         ${thumbHtml}
         <div style="padding:14px;flex:1;display:flex;flex-direction:column;">
           <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:6px;gap:8px;">
-            <div style="font-weight:700;font-size:14px;color:#0F172A;word-break:break-word;">${escapeHtml(r.name)}</div>
+            <label style="display:flex;align-items:center;gap:6px;cursor:pointer;font-weight:700;font-size:14px;color:#0F172A;word-break:break-word;">
+              <input type="checkbox" ${isSel ? "checked" : ""} onchange="toggleValReportSelection('${r.reportId}', this.checked)">
+              <span>${escapeHtml(r.name)}</span>
+            </label>
             ${statusBadge}
           </div>
           <div style="font-size:12px;color:#64748B;margin-bottom:8px;font-family:monospace;">${escapeHtml(r.path)}</div>
@@ -1392,6 +1490,9 @@ function renderValidationEvidenceGrid() {
 
           <div style="margin-top:auto;display:flex;justify-content:space-between;align-items:center;padding-top:10px;border-top:1px solid #F1F5F9;">
             <div style="display:flex;gap:6px;">
+              <button class="btn2 btn-sm" onclick="runSingleReportValidation('${r.reportId}')" title="Run Playwright validation on this report only">
+                ▶ Validate
+              </button>
               <button class="btn2 btn-sm" onclick="openInteractiveViewer('${r.reportId}', '${escapeHtml(r.path)}', 'staged')" title="Open interactive local viewer">
                 👁 View
               </button>
@@ -1410,43 +1511,63 @@ function renderValidationEvidenceGrid() {
   }).join("");
 }
 
-async function startAutomatedRenderValidation() {
+async function runSingleReportValidation(reportId) {
+  if (!currentRun) return;
+  showToast("Running render validation for selected report...");
+  try {
+    await Api.validateRender(currentRun.id, 1, [reportId]);
+    setTimeout(() => loadValidationSummary(true), 2500);
+    setTimeout(() => loadValidationSummary(true), 6000);
+  } catch (err) {
+    showToast("Validation failed to start: " + err.message, true);
+  }
+}
+
+async function startAutomatedRenderValidation(selectedOnly = true) {
   if (!currentRun) return;
 
-  const btn = document.getElementById("btn-run-render-validation");
-  const txt = document.getElementById("btn-run-validation-text");
-  if (btn) btn.disabled = true;
-  if (txt) txt.innerText = "Running Validation (5 Parallel)...";
+  const targetIds = selectedOnly ? Array.from(selectedValReportIds) : null;
+  if (selectedOnly && (!targetIds || targetIds.length === 0)) {
+    showToast("Select one or more reports first, or click 'Run All'.", true);
+    return;
+  }
 
-  showToast("Starting automated render validation (5 parallel tabs with headless Playwright)...");
+  const btnSel = document.getElementById("btn-run-selected-validation");
+  const btnAll = document.getElementById("btn-run-render-validation");
+  if (btnSel) btnSel.disabled = true;
+  if (btnAll) btnAll.disabled = true;
+
+  showToast(selectedOnly
+    ? `Starting selective validation for ${targetIds.length} report(s)...`
+    : "Starting automated render validation for all staged reports (5 parallel tabs)...");
 
   try {
-    await Api.validateRender(currentRun.id, 5);
+    await Api.validateRender(currentRun.id, 5, targetIds);
 
-    // Poll for updates every 3 seconds
     if (valPollInterval) clearInterval(valPollInterval);
     let attempts = 0;
     valPollInterval = setInterval(async () => {
       attempts++;
       await loadValidationSummary();
 
-      // Check if all reports are no longer in NotValidated
       const summary = validationSummaryCache;
       if (summary) {
-        const notDone = summary.reports.filter(r => r.status === "NotValidated").length;
+        const notDone = selectedOnly
+          ? summary.reports.filter(r => targetIds.includes(r.reportId) && r.status === "NotValidated").length
+          : summary.reports.filter(r => r.status === "NotValidated").length;
         if (notDone === 0 || attempts >= 40) {
           clearInterval(valPollInterval);
           valPollInterval = null;
-          if (btn) btn.disabled = false;
-          if (txt) txt.innerText = "Run Automated Validation (5 Parallel)";
-          showToast(`Automated validation finished! Passed: ${summary.passed}, Errors: ${summary.failed}, Needs Params: ${summary.needsManualCheck}`);
+          if (btnSel) btnSel.disabled = false;
+          if (btnAll) btnAll.disabled = false;
+          showToast(`Validation finished! Passed: ${summary.passed}, Needs Review: ${summary.failed}, Needs Params: ${summary.needsManualCheck}`);
         }
       }
     }, 3000);
   } catch (err) {
-    if (btn) btn.disabled = false;
-    if (txt) txt.innerText = "Run Automated Validation (5 Parallel)";
-    showToast("Validation failed to start: " + err.message);
+    if (btnSel) btnSel.disabled = false;
+    if (btnAll) btnAll.disabled = false;
+    showToast("Validation failed to start: " + err.message, true);
   }
 }
 
@@ -1467,6 +1588,7 @@ async function skipRenderValidationAndUpload() {
 // Interactive Local & Server Viewer/Designer Modals
 // -----------------------------------------------------------------------------
 function openInteractiveViewer(reportId, reportPath, mode = "staged") {
+  window.__activeInspectReport = { reportId, reportPath, mode };
   const modal = document.getElementById("modal-interactive-viewer");
   const host = document.getElementById("interactive-viewer-host");
   const title = document.getElementById("interactive-viewer-title");
@@ -1513,6 +1635,14 @@ function closeInteractiveViewer() {
   }
 }
 
+function switchViewerToDesigner() {
+  const active = window.__activeInspectReport;
+  closeInteractiveViewer();
+  if (active) {
+    openInteractiveDesigner(active.reportId, active.reportPath, active.mode || "staged");
+  }
+}
+
 function openInteractiveDesigner(reportId, reportPath, mode = "staged") {
   const modal = document.getElementById("modal-interactive-designer");
   const host = document.getElementById("interactive-designer-host");
@@ -1521,7 +1651,8 @@ function openInteractiveDesigner(reportId, reportPath, mode = "staged") {
 
   if (!modal || !host) return;
 
-  title.innerText = `Report Designer — ${reportPath || reportId}`;
+  const targetPath = reportPath || reportId;
+  title.innerText = `Report Designer — ${targetPath}`;
   pill.innerText = mode === "staged" ? "Local Staged Engine" : "Bold Reports Server";
   pill.className = mode === "staged" ? "pill ok" : "pill warn";
 
@@ -1533,7 +1664,15 @@ function openInteractiveDesigner(reportId, reportPath, mode = "staged") {
   if (mode === "staged") {
     $(host).boldReportDesigner({
       serviceUrl: "/api/preview/runs/" + currentRun.id + "/designer",
-      reportPath: reportPath || reportId
+      create: function () {
+        const designer = $(host).data("boldReportDesigner");
+        if (designer && targetPath) {
+          designer.openReport(targetPath);
+        }
+      },
+      reportSaved: function () {
+        showToast("Report changes saved to local staging.");
+      }
     });
   } else {
     // Destination Server mode
@@ -1543,8 +1682,13 @@ function openInteractiveDesigner(reportId, reportPath, mode = "staged") {
     $(host).boldReportDesigner({
       serviceUrl: serviceUrl,
       serverUrl: destUrl,
-      reportPath: reportPath,
-      serviceAuthorizationToken: dest.bearerToken || ""
+      serviceAuthorizationToken: dest.bearerToken || "",
+      create: function () {
+        const designer = $(host).data("boldReportDesigner");
+        if (designer && targetPath) {
+          designer.openReport(targetPath);
+        }
+      }
     });
   }
 }

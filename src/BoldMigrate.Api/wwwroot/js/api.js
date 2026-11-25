@@ -61,8 +61,12 @@ const Api = {
     return await res.json();
   },
 
-  async validateRender(runId, concurrency = 5) {
-    const res = await fetch(`${this.baseUrl}/runs/${runId}/validate-render?concurrency=${concurrency}`, { method: "POST" });
+  async validateRender(runId, concurrency = 5, reportIds = null) {
+    const res = await fetch(`${this.baseUrl}/runs/${runId}/validate-render?concurrency=${concurrency}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ reportIds: reportIds && reportIds.length > 0 ? reportIds : null })
+    });
     return await res.json();
   },
 

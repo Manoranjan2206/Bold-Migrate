@@ -742,10 +742,13 @@
             <h1 id="val-report-title">Step 4: Automated Render Validation</h1>
             <p class="sub">Verify local report rendering with headless Playwright (5 parallel tabs) before uploading to Bold Reports Server.</p>
           </div>
-          <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;">
-            <button class="btn" id="btn-run-render-validation" onclick="startAutomatedRenderValidation()" style="background:#2563EB;display:flex;align-items:center;gap:8px;">
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>
-              <span id="btn-run-validation-text">Run Automated Validation (5 Parallel)</span>
+          <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
+            <button class="btn" id="btn-run-selected-validation" onclick="startAutomatedRenderValidation(true)" style="background:#2563EB;display:flex;align-items:center;gap:6px;">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>
+              <span id="btn-run-selected-text">Validate Selected (<span id="val-selected-count">0</span>)</span>
+            </button>
+            <button class="btn2" id="btn-run-render-validation" onclick="startAutomatedRenderValidation(false)" title="Run Playwright render validation on all staged reports">
+              <span id="btn-run-validation-text">Run All</span>
             </button>
             <button class="btn2" id="btn-skip-validation" onclick="skipRenderValidationAndUpload()" style="font-weight:600;border-color:#CBD5E1;">
               <span>Skip & Upload Directly →</span>
@@ -783,8 +786,12 @@
             <button class="btn2 btn-sm" id="val-btn-filter-manual" onclick="filterValidationCards('manual')" style="color:#D97706;">Needs Params (<span id="val-pill-manual">0</span>)</button>
             <button class="btn2 btn-sm" id="val-btn-filter-failed" onclick="filterValidationCards('failed')" style="color:#D97706;">Needs Review (<span id="val-pill-failed">0</span>)</button>
           </div>
-          <div style="display:flex;gap:10px;align-items:center;">
-            <input type="text" id="val-search-input" placeholder="Search report name or folder..." style="height:34px;width:260px;padding:0 12px;border:1px solid #CBD5E1;border-radius:6px;font-size:13px;" oninput="onValidationSearch(this.value)">
+          <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
+            <input type="text" id="val-search-input" placeholder="Search report name or folder..." style="height:34px;width:220px;padding:0 12px;border:1px solid #CBD5E1;border-radius:6px;font-size:13px;" oninput="onValidationSearch(this.value)">
+            <div style="display:inline-flex;border:1px solid #CBD5E1;border-radius:6px;overflow:hidden;background:#FFF;">
+              <button class="btn2 btn-sm filter-active" id="val-view-details-btn" onclick="setValidationViewMode('details')" style="border:none;border-radius:0;border-right:1px solid #E2E8F0;" title="Details Table View">☰ Details</button>
+              <button class="btn2 btn-sm" id="val-view-cards-btn" onclick="setValidationViewMode('cards')" style="border:none;border-radius:0;" title="Visual Cards View">▦ Cards</button>
+            </div>
             <button class="btn2 btn-sm" onclick="loadValidationSummary(true)" title="Refresh validation results">↻ Refresh</button>
           </div>
         </div>
@@ -1460,7 +1467,10 @@
           <h3 id="interactive-viewer-title" style="margin:0;font-size:16px;color:#0F172A;">Report Viewer</h3>
           <span class="pill ok" id="interactive-viewer-mode-pill">Local Staged</span>
         </div>
-        <button class="modal-close-btn" onclick="closeInteractiveViewer()" style="background:none;border:none;font-size:24px;line-height:1;cursor:pointer;color:#94A3B8;">&times;</button>
+        <div style="display:flex;align-items:center;gap:10px;">
+          <button class="btn2 btn-sm" onclick="switchViewerToDesigner()" title="Open this report in Web Report Designer">✏ Edit in Designer</button>
+          <button class="modal-close-btn" onclick="closeInteractiveViewer()" style="background:none;border:none;font-size:24px;line-height:1;cursor:pointer;color:#94A3B8;">&times;</button>
+        </div>
       </div>
       <div class="modal-body" style="padding:0;flex:1;overflow:hidden;position:relative;">
         <div id="interactive-viewer-host" style="width:100%;height:100%;"></div>

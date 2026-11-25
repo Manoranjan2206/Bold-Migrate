@@ -533,11 +533,19 @@ public class MigrationController : ControllerBase
         });
     }
 
+    public record ValidateRenderRequest(List<Guid>? ReportIds);
+
     [HttpPost("runs/{id:guid}/validate-render")]
-    public async Task<IActionResult> RunAutomatedRenderValidation(Guid id, [FromQuery] int concurrency = 5, CancellationToken ct = default)
+    public async Task<IActionResult> RunAutomatedRenderValidation(
+        Guid id,
+        [FromQuery] int concurrency = 5,
+        [FromBody] ValidateRenderRequest? req = null,
+        CancellationToken ct = default)
     {
         var baseUrl = $"{Request.Scheme}://{Request.Host}";
-        _logger.Log(LogLevel.Information, "VALD-RENDER", id, $"Starting automated render validation (concurrency: {concurrency}) via {baseUrl}");
+        var targetIds = req?.ReportIds;
+        var countMsg = targetIds != null && targetIds.Count > 0 ? $"{targetIds.Count} selected report(s)" : "all reports";
+        _logger.Log(LogLevel.Information, "VALD-RENDER", id, $"Starting automated render validation for {countMsg} (concurrency: {concurrency}) via {baseUrl}");
 
         _ = Task.Run(async () =>
         {
@@ -546,7 +554,7 @@ public class MigrationController : ControllerBase
                 using var scope = _scopeFactory.CreateScope();
                 var engine = scope.ServiceProvider.GetRequiredService<BoldMigrate.Engine.Validation.RenderValidationEngine>();
                 var appLogger = scope.ServiceProvider.GetRequiredService<MigrationLogger>();
-                await engine.ValidateRunAsync(id, baseUrl, concurrency, CancellationToken.None);
+                await engine.ValidateRunAsync(id, baseUrl, concurrency, CancellationToken.None, targetIds);
                 appLogger.Log(LogLevel.Information, "VALD-COMPLETE", id, "Automated render validation completed.");
             }
             catch (Exception ex)

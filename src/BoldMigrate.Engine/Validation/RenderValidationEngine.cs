@@ -108,7 +108,8 @@ public class RenderValidationEngine
         Guid runId,
         string baseUrl,
         int maxConcurrency = 5,
-        CancellationToken ct = default)
+        CancellationToken ct = default,
+        IEnumerable<Guid>? reportIds = null)
     {
         List<CatalogItem> reports;
         using (var initScope = _scopeFactory.CreateScope())
@@ -116,6 +117,15 @@ public class RenderValidationEngine
             var store = initScope.ServiceProvider.GetRequiredService<IMigrationStore>();
             var run = await store.GetRunAsync(runId, ct) ?? throw new KeyNotFoundException($"Run {runId} not found");
             reports = (await store.GetCatalogItemsAsync(runId, ItemType.Report, ct)).ToList();
+        }
+
+        if (reportIds != null)
+        {
+            var filterSet = reportIds.ToHashSet();
+            if (filterSet.Count > 0)
+            {
+                reports = reports.Where(r => filterSet.Contains(r.Id)).ToList();
+            }
         }
 
         // Ensure screenshots staging directory exists
