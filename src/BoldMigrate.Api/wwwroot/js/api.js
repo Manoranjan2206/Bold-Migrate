@@ -226,6 +226,23 @@ const Api = {
     return await res.json();
   },
 
+  async validateAndSaveDataSourceCredentials(runId, dataSourceId, userName, password, credentialRetrieval, connectString) {
+    const res = await fetch(`${this.baseUrl}/runs/${runId}/datasources/${dataSourceId}/validate-and-save`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ userName, password, credentialRetrieval, connectString })
+    });
+    const data = await res.json().catch(() => null);
+    if (!res.ok) {
+      return {
+        success: false,
+        message: data?.message || `Validation failed (HTTP ${res.status})`,
+        detail: data?.detail || ""
+      };
+    }
+    return data;
+  },
+
   async getDesignerConfig(runId) {
     const res = await fetch(`${this.baseUrl}/runs/${runId}/designer-config`);
     return await res.json();
