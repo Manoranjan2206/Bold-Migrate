@@ -5,6 +5,9 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Bold Migrate — SSRS to Bold Reports Enterprise Migration</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700&family=Geist+Mono:wght@400;500;600&display=swap">
   <link rel="stylesheet" href="/css/tokens.css">
   <link rel="stylesheet" href="/css/app.css">
   <!-- Bold Reports Designer Dependencies Styles -->
@@ -80,7 +83,7 @@
     </section>
 
     <!-- How It Works Section -->
-    <section class="land-sec" id="how-it-works" style="background:#F5F7FA;">
+    <section class="land-sec" id="how-it-works" style="background:var(--br-background);">
       <h2>The Migration Journey</h2>
       <div class="tiles" style="grid-template-columns: repeat(4, 1fr); margin-top:20px;">
         <div class="card">
@@ -128,7 +131,7 @@
     <!-- CTA -->
     <div class="land-cta">
       <h2>Ready to move your reports to Bold Reports?</h2>
-      <button class="btn" style="background:#fff;color:#0F172A;" onclick="showAppView('connections')">Launch Migration Console</button>
+      <button class="btn" style="background:var(--br-surface);color:var(--br-text);border-color:var(--br-surface);" onclick="showAppView('connections')">Launch Migration Console</button>
     </div>
   </div>
 
@@ -261,37 +264,7 @@
            ===================================================================== -->
       <section id="tab-connections" class="tab-pane">
         <!-- Top Journey Stepper -->
-        <div class="journey-stepper">
-          <div class="journey-step active" onclick="switchTab('connections')">
-            <span class="jstep-num">1</span>
-            <span class="jstep-name">Connect & Discover</span>
-          </div>
-          <div class="jstep-divider" id="jdiv-1"></div>
-          <div class="journey-step" onclick="switchTab('library')">
-            <span class="jstep-num">2</span>
-            <span class="jstep-name">Report Library</span>
-          </div>
-          <div class="jstep-divider" id="jdiv-2"></div>
-          <div class="journey-step" onclick="switchTab('dashboard')">
-            <span class="jstep-num">3</span>
-            <span class="jstep-name">Assessment</span>
-          </div>
-          <div class="jstep-divider" id="jdiv-3"></div>
-          <div class="journey-step" onclick="switchTab('validation')">
-            <span class="jstep-num">4</span>
-            <span class="jstep-name">Validate</span>
-          </div>
-          <div class="jstep-divider" id="jdiv-4"></div>
-          <div class="journey-step" onclick="switchTab('migration')">
-            <span class="jstep-num">5</span>
-            <span class="jstep-name">Upload</span>
-          </div>
-          <div class="jstep-divider" id="jdiv-5"></div>
-          <div class="journey-step" onclick="switchTab('cutover')">
-            <span class="jstep-num">6</span>
-            <span class="jstep-name">Cutover</span>
-          </div>
-        </div>
+        <div class="journey-stepper" data-stepper><!-- filled by renderSteppers() in js/app.js --></div>
 
         <!-- Header -->
         <div class="main-header">
@@ -307,7 +280,7 @@
           <div class="discovery-banner-content">
             <div class="discovery-icon">✓</div>
             <div>
-              <strong style="color:#0F172A;font-size:14px;" id="discovery-banner-title">Active Estate Discovered</strong>
+              <strong style="color:var(--br-text);font-size:14px;" id="discovery-banner-title">Active Estate Discovered</strong>
               <p class="sub" style="margin:2px 0 0;" id="discovery-banner-desc">Discovered 52 items (42 reports, 3 data sources, 3 datasets, 4 folders) from SSRS.</p>
             </div>
           </div>
@@ -355,7 +328,7 @@
                 <input type="password" id="conn-ssrs-pass" placeholder="••••••••">
               </label>
             </div>
-            <div id="conn-ssrs-integrated-note" style="margin-top:6px;font-size:12px;color:#64748B;">
+            <div id="conn-ssrs-integrated-note" style="margin-top:6px;font-size:12px;color:var(--br-text-muted);">
               Using current Windows session identity (SSPI / NTLM). No username or password required.
             </div>
             <div style="display:flex;align-items:center;gap:12px;margin-top:12px;">
@@ -434,7 +407,7 @@
             </thead>
             <tbody id="conn-datasources-table">
               <tr>
-                <td colspan="6" style="text-align:center;color:#64748B;padding:16px;">
+                <td colspan="6" style="text-align:center;color:var(--br-text-muted);padding:16px;">
                   Click "Save & Discover Catalog" to scan and load real data sources from SSRS.
                 </td>
               </tr>
@@ -458,37 +431,7 @@
            ===================================================================== -->
       <section id="tab-library" class="tab-pane" style="display:none;">
         <!-- Top Journey Stepper -->
-        <div class="journey-stepper">
-          <div class="journey-step completed" onclick="switchTab('connections')">
-            <span class="jstep-num">✓</span>
-            <span class="jstep-name">Connect & Discover</span>
-          </div>
-          <div class="jstep-divider completed"></div>
-          <div class="journey-step active" onclick="switchTab('library')">
-            <span class="jstep-num">2</span>
-            <span class="jstep-name">Report Library</span>
-          </div>
-          <div class="jstep-divider"></div>
-          <div class="journey-step" onclick="switchTab('dashboard')">
-            <span class="jstep-num">3</span>
-            <span class="jstep-name">Assessment</span>
-          </div>
-          <div class="jstep-divider"></div>
-          <div class="journey-step" onclick="switchTab('validation')">
-            <span class="jstep-num">4</span>
-            <span class="jstep-name">Validate</span>
-          </div>
-          <div class="jstep-divider"></div>
-          <div class="journey-step" onclick="switchTab('migration')">
-            <span class="jstep-num">5</span>
-            <span class="jstep-name">Upload</span>
-          </div>
-          <div class="jstep-divider"></div>
-          <div class="journey-step" onclick="switchTab('cutover')">
-            <span class="jstep-num">6</span>
-            <span class="jstep-name">Cutover</span>
-          </div>
-        </div>
+        <div class="journey-stepper" data-stepper><!-- filled by renderSteppers() in js/app.js --></div>
 
         <!-- Header -->
         <div class="main-header">
@@ -498,7 +441,7 @@
           </div>
           <div style="display:flex;gap:10px;align-items:center;">
             <input aria-label="Search reports" id="library-search" placeholder="Search reports or folders..."
-              style="height:38px;width:240px;border:1px solid #CBD5E1;border-radius:8px;padding:0 12px;"
+              style="height:38px;width:240px;border:1px solid var(--br-border-strong);border-radius:8px;padding:0 12px;"
               oninput="filterReportLibrary()">
             <button class="btn2 btn-danger" onclick="openDeleteReportsModal('all')" title="Delete all or sections of reports from Bold Reports destination">
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="margin-right:6px;vertical-align:-2px;"><path d="M3 6h18M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path><line x1="10" y1="11" x2="10" y2="17"></line><line x1="14" y1="11" x2="14" y2="17"></line></svg>
@@ -523,7 +466,7 @@
               <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="margin-right:4px;vertical-align:-1px;"><path d="M3 6h18M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg>
               Delete Selected in Bold Reports (<span id="del-bar-count">0</span>)
             </button>
-            <button class="btn btn-sm" style="background:#059669;" onclick="startMigrationWithSelected()">
+            <button class="btn btn-sm" onclick="startMigrationWithSelected()">
               <span id="btn-bar-migrate-text">Start Migration (0) →</span>
             </button>
           </div>
@@ -555,7 +498,7 @@
             </thead>
             <tbody id="library-table-body">
               <tr>
-                <td colspan="8" style="text-align:center;color:#64748B;padding:24px;">Loading discovered reports...</td>
+                <td colspan="8" style="text-align:center;color:var(--br-text-muted);padding:24px;">Loading discovered reports...</td>
               </tr>
             </tbody>
           </table>
@@ -569,7 +512,7 @@
           </div>
           <div style="display:flex;gap:10px;">
             <button class="btn2" onclick="runAssessmentAndGoToDashboard()">Assessment Dashboard</button>
-            <button class="btn" style="background:#059669;" onclick="startMigrationWithSelected()">
+            <button class="btn" onclick="startMigrationWithSelected()">
               <span id="btn-footer-migrate-text">Start Migration (0) →</span>
             </button>
           </div>
@@ -582,37 +525,7 @@
            ===================================================================== -->
       <section id="tab-dashboard" class="tab-pane" style="display:none;">
         <!-- Top Journey Stepper -->
-        <div class="journey-stepper">
-          <div class="journey-step completed" onclick="switchTab('connections')">
-            <span class="jstep-num">✓</span>
-            <span class="jstep-name">Connect & Discover</span>
-          </div>
-          <div class="jstep-divider completed"></div>
-          <div class="journey-step completed" onclick="switchTab('library')">
-            <span class="jstep-num">✓</span>
-            <span class="jstep-name">Report Library</span>
-          </div>
-          <div class="jstep-divider completed"></div>
-          <div class="journey-step active" onclick="switchTab('dashboard')">
-            <span class="jstep-num">3</span>
-            <span class="jstep-name">Assessment</span>
-          </div>
-          <div class="jstep-divider"></div>
-          <div class="journey-step" onclick="switchTab('validation')">
-            <span class="jstep-num">4</span>
-            <span class="jstep-name">Validate</span>
-          </div>
-          <div class="jstep-divider"></div>
-          <div class="journey-step" onclick="switchTab('migration')">
-            <span class="jstep-num">5</span>
-            <span class="jstep-name">Upload</span>
-          </div>
-          <div class="jstep-divider"></div>
-          <div class="journey-step" onclick="switchTab('cutover')">
-            <span class="jstep-num">6</span>
-            <span class="jstep-name">Cutover</span>
-          </div>
-        </div>
+        <div class="journey-stepper" data-stepper><!-- filled by renderSteppers() in js/app.js --></div>
 
         <!-- Header -->
         <div class="main-header">
@@ -622,7 +535,7 @@
           </div>
           <div style="display:flex;gap:10px;">
             <button class="btn2" onclick="recheckEstate()">Re-run Assessment</button>
-            <button class="btn" style="background:#059669;" onclick="startMigrationWithSelected()"><span id="btn-dash-migrate-text">Proceed to Validation (0) →</span></button>
+            <button class="btn" onclick="startMigrationWithSelected()"><span id="btn-dash-migrate-text">Proceed to Validation (0) →</span></button>
           </div>
         </div>
 
@@ -633,15 +546,15 @@
             <div class="l">Reports Found</div>
           </div>
           <div class="card tile">
-            <div class="n" id="dash-tile-readiness" style="color:#059669;">—</div>
+            <div class="n is-ok" id="dash-tile-readiness">—</div>
             <div class="l">Migration Readiness</div>
           </div>
           <div class="card tile">
-            <div class="n" id="dash-tile-review" style="color:#D97706;">0</div>
+            <div class="n is-warn" id="dash-tile-review">0</div>
             <div class="l">Needs Review</div>
           </div>
           <div class="card tile">
-            <div class="n" id="dash-tile-blocked" style="color:#059669;">0</div>
+            <div class="n is-ok" id="dash-tile-blocked">0</div>
             <div class="l">Compatible</div>
           </div>
         </div>
@@ -656,14 +569,14 @@
                 <span>Compatible (Native SSRS)</span>
                 <strong id="comp-clean-pct">0%</strong>
               </div>
-              <div class="bar"><i id="comp-clean-bar" style="width:0%;background:#15803D"></i></div>
+              <div class="bar"><i id="comp-clean-bar" style="width:0%;background:var(--br-success)"></i></div>
             </div>
             <div style="margin-bottom:6px;font-size:13px">
               <div style="display:flex;justify-content:space-between;">
                 <span>Needs Review (e.g. Custom Assemblies)</span>
                 <strong id="comp-review-pct">0%</strong>
               </div>
-              <div class="bar"><i id="comp-review-bar" style="width:0%;background:#D97706"></i></div>
+              <div class="bar"><i id="comp-review-bar" style="width:0%;background:var(--br-warning)"></i></div>
             </div>
           </div>
 
@@ -675,14 +588,14 @@
               <!-- Dynamically populated from real reports -->
             </div>
 
-            <div style="margin-top:16px;padding-top:12px;border-top:1px solid #E2E8F0;display:flex;justify-content:space-between;align-items:center;">
+            <div style="margin-top:16px;padding-top:12px;border-top:1px solid var(--br-border);display:flex;justify-content:space-between;align-items:center;">
               <div>
                 <span class="pill" id="dash-ssrs-pill">Not connected</span>
-                <span style="font-size:12.5px;color:#64748B;margin-left:6px;" id="dash-ssrs-detail">Source server</span>
+                <span style="font-size:12.5px;color:var(--br-text-muted);margin-left:6px;" id="dash-ssrs-detail">Source server</span>
               </div>
               <div>
                 <span class="pill" id="dash-dest-pill">Not connected</span>
-                <span style="font-size:12.5px;color:#64748B;margin-left:6px;">Bold Reports Server</span>
+                <span style="font-size:12.5px;color:var(--br-text-muted);margin-left:6px;">Bold Reports Server</span>
               </div>
             </div>
           </div>
@@ -694,7 +607,7 @@
           <div class="jnav-info">
             <span id="dash-footer-readiness">Run the assessment to calculate a readiness score.</span>
           </div>
-          <button class="btn" style="background:#059669;" onclick="startMigrationWithSelected()"><span id="btn-dash-footer-migrate">Proceed to Validation & Preview (0) →</span></button>
+          <button class="btn" onclick="startMigrationWithSelected()"><span id="btn-dash-footer-migrate">Proceed to Validation & Preview (0) →</span></button>
         </div>
       </section>
 
@@ -704,37 +617,7 @@
            ===================================================================== -->
       <section id="tab-validation" class="tab-pane" style="display:none;">
         <!-- Top Journey Stepper -->
-        <div class="journey-stepper">
-          <div class="journey-step completed" onclick="switchTab('connections')">
-            <span class="jstep-num">✓</span>
-            <span class="jstep-name">Connect & Discover</span>
-          </div>
-          <div class="jstep-divider completed"></div>
-          <div class="journey-step completed" onclick="switchTab('library')">
-            <span class="jstep-num">✓</span>
-            <span class="jstep-name">Report Library</span>
-          </div>
-          <div class="jstep-divider completed"></div>
-          <div class="journey-step completed" onclick="switchTab('dashboard')">
-            <span class="jstep-num">✓</span>
-            <span class="jstep-name">Assessment</span>
-          </div>
-          <div class="jstep-divider completed"></div>
-          <div class="journey-step active" onclick="switchTab('validation')">
-            <span class="jstep-num">4</span>
-            <span class="jstep-name">Validate</span>
-          </div>
-          <div class="jstep-divider"></div>
-          <div class="journey-step" onclick="switchTab('migration')">
-            <span class="jstep-num">5</span>
-            <span class="jstep-name">Upload</span>
-          </div>
-          <div class="jstep-divider"></div>
-          <div class="journey-step" onclick="switchTab('cutover')">
-            <span class="jstep-num">6</span>
-            <span class="jstep-name">Cutover</span>
-          </div>
-        </div>
+        <div class="journey-stepper" data-stepper><!-- filled by renderSteppers() in js/app.js --></div>
 
         <!-- Header -->
         <div class="main-header">
@@ -743,14 +626,14 @@
             <p class="sub">Verify local report rendering with headless Playwright (5 parallel tabs) before uploading to Bold Reports Server.</p>
           </div>
           <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
-            <button class="btn" id="btn-run-selected-validation" onclick="startAutomatedRenderValidation(true)" style="background:#2563EB;display:flex;align-items:center;gap:6px;">
+            <button class="btn" id="btn-run-selected-validation" onclick="startAutomatedRenderValidation(true)" style="display:flex;align-items:center;gap:6px;">
               <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>
               <span id="btn-run-selected-text">Validate Selected (<span id="val-selected-count">0</span>)</span>
             </button>
             <button class="btn2" id="btn-run-render-validation" onclick="startAutomatedRenderValidation(false)" title="Run Playwright render validation on all staged reports">
               <span id="btn-run-validation-text">Run All</span>
             </button>
-            <button class="btn2" id="btn-skip-validation" onclick="skipRenderValidationAndUpload()" style="font-weight:600;border-color:#CBD5E1;">
+            <button class="btn2" id="btn-skip-validation" onclick="skipRenderValidationAndUpload()">
               <span>Skip & Upload Directly →</span>
             </button>
           </div>
@@ -759,37 +642,37 @@
         <!-- 4 Metric Tiles -->
         <div class="tiles">
           <div class="card tile">
-            <div class="n" id="val-stat-passed" style="color:#059669;">0</div>
+            <div class="n is-ok" id="val-stat-passed">0</div>
             <div class="l">Passed (Visual Snapshot OK)</div>
           </div>
           <div class="card tile">
-            <div class="n" id="val-stat-offline" style="color:#2563EB;">0</div>
+            <div class="n is-info" id="val-stat-offline">0</div>
             <div class="l">Data Source Offline (RDL Valid)</div>
           </div>
           <div class="card tile">
-            <div class="n" id="val-stat-manual" style="color:#D97706;">0</div>
+            <div class="n is-warn" id="val-stat-manual">0</div>
             <div class="l">Needs Manual Check (Params)</div>
           </div>
           <div class="card tile">
-            <div class="n" id="val-stat-failed" style="color:#D97706;">0</div>
+            <div class="n is-warn" id="val-stat-failed">0</div>
             <div class="l">Needs Review</div>
           </div>
         </div>
 
         <!-- Filter & Search Toolbar -->
-        <div style="display:flex;justify-content:space-between;align-items:center;margin:16px 0;background:#F8FAFC;padding:10px 16px;border-radius:10px;border:1px solid #E2E8F0;flex-wrap:wrap;gap:10px;">
+        <div class="note" style="display:flex;justify-content:space-between;align-items:center;margin:16px 0;flex-wrap:wrap;gap:10px;">
           <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
-            <span style="font-size:13px;font-weight:600;color:#64748B;margin-right:4px;">Filter:</span>
+            <span style="font-size:13px;font-weight:600;color:var(--br-text-muted);margin-right:4px;">Filter:</span>
             <button class="btn2 btn-sm filter-active" id="val-btn-filter-all" onclick="filterValidationCards('all')">All (<span id="val-pill-all">0</span>)</button>
-            <button class="btn2 btn-sm" id="val-btn-filter-passed" onclick="filterValidationCards('passed')" style="color:#059669;">Passed (<span id="val-pill-passed">0</span>)</button>
-            <button class="btn2 btn-sm" id="val-btn-filter-offline" onclick="filterValidationCards('offline')" style="color:#2563EB;">Data Source Offline (<span id="val-pill-offline">0</span>)</button>
-            <button class="btn2 btn-sm" id="val-btn-filter-manual" onclick="filterValidationCards('manual')" style="color:#D97706;">Needs Params (<span id="val-pill-manual">0</span>)</button>
-            <button class="btn2 btn-sm" id="val-btn-filter-failed" onclick="filterValidationCards('failed')" style="color:#D97706;">Needs Review (<span id="val-pill-failed">0</span>)</button>
+            <button class="btn2 btn-sm" id="val-btn-filter-passed" onclick="filterValidationCards('passed')">Passed (<span id="val-pill-passed">0</span>)</button>
+            <button class="btn2 btn-sm" id="val-btn-filter-offline" onclick="filterValidationCards('offline')">Data Source Offline (<span id="val-pill-offline">0</span>)</button>
+            <button class="btn2 btn-sm" id="val-btn-filter-manual" onclick="filterValidationCards('manual')">Needs Params (<span id="val-pill-manual">0</span>)</button>
+            <button class="btn2 btn-sm" id="val-btn-filter-failed" onclick="filterValidationCards('failed')">Needs Review (<span id="val-pill-failed">0</span>)</button>
           </div>
           <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
-            <input type="text" id="val-search-input" placeholder="Search report name or folder..." style="height:34px;width:220px;padding:0 12px;border:1px solid #CBD5E1;border-radius:6px;font-size:13px;" oninput="onValidationSearch(this.value)">
-            <div style="display:inline-flex;border:1px solid #CBD5E1;border-radius:6px;overflow:hidden;background:#FFF;">
-              <button class="btn2 btn-sm filter-active" id="val-view-details-btn" onclick="setValidationViewMode('details')" style="border:none;border-radius:0;border-right:1px solid #E2E8F0;" title="Details Table View">☰ Details</button>
+            <input type="text" id="val-search-input" placeholder="Search report name or folder..." style="height:34px;width:220px;padding:0 12px;border:1px solid var(--br-border-strong);border-radius:6px;font-size:13px;" oninput="onValidationSearch(this.value)">
+            <div style="display:inline-flex;border:1px solid var(--br-border-strong);border-radius:6px;overflow:hidden;background:var(--br-surface);">
+              <button class="btn2 btn-sm filter-active" id="val-view-details-btn" onclick="setValidationViewMode('details')" style="border:none;border-radius:0;border-right:1px solid var(--br-border);" title="Details Table View">☰ Details</button>
               <button class="btn2 btn-sm" id="val-view-cards-btn" onclick="setValidationViewMode('cards')" style="border:none;border-radius:0;" title="Visual Cards View">▦ Cards</button>
             </div>
             <button class="btn2 btn-sm" onclick="loadValidationSummary(true)" title="Refresh validation results">↻ Refresh</button>
@@ -799,7 +682,7 @@
 
         <!-- Evidence Cards Grid -->
         <div id="val-evidence-grid" style="display:grid;grid-template-columns:repeat(auto-fill, minmax(360px, 1fr));gap:16px;margin-bottom:20px;">
-          <div class="card" style="grid-column:1 / -1;padding:32px;text-align:center;color:#64748B;">
+          <div class="card" style="grid-column:1 / -1;padding:32px;text-align:center;color:var(--br-text-muted);">
             <p style="margin:0;font-size:15px;font-weight:500;">Loading staged report validation status...</p>
           </div>
         </div>
@@ -820,37 +703,7 @@
            ===================================================================== -->
       <section id="tab-migration" class="tab-pane" style="display:none;">
         <!-- Top Journey Stepper -->
-        <div class="journey-stepper">
-          <div class="journey-step completed" onclick="switchTab('connections')">
-            <span class="jstep-num">✓</span>
-            <span class="jstep-name">Connect & Discover</span>
-          </div>
-          <div class="jstep-divider completed"></div>
-          <div class="journey-step completed" onclick="switchTab('library')">
-            <span class="jstep-num">✓</span>
-            <span class="jstep-name">Report Library</span>
-          </div>
-          <div class="jstep-divider completed"></div>
-          <div class="journey-step completed" onclick="switchTab('dashboard')">
-            <span class="jstep-num">✓</span>
-            <span class="jstep-name">Assessment</span>
-          </div>
-          <div class="jstep-divider completed"></div>
-          <div class="journey-step completed" onclick="switchTab('validation')">
-            <span class="jstep-num">✓</span>
-            <span class="jstep-name">Validate</span>
-          </div>
-          <div class="jstep-divider completed"></div>
-          <div class="journey-step active" onclick="switchTab('migration')">
-            <span class="jstep-num">5</span>
-            <span class="jstep-name">Upload</span>
-          </div>
-          <div class="jstep-divider"></div>
-          <div class="journey-step" onclick="switchTab('cutover')">
-            <span class="jstep-num">6</span>
-            <span class="jstep-name">Cutover</span>
-          </div>
-        </div>
+        <div class="journey-stepper" data-stepper><!-- filled by renderSteppers() in js/app.js --></div>
 
         <!-- Header -->
         <div class="main-header">
@@ -951,7 +804,7 @@
               </tr>
             </thead>
             <tbody id="server-uploaded-reports-tbody">
-              <tr><td colspan="4" style="text-align:center;color:#64748B;padding:16px;">Reports will appear here once uploaded in Step 5.</td></tr>
+              <tr><td colspan="4" style="text-align:center;color:var(--br-text-muted);padding:16px;">Reports will appear here once uploaded in Step 5.</td></tr>
             </tbody>
           </table>
         </div>
@@ -972,37 +825,7 @@
            ===================================================================== -->
       <section id="tab-cutover" class="tab-pane" style="display:none;">
         <!-- Top Journey Stepper -->
-        <div class="journey-stepper">
-          <div class="journey-step completed" onclick="switchTab('connections')">
-            <span class="jstep-num">✓</span>
-            <span class="jstep-name">Connect & Discover</span>
-          </div>
-          <div class="jstep-divider completed"></div>
-          <div class="journey-step completed" onclick="switchTab('library')">
-            <span class="jstep-num">✓</span>
-            <span class="jstep-name">Report Library</span>
-          </div>
-          <div class="jstep-divider completed"></div>
-          <div class="journey-step completed" onclick="switchTab('dashboard')">
-            <span class="jstep-num">✓</span>
-            <span class="jstep-name">Assessment</span>
-          </div>
-          <div class="jstep-divider completed"></div>
-          <div class="journey-step completed" onclick="switchTab('validation')">
-            <span class="jstep-num">✓</span>
-            <span class="jstep-name">Validate</span>
-          </div>
-          <div class="jstep-divider completed"></div>
-          <div class="journey-step completed" onclick="switchTab('migration')">
-            <span class="jstep-num">✓</span>
-            <span class="jstep-name">Upload</span>
-          </div>
-          <div class="jstep-divider completed"></div>
-          <div class="journey-step active" onclick="switchTab('cutover')">
-            <span class="jstep-num">6</span>
-            <span class="jstep-name">Cutover</span>
-          </div>
-        </div>
+        <div class="journey-stepper" data-stepper><!-- filled by renderSteppers() in js/app.js --></div>
 
         <!-- Header -->
         <div class="main-header">
@@ -1012,7 +835,7 @@
           </div>
           <div style="display:flex;gap:10px;">
             <button class="btn2" onclick="downloadReportPdf()">Download Audit PDF</button>
-            <button class="btn" style="background:#059669;" onclick="handleConfirmCutover()">Confirm Production Cutover</button>
+            <button class="btn" onclick="handleConfirmCutover()">Confirm Production Cutover</button>
           </div>
         </div>
 
@@ -1023,12 +846,12 @@
             <h2>Production Cutover Gates</h2>
             <p class="sub" style="margin-bottom:12px;">All enterprise gates must pass before SSRS can be decommissioned.</p>
 
-            <div id="cutover-blocked-banner" style="display:none;background:#FEF2F2;border:1px solid #FECACA;border-radius:8px;padding:12px 14px;margin-bottom:14px;">
-              <div style="font-weight:700;font-size:13.5px;color:#991B1B;display:flex;align-items:center;gap:6px;">
+            <div id="cutover-blocked-banner" class="note note-err" style="display:none;margin-bottom:14px;">
+              <div style="font-weight:700;font-size:13.5px;color:var(--br-danger-text);display:flex;align-items:center;gap:6px;">
                 <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"></path><line x1="12" y1="9" x2="12" y2="13"></line><line x1="12" y1="17" x2="12.01" y2="17"></line></svg>
                 Cutover Blocked: Reports Have Not Been Uploaded Yet
               </div>
-              <p style="font-size:12.5px;color:#B91C1C;margin:4px 0 8px;line-height:1.4;">
+              <p style="font-size:12.5px;color:var(--br-danger-hover);margin:4px 0 8px;line-height:1.4;">
                 You cannot finalize production cutover because 0 reports have been uploaded to Bold Reports Server.
               </p>
               <button class="btn btn-sm" onclick="switchTab('migration')">Go to Step 4: Upload Pipeline →</button>
@@ -1044,23 +867,23 @@
             <h2>URL Compatibility Shim & Actions</h2>
             <p class="sub" style="margin-bottom:12px;">Seamless client URL redirection without breaking bookmarks.</p>
 
-            <label style="display:flex;align-items:center;gap:10px;font-size:13.5px;font-weight:600;padding:10px 12px;background:#F8FAFC;border:1px solid #E2E8F0;border-radius:8px;cursor:pointer;">
+            <label class="note" style="display:flex;align-items:center;gap:10px;font-size:13.5px;font-weight:600;cursor:pointer;">
               <input type="checkbox" id="setting-shim-enabled" checked>
               <span>Enable URL Compatibility Shim (/ReportServer & /Reports redirect)</span>
             </label>
 
             <div style="margin-top:16px;">
-              <span style="font-size:12px;color:#64748B;font-weight:600;display:block;margin-bottom:6px;">EXPORT AUDIT & COMPLIANCE ARTIFACTS</span>
+              <span style="font-size:12px;color:var(--br-text-muted);font-weight:600;display:block;margin-bottom:6px;">EXPORT AUDIT & COMPLIANCE ARTIFACTS</span>
               <div style="display:flex;gap:10px;flex-wrap:wrap;">
                 <button class="btn2 btn-sm" onclick="downloadReportPdf()">Download Migration Certificate (PDF)</button>
                 <button class="btn2 btn-sm" onclick="downloadSupportBundle()">Download Diagnostic Bundle (ZIP)</button>
               </div>
             </div>
 
-            <div style="margin-top:20px;padding-top:14px;border-top:1px solid #E2E8F0;">
-              <span style="font-size:12px;color:#DC2626;font-weight:700;display:block;margin-bottom:4px;">FINAL PRODUCTION SWITCHOVER</span>
+            <div style="margin-top:20px;padding-top:14px;border-top:1px solid var(--br-border);">
+              <span style="font-size:12px;color:var(--br-danger);font-weight:700;display:block;margin-bottom:4px;">FINAL PRODUCTION SWITCHOVER</span>
               <p class="sub" style="font-size:12.5px;margin-bottom:12px;">Marks SSRS as read-only, activates Bold Reports as primary, and creates signed audit event.</p>
-              <button class="btn" style="background:#059669;width:100%;" id="btn-confirm-cutover" onclick="handleConfirmCutover()">Confirm Production Cutover</button>
+              <button class="btn" style="width:100%;" id="btn-confirm-cutover" onclick="handleConfirmCutover()">Confirm Production Cutover</button>
             </div>
           </div>
         </div>
@@ -1071,7 +894,7 @@
           <div class="jnav-info">
             <span id="cutover-footer-status">Checking cutover gates...</span>
           </div>
-          <button class="btn" style="background:#059669;" onclick="handleConfirmCutover()">Confirm Production Cutover</button>
+          <button class="btn" onclick="handleConfirmCutover()">Confirm Production Cutover</button>
         </div>
       </section>
 
@@ -1167,8 +990,8 @@
             </div>
 
             <!-- Migration Features Included -->
-            <div style="background:#F8FAFC;border:1px solid #E2E8F0;border-radius:8px;padding:12px;margin-top:12px;font-size:12.5px;color:#475569;">
-              <strong style="color:#0F172A;display:block;margin-bottom:4px;">Automated Engine Features:</strong>
+            <div class="note" style="margin-top:12px;font-size:12.5px;">
+              <strong style="color:var(--br-text);display:block;margin-bottom:4px;">Automated Engine Features:</strong>
               • Recursive folder parsing & hierarchical category generation<br>
               • Base64 encoding with relaxed JSON escaping (safe '+' preservation)<br>
               • DataSource connect string & server type mapping<br>
@@ -1180,7 +1003,7 @@
         <!-- Real-time Progress & Results -->
         <div class="card" id="lf-results-card" style="margin-top:12px;display:none;">
           <h2>Migration Execution Status</h2>
-          <div id="lf-status-summary" style="margin-bottom:12px;font-weight:600;font-size:14px;color:#1E40AF;"></div>
+          <div id="lf-status-summary" style="margin-bottom:12px;font-weight:600;font-size:14px;color:var(--br-info-text);"></div>
 
           <div class="tiles" style="grid-template-columns:repeat(3, 1fr);margin-bottom:14px;">
             <div class="card tile" style="padding:12px;">
@@ -1214,7 +1037,7 @@
             <p class="sub">Analyze, validate, and test SSRS expressions against Bold Reports compatibility rules.</p>
           </div>
           <div style="display:flex;gap:10px;align-items:center;">
-            <select id="expr-sample-select" style="height:36px;border:1px solid #CBD5E1;border-radius:6px;padding:0 10px;" onchange="loadSelectedSample(this.value)">
+            <select id="expr-sample-select" style="height:36px;border:1px solid var(--br-border-strong);border-radius:6px;padding:0 10px;" onchange="loadSelectedSample(this.value)">
               <option value="">Load a sample expression...</option>
               <option value="0">Conditional Formatting (IIf)</option>
               <option value="1">Currency Formatting (Format)</option>
@@ -1256,27 +1079,27 @@
             </div>
 
             <div style="margin-bottom:12px;">
-              <span style="font-size:12px;color:#64748B;font-weight:600;display:block;">CATEGORY</span>
-              <strong id="expr-category-text" style="font-size:14px;color:#0F172A;">Conditional / Logical</strong>
+              <span style="font-size:12px;color:var(--br-text-muted);font-weight:600;display:block;">CATEGORY</span>
+              <strong id="expr-category-text" style="font-size:14px;color:var(--br-text);">Conditional / Logical</strong>
             </div>
 
             <div style="margin-bottom:12px;">
-              <span style="font-size:12px;color:#64748B;font-weight:600;display:block;">AI PLAIN-LANGUAGE EXPLANATION</span>
-              <p id="expr-explanation-text" style="font-size:13px;color:#334155;margin:2px 0 0;line-height:1.5;">
+              <span style="font-size:12px;color:var(--br-text-muted);font-weight:600;display:block;">AI PLAIN-LANGUAGE EXPLANATION</span>
+              <p id="expr-explanation-text" style="font-size:13px;color:var(--br-text-secondary);margin:2px 0 0;line-height:1.5;">
                 Evaluates a condition: if true, returns the first branch value; otherwise returns the second branch value.
               </p>
             </div>
 
-            <div style="margin-bottom:12px;background:#F8FAFC;border:1px solid #E2E8F0;border-radius:8px;padding:10px 12px;">
-              <span style="font-size:12px;color:#64748B;font-weight:600;display:block;">EVALUATED OUTPUT (SIMULATION)</span>
-              <div id="expr-eval-output" style="font-family:'JetBrains Mono',monospace;font-size:14px;font-weight:700;color:#1E40AF;margin-top:2px;">
+            <div class="note" style="margin-bottom:12px;">
+              <span style="font-size:12px;color:var(--br-text-muted);font-weight:600;display:block;">EVALUATED OUTPUT (SIMULATION)</span>
+              <div id="expr-eval-output" style="font-family:'JetBrains Mono',monospace;font-size:14px;font-weight:700;color:var(--br-info-text);margin-top:2px;">
                 "High Performer"
               </div>
             </div>
 
             <div>
-              <span style="font-size:12px;color:#64748B;font-weight:600;display:block;">BOLD REPORTS MIGRATION GUIDANCE</span>
-              <p id="expr-guidance-text" style="font-size:12.5px;color:#475569;margin:2px 0 0;">
+              <span style="font-size:12px;color:var(--br-text-muted);font-weight:600;display:block;">BOLD REPORTS MIGRATION GUIDANCE</span>
+              <p id="expr-guidance-text" style="font-size:12.5px;color:var(--br-text-secondary);margin:2px 0 0;">
                 This expression is 100% compatible with Bold Reports Server and Web Report Viewer.
               </p>
             </div>
@@ -1297,25 +1120,25 @@
         </div>
         <div class="card" style="padding:16px;margin-bottom:14px;">
           <div style="display:grid;grid-template-columns:2fr 1.5fr 1.5fr auto;gap:10px;align-items:end;">
-            <label>Bold Reports URL<input id="bd-url" type="text" placeholder="https://reports.example.com" style="width:100%;height:36px;border:1px solid #CBD5E1;border-radius:6px;padding:0 10px;"></label>
-            <label>Email<input id="bd-email" type="text" autocomplete="off" style="width:100%;height:36px;border:1px solid #CBD5E1;border-radius:6px;padding:0 10px;"></label>
-            <label>Password<input id="bd-password" type="password" autocomplete="new-password" style="width:100%;height:36px;border:1px solid #CBD5E1;border-radius:6px;padding:0 10px;"></label>
+            <label>Bold Reports URL<input id="bd-url" type="text" placeholder="https://reports.example.com" style="width:100%;height:36px;border:1px solid var(--br-border-strong);border-radius:6px;padding:0 10px;"></label>
+            <label>Email<input id="bd-email" type="text" autocomplete="off" style="width:100%;height:36px;border:1px solid var(--br-border-strong);border-radius:6px;padding:0 10px;"></label>
+            <label>Password<input id="bd-password" type="password" autocomplete="new-password" style="width:100%;height:36px;border:1px solid var(--br-border-strong);border-radius:6px;padding:0 10px;"></label>
             <button class="btn" onclick="bdLoadReports()">Load Reports</button>
           </div>
         </div>
         <div class="card" style="padding:16px;">
           <div style="display:flex;gap:10px;align-items:center;margin-bottom:10px;flex-wrap:wrap;">
-            <input id="bd-filter" type="text" placeholder="Filter by name or folder..." oninput="bdRender()" style="height:34px;border:1px solid #CBD5E1;border-radius:6px;padding:0 10px;min-width:260px;">
+            <input id="bd-filter" type="text" placeholder="Filter by name or folder..." oninput="bdRender()" style="height:34px;border:1px solid var(--br-border-strong);border-radius:6px;padding:0 10px;min-width:260px;">
             <a href="javascript:void(0)" onclick="bdSelectVisible(true)">Select visible</a>
             <a href="javascript:void(0)" onclick="bdSelectVisible(false)">Clear</a>
             <span style="flex:1"></span>
-            <span id="bd-status" style="font-size:12.5px;color:#64748B;"></span>
+            <span id="bd-status" style="font-size:12.5px;color:var(--br-text-muted);"></span>
             <button class="btn2 btn-danger" id="bd-delete-btn" onclick="bdDeleteSelected()" disabled>Delete Selected (0)</button>
           </div>
           <div style="max-height:480px;overflow:auto;">
             <table style="width:100%;border-collapse:collapse;">
               <thead><tr style="text-align:left;"><th style="width:32px;"></th><th>Report</th><th>Folder</th></tr></thead>
-              <tbody id="bd-body"><tr><td colspan="3" style="color:#94A3B8;padding:12px;">Load reports to begin.</td></tr></tbody>
+              <tbody id="bd-body"><tr><td colspan="3" style="color:var(--br-text-muted);padding:12px;">Load reports to begin.</td></tr></tbody>
             </table>
           </div>
         </div>
@@ -1375,39 +1198,39 @@
   <!-- Delete Reports in Bold Reports Modal -->
   <div id="modal-delete-reports" class="modal-overlay" style="display:none;">
     <div class="modal-dialog">
-      <div class="modal-header" style="border-bottom:1px solid #E2E8F0;padding:16px 20px;display:flex;justify-content:space-between;align-items:center;">
+      <div class="modal-header" style="border-bottom:1px solid var(--br-border);padding:16px 20px;display:flex;justify-content:space-between;align-items:center;">
         <div style="display:flex;align-items:center;gap:10px;">
-          <div style="width:36px;height:36px;border-radius:8px;background:#FEE2E2;color:#DC2626;display:flex;align-items:center;justify-content:center;">
+          <div style="width:36px;height:36px;border-radius:8px;background:var(--br-danger-bg);color:var(--br-danger);display:flex;align-items:center;justify-content:center;">
             <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 6h18M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path><line x1="10" y1="11" x2="10" y2="17"></line><line x1="14" y1="11" x2="14" y2="17"></line></svg>
           </div>
           <div>
-            <h3 style="margin:0;font-size:16px;color:#0F172A;font-weight:700;">Delete Reports in Bold Reports</h3>
-            <p style="margin:2px 0 0;font-size:12px;color:#64748B;">Remove reports from Bold Reports Server destination</p>
+            <h3 style="margin:0;font-size:16px;color:var(--br-text);font-weight:700;">Delete Reports in Bold Reports</h3>
+            <p style="margin:2px 0 0;font-size:12px;color:var(--br-text-muted);">Remove reports from Bold Reports Server destination</p>
           </div>
         </div>
-        <button class="modal-close-btn" onclick="closeDeleteReportsModal()" style="background:none;border:none;font-size:24px;line-height:1;cursor:pointer;color:#94A3B8;">&times;</button>
+        <button class="modal-close-btn" onclick="closeDeleteReportsModal()" style="background:none;border:none;font-size:24px;line-height:1;cursor:pointer;color:var(--br-text-subtle);">&times;</button>
       </div>
 
       <div class="modal-body" style="padding:20px;">
-        <div style="background:#FEF2F2;border:1px solid #FECACA;border-radius:8px;padding:12px 14px;margin-bottom:18px;">
-          <div style="font-weight:600;font-size:13px;color:#991B1B;display:flex;align-items:center;gap:6px;">
+        <div class="note note-err" style="margin-bottom:18px;">
+          <div style="font-weight:600;font-size:13px;color:var(--br-danger-text);display:flex;align-items:center;gap:6px;">
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="8" x2="12" y2="12"></line><line x1="12" y1="16" x2="12.01" y2="16"></line></svg>
             Destination Server Cleanup
           </div>
-          <div style="font-size:12px;color:#B91C1C;margin-top:4px;line-height:1.4;">
+          <div style="font-size:12px;color:var(--br-danger-hover);margin-top:4px;line-height:1.4;">
             This will call Bold Reports Server REST APIs to delete items and reset their local migration state back to <em>Analysed</em> so they can be re-migrated cleanly.
           </div>
         </div>
 
         <div style="margin-bottom:16px;">
-          <label style="font-size:11.5px;font-weight:700;color:#475569;text-transform:uppercase;letter-spacing:0.5px;display:block;margin-bottom:10px;">Select Deletion Scope</label>
+          <label style="font-size:11.5px;font-weight:700;color:var(--br-text-secondary);text-transform:uppercase;letter-spacing:0.5px;display:block;margin-bottom:10px;">Select Deletion Scope</label>
           
           <!-- Option 1: All Reports -->
           <label class="del-radio-label">
             <input type="radio" name="del-scope" value="all" id="del-scope-all" onchange="toggleDeleteScopeView()" checked style="margin-top:3px;">
             <div style="flex:1;">
-              <strong style="display:block;font-size:13.5px;color:#0F172A;">All Reports in Bold Reports</strong>
-              <span style="font-size:12px;color:#64748B;">Delete all <span id="del-modal-total-count">0</span> reports across all folders from Bold Reports Server.</span>
+              <strong style="display:block;font-size:13.5px;color:var(--br-text);">All Reports in Bold Reports</strong>
+              <span style="font-size:12px;color:var(--br-text-muted);">Delete all <span id="del-modal-total-count">0</span> reports across all folders from Bold Reports Server.</span>
             </div>
           </label>
 
@@ -1415,24 +1238,24 @@
           <label class="del-radio-label">
             <input type="radio" name="del-scope" value="section" id="del-scope-section" onchange="toggleDeleteScopeView()" style="margin-top:3px;">
             <div style="flex:1;">
-              <strong style="display:block;font-size:13.5px;color:#0F172A;">Multi-Section Delete (By Folder / Category)</strong>
-              <span style="font-size:12px;color:#64748B;">Select one or multiple entire sections / folders to delete from Bold Reports.</span>
+              <strong style="display:block;font-size:13.5px;color:var(--br-text);">Multi-Section Delete (By Folder / Category)</strong>
+              <span style="font-size:12px;color:var(--br-text-muted);">Select one or multiple entire sections / folders to delete from Bold Reports.</span>
             </div>
           </label>
 
           <!-- Section Selectors Container -->
-          <div id="del-sections-box" style="display:none;background:#F8FAFC;border:1px solid #E2E8F0;border-radius:8px;padding:12px;margin:2px 0 12px 28px;">
-            <div style="font-size:12px;font-weight:600;color:#334155;margin-bottom:8px;display:flex;justify-content:space-between;align-items:center;">
+          <div id="del-sections-box" class="note" style="display:none;margin:2px 0 12px 28px;">
+            <div style="font-size:12px;font-weight:600;color:var(--br-text-secondary);margin-bottom:8px;display:flex;justify-content:space-between;align-items:center;">
               <span>Check sections to delete:</span>
               <span style="font-size:11px;">
-                <a href="javascript:void(0)" onclick="toggleAllDeleteSections(true)" style="color:#0284C7;text-decoration:none;margin-right:8px;font-weight:600;">Select All</a>
-                <a href="javascript:void(0)" onclick="toggleAllDeleteSections(false)" style="color:#64748B;text-decoration:none;">Deselect All</a>
+                <a href="javascript:void(0)" onclick="toggleAllDeleteSections(true)" style="color:var(--br-info);text-decoration:none;margin-right:8px;font-weight:600;">Select All</a>
+                <a href="javascript:void(0)" onclick="toggleAllDeleteSections(false)" style="color:var(--br-text-muted);text-decoration:none;">Deselect All</a>
               </span>
             </div>
             <div id="del-sections-list" style="display:flex;flex-direction:column;gap:6px;max-height:160px;overflow-y:auto;padding-right:4px;">
-              <div style="color:#94A3B8;font-size:12px;padding:8px;text-align:center;">Loading sections...</div>
+              <div style="color:var(--br-text-subtle);font-size:12px;padding:8px;text-align:center;">Loading sections...</div>
             </div>
-            <label style="display:flex;align-items:center;gap:6px;margin-top:10px;font-size:12px;color:#475569;cursor:pointer;">
+            <label style="display:flex;align-items:center;gap:6px;margin-top:10px;font-size:12px;color:var(--br-text-secondary);cursor:pointer;">
               <input type="checkbox" id="del-option-categories" checked>
               <span>Also delete the Category folders from Bold Reports</span>
             </label>
@@ -1442,8 +1265,8 @@
           <label class="del-radio-label">
             <input type="radio" name="del-scope" value="selected" id="del-scope-selected" onchange="toggleDeleteScopeView()" style="margin-top:3px;">
             <div style="flex:1;">
-              <strong style="display:block;font-size:13.5px;color:#0F172A;">Multi-Selected Reports Only (<span id="del-modal-selected-count">0</span>)</strong>
-              <span style="font-size:12px;color:#64748B;">Delete only the specific reports currently checked in the Report Library.</span>
+              <strong style="display:block;font-size:13.5px;color:var(--br-text);">Multi-Selected Reports Only (<span id="del-modal-selected-count">0</span>)</strong>
+              <span style="font-size:12px;color:var(--br-text-muted);">Delete only the specific reports currently checked in the Report Library.</span>
             </div>
           </label>
         </div>
@@ -1451,9 +1274,9 @@
         <div id="del-status-message" style="display:none;padding:10px 12px;border-radius:6px;font-size:12.5px;margin-bottom:12px;"></div>
       </div>
 
-      <div class="modal-footer" style="border-top:1px solid #E2E8F0;padding:14px 20px;display:flex;justify-content:flex-end;gap:10px;background:#F8FAFC;border-bottom-left-radius:14px;border-bottom-right-radius:14px;">
+      <div class="modal-footer" style="border-top:1px solid var(--br-border);padding:14px 20px;display:flex;justify-content:flex-end;gap:10px;background:var(--br-surface-alt);border-bottom-left-radius:14px;border-bottom-right-radius:14px;">
         <button class="btn2" onclick="closeDeleteReportsModal()" id="btn-del-cancel">Cancel</button>
-        <button class="btn btn-danger" onclick="executeDeleteReports()" id="btn-del-confirm" style="background:#DC2626;">
+        <button class="btn btn-danger" onclick="executeDeleteReports()" id="btn-del-confirm">
           <span id="btn-del-confirm-text">Permanently Delete from Bold Reports</span>
         </button>
       </div>
@@ -1462,15 +1285,15 @@
 
   <!-- Interactive Report Viewer Modal (Local Staged or Server Integrated) -->
   <div id="modal-interactive-viewer" class="modal-overlay" style="display:none;z-index:9999;">
-    <div class="modal-dialog" style="max-width:92vw;width:1200px;height:90vh;display:flex;flex-direction:column;padding:0;background:#FFF;border-radius:14px;overflow:hidden;">
-      <div class="modal-header" style="border-bottom:1px solid #E2E8F0;padding:12px 20px;display:flex;justify-content:space-between;align-items:center;background:#F8FAFC;">
+    <div class="modal-dialog" style="max-width:92vw;width:1200px;height:90vh;display:flex;flex-direction:column;padding:0;background:var(--br-surface);border-radius:14px;overflow:hidden;">
+      <div class="modal-header" style="border-bottom:1px solid var(--br-border);padding:12px 20px;display:flex;justify-content:space-between;align-items:center;background:var(--br-surface-alt);">
         <div style="display:flex;align-items:center;gap:10px;">
-          <h3 id="interactive-viewer-title" style="margin:0;font-size:16px;color:#0F172A;">Report Viewer</h3>
+          <h3 id="interactive-viewer-title" style="margin:0;font-size:16px;color:var(--br-text);">Report Viewer</h3>
           <span class="pill ok" id="interactive-viewer-mode-pill">Local Staged</span>
         </div>
         <div style="display:flex;align-items:center;gap:10px;">
           <button class="btn2 btn-sm" onclick="switchViewerToDesigner()" title="Open this report in Web Report Designer">✏ Edit in Designer</button>
-          <button class="modal-close-btn" onclick="closeInteractiveViewer()" style="background:none;border:none;font-size:24px;line-height:1;cursor:pointer;color:#94A3B8;">&times;</button>
+          <button class="modal-close-btn" onclick="closeInteractiveViewer()" style="background:none;border:none;font-size:24px;line-height:1;cursor:pointer;color:var(--br-text-subtle);">&times;</button>
         </div>
       </div>
       <div class="modal-body" style="padding:0;flex:1;overflow:hidden;position:relative;">
@@ -1481,14 +1304,14 @@
 
   <!-- Interactive Report Designer Modal (Local Staged or Server Integrated) -->
   <div id="modal-interactive-designer" class="modal-overlay" style="display:none;z-index:9999;">
-    <div class="modal-dialog" style="max-width:95vw;width:1400px;height:94vh;display:flex;flex-direction:column;padding:0;background:#FFF;border-radius:14px;overflow:hidden;">
-      <div class="modal-header" style="border-bottom:1px solid #E2E8F0;padding:12px 20px;display:flex;justify-content:space-between;align-items:center;background:#F8FAFC;">
+    <div class="modal-dialog" style="max-width:95vw;width:1400px;height:94vh;display:flex;flex-direction:column;padding:0;background:var(--br-surface);border-radius:14px;overflow:hidden;">
+      <div class="modal-header" style="border-bottom:1px solid var(--br-border);padding:12px 20px;display:flex;justify-content:space-between;align-items:center;background:var(--br-surface-alt);">
         <div style="display:flex;align-items:center;gap:10px;">
-          <h3 id="interactive-designer-title" style="margin:0;font-size:16px;color:#0F172A;">Report Designer</h3>
+          <h3 id="interactive-designer-title" style="margin:0;font-size:16px;color:var(--br-text);">Report Designer</h3>
           <span class="pill warn" id="interactive-designer-mode-pill">Local Staged</span>
-          <small style="color:#64748B;">Saves directly to staging and marks report for updated upload.</small>
+          <small style="color:var(--br-text-muted);">Saves directly to staging and marks report for updated upload.</small>
         </div>
-        <button class="modal-close-btn" onclick="closeInteractiveDesigner()" style="background:none;border:none;font-size:24px;line-height:1;cursor:pointer;color:#94A3B8;">&times;</button>
+        <button class="modal-close-btn" onclick="closeInteractiveDesigner()" style="background:none;border:none;font-size:24px;line-height:1;cursor:pointer;color:var(--br-text-subtle);">&times;</button>
       </div>
       <div class="modal-body" style="padding:0;flex:1;overflow:hidden;position:relative;">
         <div id="interactive-designer-host" style="width:100%;height:100%;"></div>
@@ -1498,15 +1321,15 @@
 
   <!-- Render Error Logs Modal -->
   <div id="modal-render-logs" class="modal-overlay" style="display:none;z-index:9999;">
-    <div class="modal-dialog" style="max-width:750px;width:90%;background:#FFF;border-radius:14px;overflow:hidden;">
-      <div class="modal-header" style="border-bottom:1px solid #E2E8F0;padding:14px 20px;display:flex;justify-content:space-between;align-items:center;">
-        <h3 id="render-logs-title" style="margin:0;font-size:16px;color:#DC2626;">Rendering Error Diagnostic</h3>
-        <button class="modal-close-btn" onclick="closeRenderLogsModal()" style="background:none;border:none;font-size:24px;line-height:1;cursor:pointer;color:#94A3B8;">&times;</button>
+    <div class="modal-dialog" style="max-width:750px;width:90%;background:var(--br-surface);border-radius:14px;overflow:hidden;">
+      <div class="modal-header" style="border-bottom:1px solid var(--br-border);padding:14px 20px;display:flex;justify-content:space-between;align-items:center;">
+        <h3 id="render-logs-title" style="margin:0;font-size:16px;color:var(--br-danger);">Rendering Error Diagnostic</h3>
+        <button class="modal-close-btn" onclick="closeRenderLogsModal()" style="background:none;border:none;font-size:24px;line-height:1;cursor:pointer;color:var(--br-text-subtle);">&times;</button>
       </div>
       <div class="modal-body" style="padding:16px 20px;max-height:65vh;overflow-y:auto;" id="render-logs-body">
         <!-- Error logs content -->
       </div>
-      <div class="modal-footer" style="border-top:1px solid #E2E8F0;padding:12px 20px;display:flex;justify-content:flex-end;background:#F8FAFC;">
+      <div class="modal-footer" style="border-top:1px solid var(--br-border);padding:12px 20px;display:flex;justify-content:flex-end;background:var(--br-surface-alt);">
         <button class="btn2" onclick="closeRenderLogsModal()">Close</button>
       </div>
     </div>
@@ -1514,12 +1337,12 @@
 
   <!-- Snapshot Zoom Modal -->
   <div id="modal-snapshot-zoom" class="modal-overlay" style="display:none;z-index:9999;" onclick="closeSnapshotZoom()">
-    <div style="max-width:90vw;max-height:90vh;background:#FFF;padding:12px;border-radius:12px;box-shadow:0 25px 50px -12px rgba(0,0,0,0.25);position:relative;" onclick="event.stopPropagation()">
+    <div style="max-width:90vw;max-height:90vh;background:var(--br-surface);padding:12px;border-radius:12px;box-shadow:0 25px 50px -12px rgba(0,0,0,0.25);position:relative;" onclick="event.stopPropagation()">
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
-        <h4 id="snapshot-zoom-title" style="margin:0;font-size:14px;color:#0F172A;">Visual Snapshot</h4>
-        <button onclick="closeSnapshotZoom()" style="background:none;border:none;font-size:20px;cursor:pointer;color:#64748B;">&times;</button>
+        <h4 id="snapshot-zoom-title" style="margin:0;font-size:14px;color:var(--br-text);">Visual Snapshot</h4>
+        <button onclick="closeSnapshotZoom()" style="background:none;border:none;font-size:20px;cursor:pointer;color:var(--br-text-muted);">&times;</button>
       </div>
-      <img id="snapshot-zoom-img" src="" alt="Report Snapshot" style="max-width:100%;max-height:80vh;border-radius:6px;border:1px solid #E2E8F0;display:block;">
+      <img id="snapshot-zoom-img" src="" alt="Report Snapshot" style="max-width:100%;max-height:80vh;border-radius:6px;border:1px solid var(--br-border);display:block;">
     </div>
   </div>
 
