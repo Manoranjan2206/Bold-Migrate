@@ -25,13 +25,16 @@ public sealed class StagedReportServer : ReportingServer
     private readonly ICredentialStore _credentials;
     private readonly Func<MigrationCatalogItem, byte[], string?> _saveReport;
     private readonly ILogger _logger;
+    private readonly bool _allowUntrustedSqlCert;
 
     // Folder of the report currently being processed; data source, dataset and subreport
-    // references inside it are relative to this folder.
-    private string _contextFolder = "/";
+    // references inside it are relative to this folder (isolated per async execution context).
+    private readonly AsyncLocal<string?> _contextFolder = new();
 
-    // Data source of the most recently resolved shared dataset (one server per request).
-    private MigrationCatalogItem? _lastDataSetDataSource;
+    // Data source of the most recently resolved shared dataset.
+    private readonly AsyncLocal<MigrationCatalogItem?> _lastDataSetDataSource = new();
+
+    private string CurrentContextFolder => _contextFolder.Value ?? "/";
 
     /// <param name="saveReport">
     /// Persists a designer save for a staged report. Returns null on success, otherwise the
@@ -41,12 +44,14 @@ public sealed class StagedReportServer : ReportingServer
         StagedCatalog catalog,
         ICredentialStore credentials,
         Func<MigrationCatalogItem, byte[], string?> saveReport,
-        ILogger logger)
+        ILogger logger,
+        bool allowUntrustedSqlCert = false)
     {
         _catalog = catalog;
         _credentials = credentials;
         _saveReport = saveReport;
         _logger = logger;
+        _allowUntrustedSqlCert = allowUntrustedSqlCert;
     }
 
     public override Stream GetReport()
@@ -58,9 +63,9 @@ public sealed class StagedReportServer : ReportingServer
             return null!;
         }
 
-        _contextFolder = StagedCatalog.ParentOf(report.SourcePath);
+        _contextFolder.Value = StagedCatalog.ParentOf(report.SourcePath);
         var bytes = File.ReadAllBytes(report.StagedFilePath!);
-        bytes = EnsureTrustServerCertificateInRdl(bytes);
+        bytes = EnsureTrustServerCertificateInRdl(bytes, _allowUntrustedSqlCert);
         return new MemoryStream(bytes);
     }
 
@@ -69,8 +74,8 @@ public sealed class StagedReportServer : ReportingServer
         // While a shared dataset is expanded, Bold Reports asks for its data source with an
         // empty reference; that means the one the dataset itself points to.
         var item = string.IsNullOrWhiteSpace(dataSource)
-            ? _lastDataSetDataSource
-            : _catalog.ResolveReference(dataSource, _contextFolder, MigrationItemType.DataSource);
+            ? _lastDataSetDataSource.Value
+            : _catalog.ResolveReference(dataSource, CurrentContextFolder, MigrationItemType.DataSource);
         var definition = item != null ? BuildDataSourceDefinition(item) : null;
         if (definition == null)
         {
@@ -82,7 +87,7 @@ public sealed class StagedReportServer : ReportingServer
 
     public override SharedDatasetinfo GetSharedDataDefinition(string path)
     {
-        var item = _catalog.ResolveReference(path, _contextFolder, MigrationItemType.DataSet);
+        var item = _catalog.ResolveReference(path, CurrentContextFolder, MigrationItemType.DataSet);
         if (item == null || !StagedCatalog.IsStaged(item))
         {
             _logger.LogWarning("Preview: shared dataset '{Reference}' could not be resolved from staging (run {RunId}).",
@@ -100,7 +105,7 @@ public sealed class StagedReportServer : ReportingServer
         // The dataset's own data source reference is relative to the dataset's folder.
         var dsReference = ReportDependencies.ReadDataSetDataSourceReference(content);
         var dsItem = _catalog.ResolveReference(dsReference, StagedCatalog.ParentOf(item.SourcePath), MigrationItemType.DataSource);
-        _lastDataSetDataSource = dsItem;
+        _lastDataSetDataSource.Value = dsItem;
         if (dsItem != null)
         {
             info.DataSourceDefinition = BuildDataSourceDefinition(dsItem);
@@ -112,7 +117,7 @@ public sealed class StagedReportServer : ReportingServer
     public override BoldReports.RDL.DOM.Server.ItemDefinition GetItemDefinition(string itemName)
     {
         // External images and other resources referenced by a report.
-        var item = _catalog.ResolveReference(itemName, _contextFolder, MigrationItemType.Resource);
+        var item = _catalog.ResolveReference(itemName, CurrentContextFolder, MigrationItemType.Resource);
         if (item == null || !StagedCatalog.IsStaged(item)) return null!;
 
         return new BoldReports.RDL.DOM.Server.ItemDefinition
@@ -177,7 +182,7 @@ public sealed class StagedReportServer : ReportingServer
 
     private MigrationCatalogItem? ResolveReport(string? path)
     {
-        var report = _catalog.ResolveReference(path, _contextFolder, MigrationItemType.Report);
+        var report = _catalog.ResolveReference(path, CurrentContextFolder, MigrationItemType.Report);
         return report != null && StagedCatalog.IsStaged(report) ? report : null;
     }
 
@@ -191,15 +196,9 @@ public sealed class StagedReportServer : ReportingServer
         var effective = parsed.WithCredentials(_credentials.GetDataSourceCredential(item.Id.ToString()));
 
         var connectString = effective.ConnectString;
-        if (!string.IsNullOrWhiteSpace(connectString) &&
-            (string.Equals(effective.Extension, "SQL", StringComparison.OrdinalIgnoreCase) ||
-             connectString.Contains("Server=", StringComparison.OrdinalIgnoreCase) ||
-             connectString.Contains("Data Source=", StringComparison.OrdinalIgnoreCase)))
+        if (ShouldAppendTrustServerCertificate(connectString, effective.Extension, _allowUntrustedSqlCert))
         {
-            if (!connectString.Contains("TrustServerCertificate=", StringComparison.OrdinalIgnoreCase))
-            {
-                connectString = connectString.TrimEnd(';') + ";TrustServerCertificate=True;";
-            }
+            connectString = connectString.TrimEnd(';') + ";TrustServerCertificate=True;";
         }
 
         return new DataSourceDefinition
@@ -219,19 +218,55 @@ public sealed class StagedReportServer : ReportingServer
         };
     }
 
-    private static byte[] EnsureTrustServerCertificateInRdl(byte[] rdlBytes)
+    private static bool ShouldAppendTrustServerCertificate(string? connectString, string? extension, bool allowUntrusted)
+    {
+        if (string.IsNullOrWhiteSpace(connectString)) return false;
+        var isSql = string.Equals(extension, "SQL", StringComparison.OrdinalIgnoreCase) ||
+                    connectString.Contains("Server=", StringComparison.OrdinalIgnoreCase) ||
+                    connectString.Contains("Data Source=", StringComparison.OrdinalIgnoreCase);
+        if (!isSql || connectString.Contains("TrustServerCertificate=", StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
+        return allowUntrusted || IsLocalOrInternalSqlHost(connectString);
+    }
+
+    private static bool IsLocalOrInternalSqlHost(string connectString)
+    {
+        try
+        {
+            var builder = new Microsoft.Data.SqlClient.SqlConnectionStringBuilder(connectString);
+            var server = (builder.DataSource ?? string.Empty).Split(',')[0].Split('\\')[0].Trim();
+            return server.Equals("localhost", StringComparison.OrdinalIgnoreCase) ||
+                   server.Equals("127.0.0.1", StringComparison.OrdinalIgnoreCase) ||
+                   server.Equals("(local)", StringComparison.OrdinalIgnoreCase) ||
+                   server.Equals(".", StringComparison.OrdinalIgnoreCase) ||
+                   server.Equals("host.docker.internal", StringComparison.OrdinalIgnoreCase);
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    private static byte[] EnsureTrustServerCertificateInRdl(byte[] rdlBytes, bool allowUntrusted)
     {
         try
         {
             using var ms = new MemoryStream(rdlBytes);
-            var doc = System.Xml.Linq.XDocument.Load(ms);
+            var readerSettings = new System.Xml.XmlReaderSettings
+            {
+                DtdProcessing = System.Xml.DtdProcessing.Prohibit,
+                XmlResolver = null
+            };
+            using var reader = System.Xml.XmlReader.Create(ms, readerSettings);
+            var doc = System.Xml.Linq.XDocument.Load(reader);
             var modified = false;
             foreach (var elem in doc.Descendants().Where(e => e.Name.LocalName == "ConnectString"))
             {
                 var val = elem.Value;
-                if (!string.IsNullOrWhiteSpace(val) &&
-                    (val.Contains("Server=", StringComparison.OrdinalIgnoreCase) || val.Contains("Data Source=", StringComparison.OrdinalIgnoreCase)) &&
-                    !val.Contains("TrustServerCertificate=", StringComparison.OrdinalIgnoreCase))
+                if (ShouldAppendTrustServerCertificate(val, null, allowUntrusted))
                 {
                     elem.Value = val.TrimEnd(';') + ";TrustServerCertificate=True;";
                     modified = true;

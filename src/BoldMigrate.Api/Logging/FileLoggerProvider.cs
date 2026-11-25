@@ -1,4 +1,5 @@
 using System.Text;
+using BoldMigrate.Engine.Logging;
 
 namespace BoldMigrate.Api.Logging;
 
@@ -46,11 +47,12 @@ public sealed class FileLoggerProvider : ILoggerProvider
             Func<TState, Exception?, string> formatter)
         {
             if (!IsEnabled(logLevel)) return;
+            var message = Redactor.RedactSecrets(formatter(state, exception));
             var sb = new StringBuilder();
             sb.Append(DateTime.UtcNow.ToString("yyyy-MM-dd HH:mm:ss.fff")).Append("Z [")
               .Append(logLevel.ToString().ToUpperInvariant()).Append("] ")
-              .Append(category).Append(": ").Append(formatter(state, exception));
-            if (exception != null) sb.AppendLine().Append(exception);
+              .Append(category).Append(": ").Append(message);
+            if (exception != null) sb.AppendLine().Append(Redactor.RedactSecrets(exception.ToString()));
             provider.Write(sb.ToString());
         }
     }

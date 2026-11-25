@@ -14,6 +14,7 @@ using BoldMigrate.Engine.Upload;
 using BoldMigrate.Infrastructure.Credentials;
 using BoldMigrate.Infrastructure.SourceAdapters;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.EntityFrameworkCore;
 
 namespace BoldMigrate.Api.Controllers;
 
@@ -62,8 +63,54 @@ public class MigrationController : ControllerBase
     [HttpPost("runs")]
     public async Task<IActionResult> CreateOrGetRun([FromBody] CreateRunRequest req, CancellationToken ct)
     {
+        if (req.ForceNew)
+        {
+            var current = await _orchestrator.GetActiveRunAsync(ct);
+            if (current != null)
+            {
+                await _orchestrator.AbandonRunAsync(current.Id, ct);
+            }
+        }
+
         var run = await _orchestrator.CreateOrGetActiveRunAsync(req.Name ?? "SSRS Migration", req.SourceUrl ?? "http://localhost/ReportServer", ct);
         return Ok(run);
+    }
+
+    [HttpPut("runs/{id:guid}/credential-mode")]
+    public async Task<IActionResult> SetCredentialMode(Guid id, [FromBody] CredentialModeRequest req, CancellationToken ct)
+    {
+        var run = await _store.GetRunAsync(id, ct);
+        if (run == null) return NotFound();
+
+        if (!Enum.TryParse<CredentialMode>(req.CredentialMode, ignoreCase: true, out var mode))
+        {
+            return BadRequest(new { message = $"Unsupported credential mode '{req.CredentialMode}'. Use InMemory or DpapiLocal." });
+        }
+
+        if (mode == CredentialMode.ExternalVault)
+        {
+            return BadRequest(new { message = "ExternalVault mode requires external KMS/KeyVault integration, which is not configured in this environment. Use InMemory or DpapiLocal." });
+        }
+
+        _credStore.SetMode(mode);
+        run.CredentialMode = mode;
+        await _store.UpdateRunAsync(run, ct);
+        _logger.Log(LogLevel.Information, "CRED-MODE", id, $"Credential storage mode set to {mode}.");
+        return Ok(new { success = true, credentialMode = mode.ToString() });
+    }
+
+    [HttpGet("runs/{id:guid}/permissions")]
+    public async Task<IActionResult> GetPermissions(Guid id, CancellationToken ct)
+    {
+        if (await _store.GetRunAsync(id, ct) == null) return NotFound();
+        return Ok(await _store.GetPermissionMappingsAsync(id, ct));
+    }
+
+    [HttpGet("runs/{id:guid}/subscriptions")]
+    public async Task<IActionResult> GetSubscriptions(Guid id, CancellationToken ct)
+    {
+        if (await _store.GetRunAsync(id, ct) == null) return NotFound();
+        return Ok(await _store.GetSubscriptionRecordsAsync(id, ct));
     }
 
     [HttpGet("runs/{id:guid}")]
@@ -86,6 +133,25 @@ public class MigrationController : ControllerBase
     {
         var run = await _store.GetRunAsync(id, ct);
         if (run == null) return NotFound();
+
+        if (!string.IsNullOrWhiteSpace(req.CredentialMode) &&
+            Enum.TryParse<CredentialMode>(req.CredentialMode, ignoreCase: true, out var requestedMode) &&
+            requestedMode != CredentialMode.ExternalVault)
+        {
+            _credStore.SetMode(requestedMode);
+            run.CredentialMode = requestedMode;
+        }
+
+        var isBasicOverPlainHttp = string.Equals(req.AuthMode, "Basic", StringComparison.OrdinalIgnoreCase) &&
+                                   Uri.TryCreate(req.SourceUrl, UriKind.Absolute, out var rawUri) &&
+                                   rawUri.Scheme == Uri.UriSchemeHttp &&
+                                   !rawUri.IsLoopback;
+        if (isBasicOverPlainHttp)
+        {
+            var msg = ErrorCatalogue.FormatMessage(ErrorCatalogue.Src007);
+            _logger.Log(LogLevel.Warning, ErrorCatalogue.Src007, id, msg);
+            return BadRequest(new { success = false, errorCode = ErrorCatalogue.Src007, message = msg });
+        }
 
         NetworkCredential? cred = null;
         var isIntegrated = string.Equals(req.AuthMode, "Integrated", StringComparison.OrdinalIgnoreCase) ||
@@ -111,8 +177,8 @@ public class MigrationController : ControllerBase
         }
 
         var resolvedUrl = BoldMigrate.Core.Common.HostResolver.Resolve(req.SourceUrl);
-        var (adapter, api) = await SourceAdapterFactory.CreateAndProbeAsync(resolvedUrl, cred, run.SourceApi, ct);
-        var probe = await adapter.ProbeAsync(resolvedUrl, cred, ct);
+        var (adapter, api, probe) = await SourceAdapterFactory.CreateAndProbeWithResultAsync(resolvedUrl, cred, _settings.ExtractionPreferredApi, ct);
+        using var adapterDisp = adapter as IDisposable;
 
         // If explicit credentials were provided and failed with 401 Unauthorized,
         // test whether Integrated Windows Authentication succeeds on this endpoint.
@@ -120,8 +186,8 @@ public class MigrationController : ControllerBase
         {
             try
             {
-                var (intAdapter, intApi) = await SourceAdapterFactory.CreateAndProbeAsync(resolvedUrl, null, run.SourceApi, ct);
-                var intProbe = await intAdapter.ProbeAsync(resolvedUrl, null, ct);
+                var (intAdapter, _, intProbe) = await SourceAdapterFactory.CreateAndProbeWithResultAsync(resolvedUrl, null, _settings.ExtractionPreferredApi, ct);
+                using var intAdapterDisp = intAdapter as IDisposable;
                 if (intProbe.Success)
                 {
                     _logger.Log(LogLevel.Warning, "CONN-FALLBACK", id, "Explicit credentials failed with 401, but Windows Integrated Authentication succeeded.");
@@ -143,12 +209,12 @@ public class MigrationController : ControllerBase
         {
             run.SourceServerUrl = req.SourceUrl;
             run.SourceApi = api;
-            run.SourceVersion = probe.SourceVersion;
+            run.SourceVersion = probe.SourceVersion ?? "Unknown";
             run.Status = RunStatus.Connected;
             await _store.UpdateRunAsync(run, ct);
 
-            _logger.Log(LogLevel.Information, "CONN-OK", id, $"Connected. {probe.SourceVersion}, using {api}.");
-            return Ok(new { success = true, version = probe.SourceVersion, api = api.ToString() });
+            _logger.Log(LogLevel.Information, "CONN-OK", id, $"Connected. {run.SourceVersion}, using {api}.");
+            return Ok(new { success = true, version = run.SourceVersion, api = api.ToString() });
         }
 
         _logger.Log(LogLevel.Error, "CONN-FAIL", id, $"Connection failed: {probe.ErrorMessage}");
@@ -163,7 +229,7 @@ public class MigrationController : ControllerBase
 
         try
         {
-            var destClient = new DestinationClient(req.DestinationUrl, req.BearerToken);
+            using var destClient = new DestinationClient(req.DestinationUrl, req.BearerToken);
             string token;
 
             if (!string.IsNullOrWhiteSpace(req.BearerToken))
@@ -184,7 +250,13 @@ public class MigrationController : ControllerBase
 
                 _credStore.SetDestinationToken(token);
                 _logger.Log(LogLevel.Information, "DEST-OK", id, $"Connected to Bold Reports Server ({req.DestinationUrl})");
-                return Ok(new { success = true, message = "Authenticated with Bold Reports Server" });
+                return Ok(new
+                {
+                    success = true,
+                    destinationUrl = req.DestinationUrl,
+                    hasToken = true,
+                    message = "Authenticated with Bold Reports Server"
+                });
             }
 
             return BadRequest(new { success = false, message = "No token returned from Bold Reports Server" });
@@ -199,34 +271,16 @@ public class MigrationController : ControllerBase
     [HttpPost("runs/{id:guid}/fetch")]
     public async Task<IActionResult> FetchEstate(Guid id, CancellationToken ct)
     {
-        _ = Task.Run(async () =>
-        {
-            try
-            {
-                await _orchestrator.StartFetchAsync(id, CancellationToken.None);
-            }
-            catch (Exception ex)
-            {
-                _logger.Log(LogLevel.Error, "DISC-ERROR", id, $"Discovery failed: {ex.Message}");
-            }
-        });
+        if (await _store.GetRunAsync(id, ct) == null) return NotFound();
+        QueueBackgroundWork(id, "DISC-ERROR", "Discovery", (orch, token) => orch.StartFetchAsync(id, token));
         return Accepted(new { message = "Discovery started" });
     }
 
     [HttpPost("runs/{id:guid}/check")]
     public async Task<IActionResult> CheckEstate(Guid id, CancellationToken ct)
     {
-        _ = Task.Run(async () =>
-        {
-            try
-            {
-                await _orchestrator.StartCheckAsync(id, CancellationToken.None);
-            }
-            catch (Exception ex)
-            {
-                _logger.Log(LogLevel.Error, "XFRM-ERROR", id, $"Check failed: {ex.Message}");
-            }
-        });
+        if (await _store.GetRunAsync(id, ct) == null) return NotFound();
+        QueueBackgroundWork(id, "XFRM-ERROR", "Check", (orch, token) => orch.StartCheckAsync(id, token));
         return Accepted(new { message = "Transform check started" });
     }
 
@@ -244,42 +298,42 @@ public class MigrationController : ControllerBase
             return Ok(new { status = "resumed" });
         }
 
-        _ = Task.Run(async () =>
-        {
-            try
-            {
-                await _orchestrator.StartUploadAsync(id, CancellationToken.None);
-            }
-            catch (Exception ex)
-            {
-                _logger.Log(LogLevel.Error, "UPLD-ERROR", id, $"Upload failed: {ex.Message}");
-            }
-        });
+        if (await _store.GetRunAsync(id, ct) == null) return NotFound();
+        QueueBackgroundWork(id, "UPLD-ERROR", "Upload", (orch, token) => orch.StartUploadAsync(id, token));
         return Accepted(new { message = "Upload started" });
     }
 
     [HttpPost("runs/{id:guid}/validate")]
     public async Task<IActionResult> StartValidation(Guid id, CancellationToken ct)
     {
-        _ = Task.Run(async () =>
-        {
-            try
-            {
-                await _orchestrator.StartValidationAsync(id, CancellationToken.None);
-            }
-            catch (Exception ex)
-            {
-                _logger.Log(LogLevel.Error, "VALD-ERROR", id, $"Validation failed: {ex.Message}");
-            }
-        });
+        if (await _store.GetRunAsync(id, ct) == null) return NotFound();
+        QueueBackgroundWork(id, "VALD-ERROR", "Validation", (orch, token) => orch.StartValidationAsync(id, token));
         return Accepted(new { message = "Validation started" });
     }
 
     [HttpPost("runs/{id:guid}/retry")]
     public async Task<IActionResult> RetryFailed(Guid id, CancellationToken ct)
     {
-        _ = Task.Run(async () => await _orchestrator.RetryFailedItemsAsync(id, CancellationToken.None));
+        if (await _store.GetRunAsync(id, ct) == null) return NotFound();
+        QueueBackgroundWork(id, "RETRY-ERROR", "Retry", (orch, token) => orch.RetryFailedItemsAsync(id, token));
         return Accepted(new { message = "Retrying failed items" });
+    }
+
+    private void QueueBackgroundWork(Guid runId, string errorCode, string stageName, Func<IMigrationOrchestrator, CancellationToken, Task> work)
+    {
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                await work(_orchestrator, CancellationToken.None);
+            }
+            catch (Exception ex)
+            {
+                using var errScope = _scopeFactory.CreateScope();
+                var appLogger = errScope.ServiceProvider.GetRequiredService<MigrationLogger>();
+                appLogger.Log(LogLevel.Error, errorCode, runId, $"{stageName} failed: {Redactor.RedactSecrets(ex.Message)}");
+            }
+        });
     }
 
     [HttpPost("runs/{id:guid}/abandon")]
@@ -290,16 +344,21 @@ public class MigrationController : ControllerBase
     }
 
     [HttpGet("runs/{id:guid}/estate")]
-    public async Task<IActionResult> GetEstate(Guid id, CancellationToken ct)
+    public async Task<IActionResult> GetEstate(Guid id, [FromQuery] int skip = 0, [FromQuery] int take = 100, CancellationToken ct = default)
     {
         var items = await _store.GetCatalogItemsAsync(id, ct: ct);
+        var clampedTake = Math.Clamp(take, 1, 1000);
+        var clampedSkip = Math.Max(0, skip);
         return Ok(new
         {
+            totalCount = items.Count,
+            skip = clampedSkip,
+            take = clampedTake,
             folders = items.Count(i => i.ItemType == ItemType.Folder),
             dataSources = items.Count(i => i.ItemType == ItemType.DataSource),
             datasets = items.Count(i => i.ItemType == ItemType.DataSet),
             reports = items.Count(i => i.ItemType == ItemType.Report),
-            items = items.Take(100)
+            items = items.Skip(clampedSkip).Take(clampedTake)
         });
     }
 
@@ -331,7 +390,8 @@ public class MigrationController : ControllerBase
                 parentPath = i.ParentPath,
                 sizeBytes = i.SizeBytes,
                 serverType = def?.Extension ?? "SQL",
-                connectString = def?.ConnectString ?? "",
+                connectString = Redactor.RedactConnectionString(def?.ConnectString ?? ""),
+                hasConnectString = !string.IsNullOrWhiteSpace(def?.ConnectString),
                 credentialRetrieval = retrieval,
                 isWindowsCredentials = isWindows,
                 hasCredentials = cred != null || string.Equals(retrieval, "Integrated", StringComparison.OrdinalIgnoreCase) || string.Equals(retrieval, "None", StringComparison.OrdinalIgnoreCase),
@@ -417,60 +477,26 @@ public class MigrationController : ControllerBase
     public async Task<IActionResult> GetReportRdl(Guid id, Guid reportId, CancellationToken ct)
     {
         var item = await _store.GetCatalogItemAsync(reportId, ct);
-        if (item == null) return NotFound(new { message = "Report not found" });
+        if (item == null || item.RunId != id) return NotFound(new { message = "Report not found" });
 
         var record = await _store.GetReportRecordAsync(reportId, ct);
 
         string originalRdl = "";
         string transformedRdl = "";
 
-        string? resolvedPath = null;
-        if (!string.IsNullOrEmpty(item.StagedFilePath))
+        if (!string.IsNullOrWhiteSpace(item.StagedFilePath) && System.IO.File.Exists(item.StagedFilePath))
         {
-            if (System.IO.File.Exists(item.StagedFilePath))
-            {
-                resolvedPath = item.StagedFilePath;
-            }
-            else
-            {
-                var candidate = Path.Combine("C:", item.StagedFilePath.TrimStart('/', '\\'));
-                if (System.IO.File.Exists(candidate))
-                {
-                    resolvedPath = candidate;
-                }
-                else
-                {
-                    // Look in C:\migrations
-                    var filename = Path.GetFileName(item.StagedFilePath);
-                    if (Directory.Exists("C:\\migrations"))
-                    {
-                        var matches = Directory.GetFiles("C:\\migrations", filename, SearchOption.AllDirectories);
-                        if (matches.Length > 0)
-                        {
-                            resolvedPath = matches[0];
-                        }
-                    }
-                }
-            }
+            transformedRdl = await System.IO.File.ReadAllTextAsync(item.StagedFilePath, ct);
         }
 
-        if (resolvedPath != null && System.IO.File.Exists(resolvedPath))
+        var originalPath = _staging.ResolveOriginalPath(id, item.SourcePath);
+        if (!string.IsNullOrWhiteSpace(originalPath) && System.IO.File.Exists(originalPath))
         {
-            try
-            {
-                var bytes = await System.IO.File.ReadAllBytesAsync(resolvedPath, ct);
-                originalRdl = System.Text.Encoding.UTF8.GetString(bytes);
-                transformedRdl = originalRdl;
-
-                // If report was auto-fixed, show the updated namespace or expression changes
-                if (record?.Bucket == ReportBucket.AutoFixed && !string.IsNullOrEmpty(originalRdl))
-                {
-                    transformedRdl = originalRdl
-                        .Replace("http://schemas.microsoft.com/sqlserver/reporting/2010/01/reportdefinition", "http://schemas.microsoft.com/sqlserver/reporting/2016/01/reportdefinition")
-                        .Replace("http://schemas.microsoft.com/sqlserver/reporting/2008/01/reportdefinition", "http://schemas.microsoft.com/sqlserver/reporting/2016/01/reportdefinition");
-                }
-            }
-            catch { }
+            originalRdl = await System.IO.File.ReadAllTextAsync(originalPath, ct);
+        }
+        else
+        {
+            originalRdl = transformedRdl;
         }
 
         return Ok(new
@@ -576,85 +602,65 @@ public class MigrationController : ControllerBase
         return Ok(new { message = "Validation skipped. Reports approved for upload." });
     }
 
+    private sealed record ValidationSummaryCardDto(
+        Guid ReportId,
+        string Name,
+        string Path,
+        string Status,
+        string State,
+        long? DurationMs,
+        string? ScreenshotUrl,
+        string? ErrorMessage,
+        string? Summary,
+        List<string> FeatureTags,
+        int ParameterCount);
+
     [HttpGet("runs/{id:guid}/validation-summary")]
     public async Task<IActionResult> GetValidationSummary(Guid id, CancellationToken ct)
     {
         var reports = await _store.GetCatalogItemsAsync(id, ItemType.Report, ct);
-        var cards = new List<object>();
+        var records = (await _store.GetReportRecordsAsync(id, ct: ct))
+            .ToDictionary(r => r.CatalogItemId);
+        var latestByReport = (await _store.GetValidationResultsByRunAsync(id, ct))
+            .GroupBy(v => v.ReportId)
+            .ToDictionary(g => g.Key, g => g.OrderByDescending(v => v.RunUtc).First());
+
+        var cards = new List<ValidationSummaryCardDto>(reports.Count);
 
         foreach (var report in reports)
         {
-            var record = await _store.GetReportRecordAsync(report.Id, ct);
-            var results = await _store.GetValidationResultsAsync(report.Id, ct);
-            var latest = results.OrderByDescending(r => r.RunUtc).FirstOrDefault();
+            records.TryGetValue(report.Id, out var record);
+            latestByReport.TryGetValue(report.Id, out var latest);
 
-            var featureTags = (record?.FeatureTags ?? "")
+            var featureTags = (record?.FeatureTags ?? string.Empty)
                 .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
                 .ToList();
-
-            if (featureTags.Count == 0 && !string.IsNullOrWhiteSpace(report.StagedFilePath) && System.IO.File.Exists(report.StagedFilePath))
-            {
-                try
-                {
-                    using var tagMs = new System.IO.FileStream(report.StagedFilePath, System.IO.FileMode.Open, System.IO.FileAccess.Read, System.IO.FileShare.Read);
-                    var doc = System.Xml.Linq.XDocument.Load(tagMs);
-                    var detected = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-                    if (doc.Descendants().Any(e => e.Name.LocalName == "Subreport")) detected.Add("Subreport");
-                    if (doc.Descendants().Any(e => e.Name.LocalName == "Chart")) detected.Add("Chart");
-                    if (doc.Descendants().Any(e => e.Name.LocalName == "GaugePanel")) detected.Add("Gauge");
-                    if (doc.Descendants().Any(e => e.Name.LocalName == "Map" || e.Name.LocalName == "MapDataRegion")) detected.Add("Map");
-                    if (doc.Descendants().Any(e => e.Name.LocalName == "Code")) detected.Add("CustomCode");
-                    if (doc.Descendants().Any(e => e.Name.LocalName == "UserSort")) detected.Add("InteractiveSort");
-                    if (doc.Descendants().Any(e => e.Name.LocalName == "DocumentMapLabel")) detected.Add("DocumentMap");
-                    if (doc.Descendants().Any(e => e.Name.LocalName == "DataSourceReference")) detected.Add("SharedDataSource");
-                    if (doc.Descendants().Any(e => e.Name.LocalName == "SharedDataSet")) detected.Add("SharedDataSet");
-                    if (doc.Descendants().Any(e => e.Value.Contains("Lookup(") || e.Value.Contains("LookupSet("))) detected.Add("Lookup");
-                    if (doc.Descendants().Any(e => e.Name.LocalName == "MarkupType" && e.Value == "HTML")) detected.Add("RichText");
-
-                    if (detected.Count > 0)
-                    {
-                        featureTags = detected.OrderBy(t => t).ToList();
-                        if (record != null)
-                        {
-                            record.FeatureTags = string.Join(",", featureTags);
-                            _ = _store.UpdateReportRecordAsync(record, ct);
-                        }
-                    }
-                }
-                catch { }
-            }
 
             var status = latest?.RenderStatus ?? (record?.State == ReportState.AutoPassed ? "Passed" :
                                                 record?.State == ReportState.Approved ? "Approved" :
                                                 record?.State == ReportState.AwaitingReview ? "NeedsManualCheck" :
                                                 record?.State == ReportState.ValidationFailed ? "Failed" : "NotValidated");
 
-            cards.Add(new
-            {
-                reportId = report.Id,
-                name = report.Name,
-                path = report.SourcePath,
+            cards.Add(new ValidationSummaryCardDto(
+                report.Id,
+                report.Name,
+                report.SourcePath,
                 status,
-                state = record?.State.ToString() ?? "Unknown",
-                durationMs = latest?.RenderDurationMs,
-                screenshotUrl = latest?.ScreenshotRelativePath,
-                errorMessage = latest?.ErrorMessage,
-                summary = latest?.RenderSummary,
+                record?.State.ToString() ?? "Unknown",
+                latest?.RenderDurationMs,
+                latest?.ScreenshotRelativePath,
+                latest?.ErrorMessage,
+                latest?.RenderSummary,
                 featureTags,
-                parameterCount = record?.ParameterCount ?? 0
-            });
+                record?.ParameterCount ?? 0));
         }
 
         var total = cards.Count;
-        var passed = cards.Count(c =>
-        {
-            var s = (string)((dynamic)c).status;
-            return s == "Passed" || s == "Approved";
-        });
-        var dsOffline = cards.Count(c => (string)((dynamic)c).status == "DataSourceOffline");
-        var failed = cards.Count(c => (string)((dynamic)c).status == "Failed");
-        var needsManual = cards.Count(c => (string)((dynamic)c).status == "NeedsManualCheck");
-        var skipped = cards.Count(c => (string)((dynamic)c).status == "Skipped");
+        var passed = cards.Count(c => c.Status is "Passed" or "Approved");
+        var dsOffline = cards.Count(c => c.Status == "DataSourceOffline");
+        var failed = cards.Count(c => c.Status == "Failed");
+        var needsManual = cards.Count(c => c.Status == "NeedsManualCheck");
+        var skipped = cards.Count(c => c.Status == "Skipped");
 
         return Ok(new
         {
@@ -675,28 +681,28 @@ public class MigrationController : ControllerBase
         using var scope = _scopeFactory.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<BoldMigrate.Infrastructure.Data.MigrationDbContext>();
 
-        var reportIds = db.CatalogItems
+        var reportIds = await db.CatalogItems
             .Where(c => c.RunId == id && c.ItemType == ItemType.Report)
             .Select(c => c.Id)
-            .ToList();
+            .ToListAsync(ct);
 
         if (reportIds.Count > 0)
         {
-            var oldResults = db.ValidationResults
+            var oldResults = await db.ValidationResults
                 .Where(v => reportIds.Contains(v.ReportId))
-                .ToList();
+                .ToListAsync(ct);
             if (oldResults.Count > 0)
             {
                 db.ValidationResults.RemoveRange(oldResults);
             }
 
-            var records = db.ReportRecords
+            var records = await db.ReportRecords
                 .Where(r => reportIds.Contains(r.CatalogItemId) &&
                             (r.State == ReportState.Approved ||
                              r.State == ReportState.AutoPassed ||
                              r.State == ReportState.AwaitingReview ||
                              r.State == ReportState.ValidationFailed))
-                .ToList();
+                .ToListAsync(ct);
             foreach (var rec in records)
             {
                 rec.State = ReportState.Analysed;
@@ -705,18 +711,11 @@ public class MigrationController : ControllerBase
             await db.SaveChangesAsync(ct);
         }
 
-        // Remove cached screenshot PNGs
-        var screenshotDirs = new[]
+        // Remove cached screenshot PNGs inside staging store
+        var screenshotsDir = Path.Combine(_staging.GetRunStagingPath(id), "screenshots");
+        if (Directory.Exists(screenshotsDir))
         {
-            Path.Combine(Directory.GetCurrentDirectory(), "staging", id.ToString(), "screenshots"),
-            Path.Combine(_staging.GetRunStagingPath(id), "screenshots")
-        };
-        foreach (var dir in screenshotDirs.Distinct())
-        {
-            if (Directory.Exists(dir))
-            {
-                try { Directory.Delete(dir, recursive: true); } catch { }
-            }
+            try { Directory.Delete(screenshotsDir, recursive: true); } catch { }
         }
 
         return Ok(new { cleared = true });
@@ -725,16 +724,8 @@ public class MigrationController : ControllerBase
     [HttpGet("runs/{id:guid}/screenshots/{reportId:guid}.png")]
     public IActionResult GetScreenshot(Guid id, Guid reportId)
     {
-        var candidates = new[]
-        {
-            Path.Combine(Directory.GetCurrentDirectory(), "staging", id.ToString(), "screenshots", $"{reportId}.png"),
-            Path.Combine(AppContext.BaseDirectory, "staging", id.ToString(), "screenshots", $"{reportId}.png"),
-            Path.Combine(Directory.GetCurrentDirectory(), "src", "BoldMigrate.Api", "staging", id.ToString(), "screenshots", $"{reportId}.png"),
-            Path.Combine(_staging.GetRunStagingPath(id), "screenshots", $"{reportId}.png")
-        };
-
-        var filePath = candidates.FirstOrDefault(System.IO.File.Exists);
-        if (filePath == null)
+        var filePath = Path.Combine(_staging.GetRunStagingPath(id), "screenshots", $"{reportId}.png");
+        if (!System.IO.File.Exists(filePath))
         {
             return NotFound();
         }
@@ -797,7 +788,7 @@ public class MigrationController : ControllerBase
         foreach (var r in queue)
         {
             var results = await _store.GetValidationResultsAsync(r.CatalogItemId, ct);
-            var latest = results.FirstOrDefault();
+            var latest = results.OrderByDescending(v => v.RunUtc).FirstOrDefault();
             if (latest != null && latest.DataAccuracy >= minAccuracy)
             {
                 r.State = ReportState.Approved;
@@ -817,9 +808,20 @@ public class MigrationController : ControllerBase
     [HttpPost("runs/{id:guid}/delta-sync")]
     public async Task<IActionResult> DeltaSync(Guid id, CancellationToken ct)
     {
-        var run = await _store.GetRunAsync(id, ct) ?? throw new KeyNotFoundException("Run not found.");
-        var source = SourceAdapterFactory.Create(run.SourceServerUrl, run.SourceApi);
-        var dest = new DestinationClient(run.SourceServerUrl);
+        var run = await _store.GetRunAsync(id, ct);
+        if (run == null) return NotFound(new { message = "Run not found." });
+
+        if (string.IsNullOrWhiteSpace(run.DestinationServerUrl))
+        {
+            return BadRequest(new { message = "Destination server URL is not configured for this run." });
+        }
+
+        var cred = _credStore.GetSourceCredential(id.ToString());
+        var source = SourceAdapterFactory.Create(run.SourceServerUrl, run.SourceApi, cred);
+        using var sourceDisp = source as IDisposable;
+
+        var token = _credStore.GetDestinationToken();
+        using var dest = new DestinationClient(run.DestinationServerUrl, token);
         var res = await _deltaSync.RunDeltaSyncAsync(id, source, dest, ct);
         return Ok(res);
     }
@@ -829,10 +831,11 @@ public class MigrationController : ControllerBase
     {
         var reports = await _store.GetReportRecordsAsync(id, ct: ct);
         var catalogReports = await _store.GetCatalogItemsAsync(id, ItemType.Report, ct);
+        var validatedReportIds = (await _store.GetValidationResultsByRunAsync(id, ct))
+            .Select(v => v.ReportId)
+            .ToHashSet();
 
-        var uploadedItems = catalogReports.Where(r => !string.IsNullOrEmpty(r.DestinationItemId) &&
-                                                      !r.DestinationItemId.StartsWith("dest-") &&
-                                                      !r.DestinationItemId.StartsWith("rep-")).ToList();
+        var uploadedItems = catalogReports.Where(r => IsGenuineDestinationId(r.DestinationItemId)).ToList();
         var actuallyUploaded = uploadedItems.Count;
 
         var selected = reports.Where(r => r.State != ReportState.Excluded).ToList();
@@ -842,12 +845,7 @@ public class MigrationController : ControllerBase
         var notStarted = selected.Count(r => r.State is ReportState.Discovered or ReportState.Analysed or ReportState.Queued);
 
         // A report counts as validated only when a measured validation result exists for it.
-        var validatedCount = 0;
-        foreach (var item in uploadedItems)
-        {
-            var results = await _store.GetValidationResultsAsync(item.Id, ct);
-            if (results.Count > 0) validatedCount++;
-        }
+        var validatedCount = uploadedItems.Count(item => validatedReportIds.Contains(item.Id));
 
         var allReady = actuallyUploaded > 0
                        && validatedCount == actuallyUploaded
@@ -923,9 +921,7 @@ public class MigrationController : ControllerBase
     public async Task<IActionResult> ConfirmCutover(Guid id, CancellationToken ct)
     {
         var catalogReports = await _store.GetCatalogItemsAsync(id, ItemType.Report, ct);
-        var actuallyUploaded = catalogReports.Count(r => !string.IsNullOrEmpty(r.DestinationItemId) &&
-                                                        !r.DestinationItemId.StartsWith("dest-") &&
-                                                        !r.DestinationItemId.StartsWith("rep-"));
+        var actuallyUploaded = catalogReports.Count(r => IsGenuineDestinationId(r.DestinationItemId));
         if (actuallyUploaded == 0)
         {
             return BadRequest(new
@@ -940,9 +936,9 @@ public class MigrationController : ControllerBase
     }
 
     [HttpGet("runs/{id:guid}/log")]
-    public IActionResult GetLiveLog()
+    public IActionResult GetLiveLog(Guid id)
     {
-        return Ok(_logger.GetLiveLog());
+        return Ok(_logger.GetLiveLog(id));
     }
 
     [HttpGet("runs/{id:guid}/poll")]
@@ -1238,11 +1234,11 @@ public class MigrationController : ControllerBase
         }
         catch (Microsoft.Data.SqlClient.SqlException ex)
         {
-            return (false, ex.Message, $"SQL Error {ex.Number} (State {ex.State}, Class {ex.Class}): {ex.Message}");
+            return (false, Redactor.RedactSecrets(ex.Message), $"SQL Error {ex.Number} (State {ex.State}, Class {ex.Class}): {Redactor.RedactSecrets(ex.Message)}");
         }
         catch (Exception ex)
         {
-            return (false, ex.Message, ex.ToString());
+            return (false, Redactor.RedactSecrets(ex.Message), $"{ex.GetType().Name}: {Redactor.RedactSecrets(ex.Message)}");
         }
     }
 
@@ -1359,7 +1355,10 @@ public class MigrationController : ControllerBase
     }
 
     private static bool IsGenuineDestinationId(string? id) =>
-        !string.IsNullOrEmpty(id) && !id.StartsWith("dest-") && !id.StartsWith("rep-");
+        !string.IsNullOrEmpty(id) &&
+        !id.StartsWith("dest-", StringComparison.OrdinalIgnoreCase) &&
+        !id.StartsWith("rep-", StringComparison.OrdinalIgnoreCase) &&
+        !id.StartsWith("existing-", StringComparison.OrdinalIgnoreCase);
 
     [HttpGet("runs/{id:guid}/designer-config")]
     public async Task<IActionResult> GetDesignerConfig(Guid id, CancellationToken ct)
@@ -1368,18 +1367,9 @@ public class MigrationController : ControllerBase
         if (run == null) return NotFound();
 
         var destUrl = !string.IsNullOrWhiteSpace(run.DestinationServerUrl) ? run.DestinationServerUrl : "http://localhost:8090/reporting/site/site1";
-        var client = new DestinationClient(destUrl);
+        using var client = new DestinationClient(destUrl);
         var tenantId = client.GetTenantId();
         var token = _credStore.GetDestinationToken();
-        if (string.IsNullOrEmpty(token) && !string.IsNullOrEmpty(run.DestinationUserEmail))
-        {
-            try
-            {
-                token = await client.AuthenticateAsync(run.DestinationUserEmail, "Admin@123", ct);
-                if (!string.IsNullOrEmpty(token)) _credStore.SetDestinationToken(token);
-            }
-            catch { }
-        }
 
         var origin = "http://localhost:8090";
         if (Uri.TryCreate(destUrl, UriKind.Absolute, out var uri))
@@ -1387,12 +1377,14 @@ public class MigrationController : ControllerBase
             origin = $"{uri.Scheme}://{uri.Authority}".TrimEnd('/');
         }
 
+        // Security: never expose raw Bearer JWT tokens over GET endpoints.
         return Ok(new
         {
             serviceUrl = $"{origin}/reporting/reportservice/api/Designer",
             cloudServiceUrl = "https://service.boldreports.com/api/Designer",
             reportServerUrl = $"{origin}/reporting/api/site/{tenantId}",
-            serviceAuthorizationToken = !string.IsNullOrEmpty(token) ? $"bearer {token}" : "",
+            serviceAuthorizationToken = string.Empty,
+            hasAuthorizationToken = !string.IsNullOrEmpty(token),
             tenantId,
             serverUrl = origin
         });
@@ -1407,20 +1399,19 @@ public class MigrationController : ControllerBase
         var reports = await _store.GetCatalogItemsAsync(id, ItemType.Report, ct);
         var records = (await _store.GetReportRecordsAsync(id, ct: ct)).ToDictionary(r => r.CatalogItemId);
 
-        // Check live items on Bold Reports Server if connected
+        // Check live items on Bold Reports Server if connected with an active session token
         List<DestinationItemInfo>? liveRemoteReports = null;
         if (!string.IsNullOrWhiteSpace(run.DestinationServerUrl))
         {
             try
             {
                 var token = _credStore.GetDestinationToken();
-                var client = new DestinationClient(run.DestinationServerUrl, token);
-                var tenantId = client.GetTenantId();
-                if (string.IsNullOrEmpty(token) && !string.IsNullOrEmpty(run.DestinationUserEmail))
+                if (!string.IsNullOrEmpty(token))
                 {
-                    try { token = await client.AuthenticateAsync(run.DestinationUserEmail, "Admin@123", ct); } catch { }
+                    using var client = new DestinationClient(run.DestinationServerUrl, token);
+                    var tenantId = client.GetTenantId();
+                    liveRemoteReports = await client.GetItemsAsync(tenantId, "Report", ct);
                 }
-                liveRemoteReports = await client.GetItemsAsync(tenantId, "Report", ct);
             }
             catch { }
         }
@@ -1475,7 +1466,7 @@ public class MigrationController : ControllerBase
         if (string.IsNullOrWhiteSpace(run.DestinationServerUrl) || string.IsNullOrEmpty(token))
             return BadRequest(new { success = false, message = "Not connected to the Bold Reports destination. Connect (sign in) first, then retry." });
 
-        var client = new DestinationClient(run.DestinationServerUrl, token);
+        using var client = new DestinationClient(run.DestinationServerUrl, token);
         var tenantId = client.GetTenantId();
 
         var allReports = (await _store.GetCatalogItemsAsync(id, ItemType.Report, ct)).ToList();
@@ -1602,8 +1593,9 @@ public class MigrationController : ControllerBase
     }
 }
 
-public record CreateRunRequest(string? Name, string? SourceUrl);
-public record ConnectRequest(string SourceUrl, string? Username = null, string? Password = null, string? AuthMode = "Integrated");
+public record CreateRunRequest(string? Name, string? SourceUrl, bool ForceNew = false);
+public record CredentialModeRequest(string CredentialMode);
+public record ConnectRequest(string SourceUrl, string? Username = null, string? Password = null, string? AuthMode = "Integrated", string? CredentialMode = null);
 public record ConnectDestinationRequest(string DestinationUrl, string? Email = null, string? Password = null, string? BearerToken = null);
 public record DataSourceCredentialRequest(string? UserName = null, string? Password = null, string? CredentialRetrieval = null, string? ConnectString = null);
 public record ApproveRequest(string? UserId, string? UserName, string? Comment);

@@ -17,7 +17,7 @@ namespace BoldMigrate.Api.Controllers;
 public class LocalReportDesignerController : ControllerBase, IReportDesignerController, IReportHelperSettings
 {
     // Designer upload keys and item ids become file names in the designer cache folder.
-    private static readonly Regex SafeCacheName = new("^[A-Za-z0-9._-]{1,128}$", RegexOptions.Compiled);
+    private static readonly Regex SafeCacheName = new("^[A-Za-z0-9._ -]{1,128}$", RegexOptions.Compiled);
 
     private readonly IMemoryCache _cache;
     private readonly StagedReportSession _session;
@@ -29,7 +29,7 @@ public class LocalReportDesignerController : ControllerBase, IReportDesignerCont
         _cache = cache;
         _session = session;
         // GetRunStagingPath(Guid.Empty) is the staging root plus a fixed folder name, never a real run.
-        _designerCacheRoot = Path.Combine(Path.GetDirectoryName(staging.GetRunStagingPath(Guid.Empty))!, "_designer-cache");
+        _designerCacheRoot = Path.GetFullPath(Path.Combine(Path.GetDirectoryName(staging.GetRunStagingPath(Guid.Empty))!, "_designer-cache"));
     }
 
     [NonAction]
@@ -81,9 +81,13 @@ public class LocalReportDesignerController : ControllerBase, IReportDesignerCont
         return ReportHelper.GetResource(resource, this, _cache);
     }
 
-    // Designer cache images are keyed per designer session; the run id only scopes the route.
+    // Designer cache images are keyed per designer session; the run id scopes and authorizes the route.
     [HttpGet]
-    public object GetImage([FromRoute] Guid runId, string key, string image) => ReportDesignerHelper.GetImage(key, image, this);
+    public async Task<object> GetImage([FromRoute] Guid runId, string key, string image)
+    {
+        if (!await BindRunAsync(runId)) return RunNotFound();
+        return ReportDesignerHelper.GetImage(key, image, this);
+    }
 
     [NonAction]
     public object GetImage(string key, string image) => ReportDesignerHelper.GetImage(key, image, this);
@@ -166,14 +170,38 @@ public class LocalReportDesignerController : ControllerBase, IReportDesignerCont
 
     private string? CacheFilePath(string key, string itemName)
     {
-        if (!SafeCacheName.IsMatch(key ?? "") || !SafeCacheName.IsMatch(itemName ?? "") || itemName is "." or "..")
+        var trimmedKey = key?.Trim() ?? string.Empty;
+        var trimmedItem = itemName?.Trim() ?? string.Empty;
+        if (!SafeCacheName.IsMatch(trimmedKey) ||
+            !SafeCacheName.IsMatch(trimmedItem) ||
+            trimmedKey is "." or ".." ||
+            trimmedItem is "." or ".." ||
+            trimmedKey.Contains("..", StringComparison.Ordinal) ||
+            trimmedItem.Contains("..", StringComparison.Ordinal))
         {
             return null;
         }
 
-        var folder = Path.Combine(_designerCacheRoot, key!);
+        var folder = Path.GetFullPath(Path.Combine(_designerCacheRoot, trimmedKey));
+        var rootWithSep = _designerCacheRoot.EndsWith(Path.DirectorySeparatorChar)
+            ? _designerCacheRoot
+            : _designerCacheRoot + Path.DirectorySeparatorChar;
+        if (!folder.StartsWith(rootWithSep, StringComparison.OrdinalIgnoreCase))
+        {
+            return null;
+        }
+
+        var fullFile = Path.GetFullPath(Path.Combine(folder, trimmedItem));
+        var folderWithSep = folder.EndsWith(Path.DirectorySeparatorChar)
+            ? folder
+            : folder + Path.DirectorySeparatorChar;
+        if (!fullFile.StartsWith(folderWithSep, StringComparison.OrdinalIgnoreCase))
+        {
+            return null;
+        }
+
         Directory.CreateDirectory(folder);
-        return Path.Combine(folder, itemName!);
+        return fullFile;
     }
 
     private async Task<bool> BindRunAsync(Guid runId)

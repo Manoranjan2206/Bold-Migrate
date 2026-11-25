@@ -1,6 +1,7 @@
 using BoldMigrate.Core.Configuration;
 using BoldMigrate.Core.Interfaces;
 using BoldMigrate.Engine.Logging;
+using BoldMigrate.Engine.Metrics;
 
 namespace BoldMigrate.Api.Middleware;
 
@@ -19,16 +20,16 @@ public class UrlShimMiddleware
     {
         var path = context.Request.Path.Value ?? "";
 
-        // Check if shim is enabled and path matches
-        var listenPath = _settings.UrlShimListenPath.TrimEnd('/');
-        var isReportServer = path.StartsWith(listenPath, StringComparison.OrdinalIgnoreCase);
-        var isReportManager = path.StartsWith("/Reports/Pages/Report.aspx", StringComparison.OrdinalIgnoreCase);
-
-        if (!_settings.UrlShimEnabled && !isReportServer && !isReportManager)
+        // Check if shim is enabled first; if disabled, pass straight through.
+        if (!_settings.UrlShimEnabled)
         {
             await _next(context);
             return;
         }
+
+        var listenPath = (_settings.UrlShimListenPath ?? "/ReportServer").TrimEnd('/');
+        var isReportServer = path.StartsWith(listenPath, StringComparison.OrdinalIgnoreCase);
+        var isReportManager = path.StartsWith("/Reports/Pages/Report.aspx", StringComparison.OrdinalIgnoreCase);
 
         if (!isReportServer && !isReportManager)
         {
@@ -61,17 +62,45 @@ public class UrlShimMiddleware
 
         requestedReportPath = requestedReportPath.Trim();
 
-        // Check against active runs' URL mappings
-        var activeRun = await store.GetActiveRunAsync(context.RequestAborted);
-        var mappings = activeRun != null
-            ? await store.GetUrlMappingsAsync(activeRun.Id, context.RequestAborted)
-            : Array.Empty<BoldMigrate.Core.Models.UrlMapping>();
+        // Search non-abandoned runs (most recent first, including CutOver runs where the shim operates)
+        var candidateRuns = (await store.ListRunsAsync(context.RequestAborted))
+            .Where(r => r.Status != BoldMigrate.Core.Enums.RunStatus.Abandoned)
+            .ToList();
 
-        var mapping = mappings.FirstOrDefault(m => string.Equals(m.SourcePath, requestedReportPath, StringComparison.OrdinalIgnoreCase) ||
-                                                   string.Equals(m.SourcePath.TrimStart('/'), requestedReportPath.TrimStart('/'), StringComparison.OrdinalIgnoreCase));
+        BoldMigrate.Core.Models.MigrationRun? matchedRun = null;
+        BoldMigrate.Core.Models.UrlMapping? mapping = null;
+        foreach (var candidate in candidateRuns)
+        {
+            var runMappings = await store.GetUrlMappingsAsync(candidate.Id, context.RequestAborted);
+            var hit = runMappings.FirstOrDefault(m =>
+                string.Equals(m.SourcePath, requestedReportPath, StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(m.SourcePath.TrimStart('/'), requestedReportPath.TrimStart('/'), StringComparison.OrdinalIgnoreCase));
+            if (hit != null)
+            {
+                matchedRun = candidate;
+                mapping = hit;
+                break;
+            }
+        }
 
         if (mapping != null)
         {
+            if (!IsSafeRedirectDestination(mapping.DestinationUrl, matchedRun?.DestinationServerUrl))
+            {
+                MigrationMetrics.ShimRequestsTotal.Add(1,
+                    new KeyValuePair<string, object?>("outcome", "BlockedUnsafeRedirect"));
+                logger.Log(
+                    LogLevel.Warning,
+                    "SHIM-BLOCKED",
+                    matchedRun?.Id ?? Guid.Empty,
+                    $"Blocked unsafe URL shim redirect target '{mapping.DestinationUrl}'.",
+                    itemPath: requestedReportPath,
+                    outcome: "Blocked");
+                context.Response.StatusCode = StatusCodes.Status400BadRequest;
+                await context.Response.WriteAsync("Unsafe redirect destination rejected.");
+                return;
+            }
+
             // Build destination redirect URL
             var destUrl = mapping.DestinationUrl;
 
@@ -82,21 +111,25 @@ public class UrlShimMiddleware
                 destUrl += (destUrl.Contains('?') ? "&" : "?") + $"exportFormat={Uri.EscapeDataString(format)}";
             }
 
-            // Forward parameter queries
+            // Forward parameter queries (excluding SSRS control params and the report path token itself)
             foreach (var q in context.Request.Query)
             {
-                if (!q.Key.StartsWith("rs:", StringComparison.OrdinalIgnoreCase) &&
+                if (!q.Key.StartsWith('/') &&
+                    !q.Key.StartsWith("rs:", StringComparison.OrdinalIgnoreCase) &&
                     !q.Key.StartsWith("rc:", StringComparison.OrdinalIgnoreCase) &&
-                    !string.Equals(q.Key, "ItemPath", StringComparison.OrdinalIgnoreCase))
+                    !string.Equals(q.Key, "ItemPath", StringComparison.OrdinalIgnoreCase) &&
+                    !string.Equals(q.Key, requestedReportPath, StringComparison.OrdinalIgnoreCase))
                 {
                     destUrl += (destUrl.Contains('?') ? "&" : "?") + $"{Uri.EscapeDataString(q.Key)}={Uri.EscapeDataString(q.Value.ToString())}";
                 }
             }
 
+            MigrationMetrics.ShimRequestsTotal.Add(1,
+                new KeyValuePair<string, object?>("outcome", "Redirect"));
             logger.Log(
                 LogLevel.Debug,
                 "SHIM-HIT",
-                activeRun?.Id ?? Guid.Empty,
+                matchedRun?.Id ?? Guid.Empty,
                 $"URL shim redirected '{requestedReportPath}' to '{destUrl}'.",
                 itemPath: requestedReportPath,
                 outcome: "Redirect");
@@ -106,10 +139,12 @@ public class UrlShimMiddleware
         }
 
         // Not mapped: Return friendly diagnostic page per specification
+        MigrationMetrics.ShimRequestsTotal.Add(1,
+            new KeyValuePair<string, object?>("outcome", "Miss"));
         logger.Log(
             LogLevel.Warning,
             "SHIM-MISS",
-            activeRun?.Id ?? Guid.Empty,
+            candidateRuns.FirstOrDefault()?.Id ?? Guid.Empty,
             $"URL shim could not resolve path '{requestedReportPath}'.",
             itemPath: requestedReportPath,
             outcome: "Miss");
@@ -142,5 +177,29 @@ public class UrlShimMiddleware
 </html>";
 
         await context.Response.WriteAsync(html);
+    }
+
+    private static bool IsSafeRedirectDestination(string? destUrl, string? configuredDestinationServerUrl)
+    {
+        if (string.IsNullOrWhiteSpace(destUrl)) return false;
+
+        // Relative paths within the app are safe, except protocol-relative // or /\
+        if (destUrl.StartsWith('/') && !destUrl.StartsWith("//") && !destUrl.StartsWith("/\\"))
+        {
+            return true;
+        }
+
+        if (!Uri.TryCreate(destUrl, UriKind.Absolute, out var destUri)) return false;
+        if (destUri.Scheme != Uri.UriSchemeHttp && destUri.Scheme != Uri.UriSchemeHttps) return false;
+
+        if (!string.IsNullOrWhiteSpace(configuredDestinationServerUrl) &&
+            Uri.TryCreate(configuredDestinationServerUrl, UriKind.Absolute, out var expectedUri))
+        {
+            return string.Equals(destUri.Scheme, expectedUri.Scheme, StringComparison.OrdinalIgnoreCase) &&
+                   string.Equals(destUri.Host, expectedUri.Host, StringComparison.OrdinalIgnoreCase) &&
+                   destUri.Port == expectedUri.Port;
+        }
+
+        return false;
     }
 }
