@@ -28,9 +28,10 @@ RUN dotnet publish -c Release -o /app/publish /p:UseAppHost=false
 FROM mcr.microsoft.com/dotnet/aspnet:10.0 AS runtime
 WORKDIR /app
 
-# Ensure dependencies are available for Playwright Chromium headless, GDI+ rendering, and healthcheck
+# Ensure dependencies are available for Playwright Chromium headless, GDI+ rendering, NTLM auth, and healthcheck
 RUN apt-get update && apt-get install -y --no-install-recommends \
     curl \
+    gss-ntlmssp \
     libgdiplus \
     fontconfig \
     libnss3 \
