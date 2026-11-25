@@ -515,7 +515,7 @@
             <span>of <strong id="lib-total-count">0</strong> reports selected for migration</span>
           </div>
           <div class="selection-actions">
-            <button class="btn2 btn-sm" onclick="selectAllReady()"><span id="btn-select-clean-text">Select Ready for Migration</span></button>
+            <button class="btn2 btn-sm" onclick="selectAllReady()"><span id="btn-select-clean-text">Select Compatible</span></button>
             <button class="btn2 btn-sm" onclick="toggleSelectAllReports(true)">Select All</button>
             <button class="btn2 btn-sm" onclick="toggleSelectAllReports(false)">Deselect All</button>
             <button class="btn2 btn-danger btn-sm" onclick="openDeleteReportsModal('selected')" title="Delete selected reports from Bold Reports">
@@ -531,9 +531,8 @@
         <!-- Filter Chips -->
         <div class="chips" id="library-filter-chips">
           <span class="chip active" data-filter="all" onclick="setLibraryFilter('all', this)">All (<span id="lib-count-all">0</span>)</span>
-          <span class="chip" data-filter="clean" onclick="setLibraryFilter('clean', this)">Clean &amp; Ready (<span id="lib-count-clean">0</span>)</span>
-          <span class="chip" data-filter="autofix" onclick="setLibraryFilter('autofix', this)">Auto-Fixed (<span id="lib-count-autofix">0</span>)</span>
-          <span class="chip" data-filter="blocked" onclick="setLibraryFilter('blocked', this)">Blocked (<span id="lib-count-blocked">0</span>)</span>
+          <span class="chip" data-filter="clean" onclick="setLibraryFilter('clean', this)">Compatible (<span id="lib-count-clean">0</span>)</span>
+          <span class="chip" data-filter="review" onclick="setLibraryFilter('review', this)">Needs Review (<span id="lib-count-review">0</span>)</span>
         </div>
 
         <!-- Real Table -->
@@ -641,8 +640,8 @@
             <div class="l">Needs Review</div>
           </div>
           <div class="card tile">
-            <div class="n" id="dash-tile-blocked" style="color:#DC2626;">0</div>
-            <div class="l">Blocked</div>
+            <div class="n" id="dash-tile-blocked" style="color:#059669;">0</div>
+            <div class="l">Compatible</div>
           </div>
         </div>
 
@@ -653,38 +652,24 @@
             <h2>Compatibility Breakdown</h2>
             <div style="margin-bottom:14px;font-size:13px">
               <div style="display:flex;justify-content:space-between;">
-                <span>Compatible as is (Clean)</span>
+                <span>Compatible (Native SSRS)</span>
                 <strong id="comp-clean-pct">0%</strong>
               </div>
               <div class="bar"><i id="comp-clean-bar" style="width:0%;background:#15803D"></i></div>
             </div>
-            <div style="margin-bottom:14px;font-size:13px">
-              <div style="display:flex;justify-content:space-between;">
-                <span>Auto-fixed (shared datasets/paths inlined)</span>
-                <strong id="comp-autofix-pct">0%</strong>
-              </div>
-              <div class="bar"><i id="comp-autofix-bar" style="width:0%;background:#2563EB"></i></div>
-            </div>
-            <div style="margin-bottom:14px;font-size:13px">
-              <div style="display:flex;justify-content:space-between;">
-                <span>Needs manual review</span>
-                <strong id="comp-review-pct">0%</strong>
-              </div>
-              <div class="bar"><i id="comp-review-bar" style="width:0%;background:#B45309"></i></div>
-            </div>
             <div style="margin-bottom:6px;font-size:13px">
               <div style="display:flex;justify-content:space-between;">
-                <span>Blocked (custom assemblies)</span>
-                <strong id="comp-blocked-pct">0%</strong>
+                <span>Needs Review (e.g. Custom Assemblies)</span>
+                <strong id="comp-review-pct">0%</strong>
               </div>
-              <div class="bar"><i id="comp-blocked-bar" style="width:0%;background:#DC2626"></i></div>
+              <div class="bar"><i id="comp-review-bar" style="width:0%;background:#D97706"></i></div>
             </div>
           </div>
 
           <!-- Card 2: Attention Items & Blocker Details -->
           <div class="card">
-            <h2>Flagged Items & Attention Required</h2>
-            <p class="sub" style="margin-bottom:8px;">Reports with custom code, HTML formatting, gauges, or assembly dependencies:</p>
+            <h2>Items Tagged for Review</h2>
+            <p class="sub" style="margin-bottom:8px;">Reports using custom assemblies or items that require manual review:</p>
             <div class="flagged-list" id="dash-flagged-list">
               <!-- Dynamically populated from real reports -->
             </div>
@@ -782,8 +767,8 @@
             <div class="l">Needs Manual Check (Params)</div>
           </div>
           <div class="card tile">
-            <div class="n" id="val-stat-failed" style="color:#DC2626;">0</div>
-            <div class="l">Render Errors (Syntax)</div>
+            <div class="n" id="val-stat-failed" style="color:#D97706;">0</div>
+            <div class="l">Needs Review</div>
           </div>
         </div>
 
@@ -795,7 +780,7 @@
             <button class="btn2 btn-sm" id="val-btn-filter-passed" onclick="filterValidationCards('passed')" style="color:#059669;">Passed (<span id="val-pill-passed">0</span>)</button>
             <button class="btn2 btn-sm" id="val-btn-filter-offline" onclick="filterValidationCards('offline')" style="color:#2563EB;">Data Source Offline (<span id="val-pill-offline">0</span>)</button>
             <button class="btn2 btn-sm" id="val-btn-filter-manual" onclick="filterValidationCards('manual')" style="color:#D97706;">Needs Params (<span id="val-pill-manual">0</span>)</button>
-            <button class="btn2 btn-sm" id="val-btn-filter-failed" onclick="filterValidationCards('failed')" style="color:#DC2626;">Errors (<span id="val-pill-failed">0</span>)</button>
+            <button class="btn2 btn-sm" id="val-btn-filter-failed" onclick="filterValidationCards('failed')" style="color:#D97706;">Needs Review (<span id="val-pill-failed">0</span>)</button>
           </div>
           <div style="display:flex;gap:10px;align-items:center;">
             <input type="text" id="val-search-input" placeholder="Search report name or folder..." style="height:34px;width:260px;padding:0 12px;border:1px solid #CBD5E1;border-radius:6px;font-size:13px;" oninput="onValidationSearch(this.value)">

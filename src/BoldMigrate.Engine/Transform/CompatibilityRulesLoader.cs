@@ -86,19 +86,19 @@ public class CompatibilityRulesLoader
             Version = "2026.11.1",
             Rules = new List<ClassificationRule>
             {
-                new() { Code = "CF-ASSEMBLY", XPath = "//*[local-name()='CodeModule']", BucketStr = "Blocked", Message = "References a custom assembly, which cannot be migrated.", Article = "https://support.boldreports.com/kb/custom-assemblies" },
+                new() { Code = "CF-ASSEMBLY", XPath = "//*[local-name()='CodeModule']", BucketStr = "NeedsReview", Message = "Uses custom assemblies — needs review.", Article = "https://support.boldreports.com/kb/custom-assemblies" },
                 new() { Code = "CF-CODE-NET", XPath = "//*[local-name()='Code'][contains(., 'System.')]", BucketStr = "Clean", Message = "Contains embedded code that calls framework types.", Article = "https://support.boldreports.com/kb/embedded-code-net" },
-                new() { Code = "CF-CODE-SIMPLE", XPath = "//*[local-name()='Code']", BucketStr = "AutoFixed", Message = "Contains simple embedded code, carried over as is.", Article = "https://support.boldreports.com/kb/embedded-code-simple" },
+                new() { Code = "CF-CODE-SIMPLE", XPath = "//*[local-name()='Code']", BucketStr = "Clean", Message = "Contains simple embedded code, carried over as is.", Article = "https://support.boldreports.com/kb/embedded-code-simple" },
                 new() { Code = "CF-SUBREPORT", XPath = "//*[local-name()='Subreport']", BucketStr = "Clean", Message = "Contains a subreport.", Article = "https://support.boldreports.com/kb/subreports" },
                 new() { Code = "CF-LOOKUP", XPath = "//*[local-name()='Value'][contains(., 'Lookup(') or contains(., 'LookupSet(') or contains(., 'RunningValue(') or contains(., 'Previous(') or contains(., 'Aggregate(')]", BucketStr = "Clean", Message = "Uses a scoped aggregate function.", Article = "https://support.boldreports.com/kb/scoped-aggregates" },
                 new() { Code = "CF-MAP", XPath = "//*[local-name()='Map']", BucketStr = "Clean", Message = "Uses a map visual.", Article = "https://support.boldreports.com/kb/maps" },
                 new() { Code = "CF-GAUGE", XPath = "//*[local-name()='GaugePanel']", BucketStr = "Clean", Message = "Uses a gauge visual.", Article = "https://support.boldreports.com/kb/gauges" },
                 new() { Code = "CF-INTERACTIVE-SORT", XPath = "//*[local-name()='UserSort']", BucketStr = "Clean", Message = "Uses interactive sorting.", Article = "https://support.boldreports.com/kb/interactive-sort" },
                 new() { Code = "CF-RICHTEXT", XPath = "//*[local-name()='MarkupType'][text()='HTML']", BucketStr = "Clean", Message = "Uses rich text inside a text box.", Article = "https://support.boldreports.com/kb/rich-text" },
-                new() { Code = "CF-SHARED-DSET", XPath = "//*[local-name()='SharedDataSet']", BucketStr = "AutoFixed", Message = "Uses a shared dataset.", Article = "https://support.boldreports.com/kb/shared-datasets" },
-                new() { Code = "CF-SHARED-DS", XPath = "//*[local-name()='DataSourceReference']", BucketStr = "AutoFixed", Message = "Uses a shared data source.", Article = "https://support.boldreports.com/kb/shared-datasources" },
+                new() { Code = "CF-SHARED-DSET", XPath = "//*[local-name()='SharedDataSet']", BucketStr = "Clean", Message = "Uses a shared dataset.", Article = "https://support.boldreports.com/kb/shared-datasets" },
+                new() { Code = "CF-SHARED-DS", XPath = "//*[local-name()='DataSourceReference']", BucketStr = "Clean", Message = "Uses a shared data source.", Article = "https://support.boldreports.com/kb/shared-datasources" },
                 new() { Code = "CF-DOCMAP", XPath = "//*[local-name()='DocumentMapLabel']", BucketStr = "Clean", Message = "Uses a document map.", Article = "https://support.boldreports.com/kb/document-maps" },
-                new() { Code = "CF-UNSUPPORTED-TYPE", XPath = "", BucketStr = "Blocked", Message = "This item type is not migrated.", Article = "https://support.boldreports.com/kb/unsupported-types" }
+                new() { Code = "CF-UNSUPPORTED-TYPE", XPath = "", BucketStr = "NeedsReview", Message = "Uses an item type that needs review.", Article = "https://support.boldreports.com/kb/unsupported-types" }
             }
         };
     }

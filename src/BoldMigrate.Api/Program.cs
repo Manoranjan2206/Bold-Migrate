@@ -239,10 +239,19 @@ using (var scope = app.Services.CreateScope())
             await db.Database.ExecuteSqlRawAsync("ALTER TABLE ValidationResults ADD COLUMN ErrorMessage TEXT NULL;");
         }
 
-        // Auto-reclassify any stale NeedsReview report records to Clean.
-        // Static rules should not block or mark reports as NeedsReview on assumption.
+        // Native SSRS features (Shared DS/DSet, Simple Code) are Clean/Compatible, not AutoFixed.
         await db.Database.ExecuteSqlRawAsync(
-            "UPDATE ReportRecords SET Bucket = 'Clean', BlockReasonCode = NULL WHERE Bucket = 'NeedsReview' OR Bucket = '2';");
+            "UPDATE ReportRecords SET Bucket = 'Clean', BlockReasonCode = NULL WHERE Bucket = 'AutoFixed';");
+
+        // Reclassify any stale NeedsReview records (other than CF-ASSEMBLY) to Clean.
+        await db.Database.ExecuteSqlRawAsync(
+            "UPDATE ReportRecords SET Bucket = 'Clean', BlockReasonCode = NULL WHERE (Bucket = 'NeedsReview' OR Bucket = '2') AND (BlockReasonCode IS NULL OR BlockReasonCode != 'CF-ASSEMBLY');");
+
+        // Custom assemblies should be tagged as NeedsReview rather than Blocked.
+        await db.Database.ExecuteSqlRawAsync(
+            "UPDATE ReportRecords SET Bucket = 'NeedsReview' WHERE Bucket = 'Blocked';");
+        await db.Database.ExecuteSqlRawAsync(
+            "UPDATE ReportRecords SET State = 'Analysed' WHERE State = 'Blocked';");
 
         // Reclassify SQL Server offline connection errors in validation results as DataSourceOffline (not Failed)
         await db.Database.ExecuteSqlRawAsync(@"

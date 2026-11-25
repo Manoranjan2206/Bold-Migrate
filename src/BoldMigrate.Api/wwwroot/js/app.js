@@ -494,28 +494,24 @@ function renderReportLibrary() {
     if (!matchSearch) return false;
 
     if (currentLibFilter === "all") return true;
-    if (currentLibFilter === "clean") return r.bucket === "Clean";
-    if (currentLibFilter === "autofix") return r.bucket === "AutoFixed";
-    if (currentLibFilter === "blocked") return r.bucket === "Blocked";
+    if (currentLibFilter === "clean") return r.bucket === "Clean" || r.bucket === "AutoFixed";
+    if (currentLibFilter === "review") return r.bucket === "NeedsReview" || r.bucket === "Blocked";
     return true;
   });
 
   // Update counts
-  const cleanCount = reportsCache.filter(r => r.bucket === "Clean").length;
-  const autofixCount = reportsCache.filter(r => r.bucket === "AutoFixed").length;
-  const blockedCount = reportsCache.filter(r => r.bucket === "Blocked").length;
+  const cleanCount = reportsCache.filter(r => r.bucket === "Clean" || r.bucket === "AutoFixed").length;
+  const reviewCount = reportsCache.filter(r => r.bucket === "NeedsReview" || r.bucket === "Blocked").length;
 
   const elAll = document.getElementById("lib-count-all");
   if (elAll) elAll.innerText = reportsCache.length;
   const elClean = document.getElementById("lib-count-clean");
   if (elClean) elClean.innerText = cleanCount;
-  const elAuto = document.getElementById("lib-count-autofix");
-  if (elAuto) elAuto.innerText = autofixCount;
-  const elBlock = document.getElementById("lib-count-blocked");
-  if (elBlock) elBlock.innerText = blockedCount;
+  const elReview = document.getElementById("lib-count-review");
+  if (elReview) elReview.innerText = reviewCount;
 
   const btnSelectReady = document.getElementById("btn-select-clean-text");
-  if (btnSelectReady) btnSelectReady.innerText = `Select Ready for Migration (${cleanCount + autofixCount})`;
+  if (btnSelectReady) btnSelectReady.innerText = `Select Compatible (${cleanCount})`;
 
   // Update sidebar count
   const sideCount = document.getElementById("side-count-reports");
@@ -530,9 +526,9 @@ function renderReportLibrary() {
   }
 
   tbody.innerHTML = filtered.map(r => {
-    let bucketClass = "pill ok";
-    if (r.bucket === "AutoFixed") bucketClass = "pill ok";
-    if (r.bucket === "Blocked") bucketClass = "pill fail";
+    const isReview = r.bucket === "NeedsReview" || r.bucket === "Blocked";
+    const bucketClass = isReview ? "pill warn" : "pill ok";
+    const bucketLabel = isReview ? "Needs Review" : "Compatible";
 
     const isSelected = selectedReportIds.has(r.id);
     const sizeFormatted = r.sizeBytes > 1024 ? `${(r.sizeBytes / 1024).toFixed(1)} KB` : `${r.sizeBytes} B`;
@@ -542,7 +538,12 @@ function renderReportLibrary() {
       const tags = (typeof r.featureTags === "string" ? r.featureTags.split(",") : r.featureTags).map(t => t.trim()).filter(Boolean);
       tagsHtml = tags.map(t => `<span style="font-size:10.5px;font-weight:600;padding:1px 5px;border-radius:4px;background:#EFF6FF;color:#2563EB;border:1px solid #DBEAFE;margin-right:3px;">${escapeHtml(t)}</span>`).join("");
     }
-    const blockReasonText = r.blockReason ? `<span style="color:#DC2626;font-weight:600;">${escapeHtml(r.blockReason)}</span>` : (tagsHtml ? `${tagsHtml} <span style="color:#64748B;">Ready</span>` : (r.bucket === "Clean" ? "100% Native RDL" : "Auto-inlined"));
+    const reviewMsg = (r.blockReason === "CF-ASSEMBLY" || (r.featureTags && String(r.featureTags).includes("CustomAssembly")))
+      ? "Uses custom assemblies — needs review"
+      : (r.blockReason ? escapeHtml(r.blockReason) : "Requires review");
+    const blockReasonText = isReview
+      ? `<span style="color:#B45309;font-weight:600;">${reviewMsg}</span>`
+      : (tagsHtml ? `${tagsHtml} <span style="color:#64748B;">Compatible</span>` : "100% Native RDL");
 
     return `
       <tr>
@@ -553,7 +554,7 @@ function renderReportLibrary() {
         <td><code>${escapeHtml(r.folder)}</code></td>
         <td style="color:#64748B;">${sizeFormatted}</td>
         <td>${r.parameterCount || 0}</td>
-        <td><span class="${bucketClass}">${escapeHtml(r.bucket === "NeedsReview" ? "Clean" : r.bucket)}</span></td>
+        <td><span class="${bucketClass}">${bucketLabel}</span></td>
         <td style="font-size:12px;color:#475569;">${blockReasonText}</td>
         <td style="text-align:right;white-space:nowrap;">
           <button class="btn2 btn-sm" onclick="selectReportForValidation('${r.id}')">Inspect & Validate</button>
@@ -592,12 +593,12 @@ function toggleSelectAllReports(checked) {
 function selectAllReady() {
   selectedReportIds.clear();
   reportsCache.forEach(r => {
-    if (r.bucket !== "Blocked" && r.status !== "Excluded") {
+    if ((r.bucket === "Clean" || r.bucket === "AutoFixed") && r.status !== "Excluded") {
       selectedReportIds.add(r.id);
     }
   });
   renderReportLibrary();
-  showToast(`Selected ${selectedReportIds.size} ready reports for migration.`);
+  showToast(`Selected ${selectedReportIds.size} compatible reports for migration.`);
 }
 
 function selectAllCleanAndAutoFix() {
@@ -924,27 +925,25 @@ async function refreshDashboardState(knownPoll) {
     document.getElementById("dash-tile-found").innerText = total;
 
     // Readiness score calculation: (Clean + AutoFixed) / Total
-    const readinessPct = total > 0 ? Math.round(((clean + autofix) / total) * 100) : 0;
+    const compatibleCount = clean + autofix;
+    const reviewTotal = review + blocked;
+    const readinessPct = total > 0 ? Math.round((compatibleCount / total) * 100) : 0;
     document.getElementById("dash-tile-readiness").innerText = `${readinessPct}%`;
-    document.getElementById("dash-tile-review").innerText = review;
-    document.getElementById("dash-tile-blocked").innerText = blocked;
+    document.getElementById("dash-tile-review").innerText = reviewTotal;
+    document.getElementById("dash-tile-blocked").innerText = compatibleCount;
 
     // Real compatibility breakdown percentages
-    const cleanPct = total > 0 ? Math.round((clean / total) * 100) : 0;
-    const autofixPct = total > 0 ? Math.round((autofix / total) * 100) : 0;
-    const reviewPct = total > 0 ? Math.round((review / total) * 100) : 0;
-    const blockedPct = total > 0 ? Math.round((blocked / total) * 100) : 0;
+    const cleanPct = total > 0 ? Math.round((compatibleCount / total) * 100) : 0;
+    const reviewPct = total > 0 ? Math.round((reviewTotal / total) * 100) : 0;
 
     setBarAndPct("comp-clean", cleanPct);
-    setBarAndPct("comp-autofix", autofixPct);
     setBarAndPct("comp-review", reviewPct);
-    setBarAndPct("comp-blocked", blockedPct);
 
     // Footer must agree with the tile above it.
     const footerReadiness = document.getElementById("dash-footer-readiness");
     if (footerReadiness) {
       footerReadiness.innerHTML = total > 0
-        ? `Readiness score: <strong>${readinessPct}%</strong> — ${clean + autofix} of ${total} report(s) ready for direct import.`
+        ? `Readiness score: <strong>${readinessPct}%</strong> — ${compatibleCount} of ${total} report(s) compatible for direct migration.`
         : "No reports discovered yet. Run Step 1: Connect & Discover first.";
     }
 
@@ -979,20 +978,20 @@ function renderFlaggedReportsList() {
   const container = document.getElementById("dash-flagged-list");
   if (!container) return;
 
-  const flagged = reportsCache.filter(r => r.bucket === "Blocked");
+  const flagged = reportsCache.filter(r => r.bucket === "NeedsReview" || r.bucket === "Blocked");
   if (flagged.length === 0) {
     container.innerHTML = `
       <div style="padding:16px;text-align:center;color:#059669;font-weight:600;">
-        ✓ All reports are 100% clean and ready for direct import!
+        ✓ All reports are 100% compatible and ready for migration!
       </div>
     `;
     return;
   }
 
   container.innerHTML = flagged.map(r => {
-    const isBlocked = r.bucket === "Blocked";
-    const pillClass = isBlocked ? "pill fail" : "pill warn";
-    let desc = r.blockReason || (isBlocked ? "Custom assembly reference detected" : "Requires design review");
+    let desc = (r.blockReason === "CF-ASSEMBLY" || (r.featureTags && String(r.featureTags).includes("CustomAssembly")))
+      ? "Uses custom assemblies — needs review"
+      : (r.blockReason || "Tagged for review");
 
     return `
       <div class="flagged-item">
@@ -1002,7 +1001,7 @@ function renderFlaggedReportsList() {
           <div style="font-size:12px;color:#475569;margin-top:2px;">${escapeHtml(desc)}</div>
         </div>
         <div style="display:flex;align-items:center;gap:8px;">
-          <span class="${pillClass}">${escapeHtml(r.bucket)}</span>
+          <span class="pill warn">Needs Review</span>
           <button class="btn2 btn-sm" onclick="selectReportForValidation('${r.id}')">Inspect</button>
         </div>
       </div>
@@ -1322,8 +1321,8 @@ function renderValidationEvidenceGrid() {
       statusBadge = `<span class="pill warn" style="font-size:11.5px;font-weight:600;" title="Requires parameters without defaults">⚠ Needs Parameters</span>`;
       borderStyle = "border: 1px solid #FED7AA;";
     } else if (r.status === "Failed") {
-      statusBadge = `<span class="pill fail" style="font-size:11.5px;font-weight:600;cursor:pointer;" onclick="openRenderLogs('${escapeHtml(r.path)}')" title="Click to view error log">✕ Render Error</span>`;
-      borderStyle = "border: 1px solid #FECACA;";
+      statusBadge = `<span class="pill warn" style="font-size:11.5px;font-weight:600;cursor:pointer;" onclick="openRenderLogs('${escapeHtml(r.path)}')" title="Click to view log">⚠ Needs Review</span>`;
+      borderStyle = "border: 1px solid #FED7AA;";
     } else {
       statusBadge = `<span class="pill" style="font-size:11.5px;color:#64748B;">⚪ Not Validated</span>`;
     }
@@ -1354,11 +1353,11 @@ function renderValidationEvidenceGrid() {
         </div>`;
     } else if (r.status === "Failed") {
       thumbHtml = `
-        <div style="height:140px;width:100%;background:#FEF2F2;border-bottom:1px solid #FEE2E2;display:flex;flex-direction:column;align-items:center;justify-content:center;color:#DC2626;padding:12px;text-align:center;cursor:pointer;" onclick="openRenderLogs('${escapeHtml(r.path)}')">
-          <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" style="margin-bottom:6px;"><circle cx="12" cy="12" r="10"></circle><line x1="15" y1="9" x2="9" y2="15"></line><line x1="9" y1="9" x2="15" y2="15"></line></svg>
-          <span style="font-size:12.5px;font-weight:600;">Render Error</span>
-          <small style="font-size:11px;color:#991B1B;margin-top:2px;max-width:90%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">
-            ${escapeHtml(r.errorMessage || "Click to inspect error log")}
+        <div style="height:140px;width:100%;background:#FFFBEB;border-bottom:1px solid #FEF3C7;display:flex;flex-direction:column;align-items:center;justify-content:center;color:#D97706;padding:12px;text-align:center;cursor:pointer;" onclick="openRenderLogs('${escapeHtml(r.path)}')">
+          <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" style="margin-bottom:6px;"><path d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/></svg>
+          <span style="font-size:12.5px;font-weight:600;">Needs Review</span>
+          <small style="font-size:11px;color:#92400E;margin-top:2px;max-width:90%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">
+            ${escapeHtml(r.errorMessage || "Click to inspect log")}
           </small>
         </div>`;
     } else {
@@ -1387,7 +1386,7 @@ function renderValidationEvidenceGrid() {
             </div>` : ""}
 
           ${r.errorMessage && r.status === "Failed" ? `
-            <div style="font-size:11.5px;color:#DC2626;background:#FEF2F2;border:1px solid #FEE2E2;border-radius:6px;padding:6px 8px;margin-bottom:10px;max-height:48px;overflow:hidden;text-overflow:ellipsis;">
+            <div style="font-size:11.5px;color:#92400E;background:#FFFBEB;border:1px solid #FEF3C7;border-radius:6px;padding:6px 8px;margin-bottom:10px;max-height:48px;overflow:hidden;text-overflow:ellipsis;">
               ${escapeHtml(r.errorMessage)}
             </div>` : ""}
 

@@ -55,7 +55,7 @@ public class TransformEngineTests
     }
 
     [Fact]
-    public void Transform_CustomAssembly_ClassifiedAsBlocked()
+    public void Transform_CustomAssembly_ClassifiedAsNeedsReview()
     {
         var xml = @"<Report xmlns=""http://schemas.microsoft.com/sqlserver/reporting/2016/01/reportdefinition"">
   <CodeModules>
@@ -65,7 +65,7 @@ public class TransformEngineTests
 
         var result = _engine.TransformAndClassify(Guid.NewGuid(), Encoding.UTF8.GetBytes(xml));
 
-        Assert.Equal(ReportBucket.Blocked, result.Bucket);
+        Assert.Equal(ReportBucket.NeedsReview, result.Bucket);
         Assert.Equal("CF-ASSEMBLY", result.BlockReasonCode);
     }
 

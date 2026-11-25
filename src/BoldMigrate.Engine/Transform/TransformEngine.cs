@@ -214,6 +214,7 @@ public class TransformEngine
                     // Map rule code to friendly informational tag
                     var tag = rule.Code switch
                     {
+                        "CF-ASSEMBLY" => "CustomAssembly",
                         "CF-SUBREPORT" => "Subreport",
                         "CF-GAUGE" => "Gauge",
                         "CF-MAP" => "Map",
@@ -228,7 +229,7 @@ public class TransformEngine
                     };
                     if (tag != null) featureTags.Add(tag);
 
-                    // Blocked is fatal; AutoFixed marks applied transforms; Clean remains clean
+                    // Blocked is fatal; NeedsReview tags items requiring manual attention (e.g. custom assemblies); Clean remains clean
                     if (rule.Bucket == ReportBucket.Blocked)
                     {
                         bucket = ReportBucket.Blocked;
@@ -239,6 +240,7 @@ public class TransformEngine
                     else if (rule.Bucket == ReportBucket.NeedsReview && bucket != ReportBucket.Blocked)
                     {
                         bucket = ReportBucket.NeedsReview;
+                        blockCode = rule.Code;
                         userMessage = rule.Message;
                     }
                     else if (rule.Bucket == ReportBucket.AutoFixed && bucket == ReportBucket.Clean)

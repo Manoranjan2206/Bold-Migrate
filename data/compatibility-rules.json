@@ -4,8 +4,8 @@
     {
       "code": "CF-ASSEMBLY",
       "xpath": "//*[local-name()='CodeModule']",
-      "bucket": "Blocked",
-      "message": "References a custom assembly, which cannot be migrated.",
+      "bucket": "NeedsReview",
+      "message": "Uses custom assemblies — needs review.",
       "article": "https://support.boldreports.com/kb/custom-assemblies"
     },
     {
@@ -18,7 +18,7 @@
     {
       "code": "CF-CODE-SIMPLE",
       "xpath": "//*[local-name()='Code']",
-      "bucket": "AutoFixed",
+      "bucket": "Clean",
       "message": "Contains simple embedded code, carried over as is.",
       "article": "https://support.boldreports.com/kb/embedded-code-simple"
     },
@@ -67,14 +67,14 @@
     {
       "code": "CF-SHARED-DSET",
       "xpath": "//*[local-name()='SharedDataSet']",
-      "bucket": "AutoFixed",
+      "bucket": "Clean",
       "message": "Uses a shared dataset.",
       "article": "https://support.boldreports.com/kb/shared-datasets"
     },
     {
       "code": "CF-SHARED-DS",
       "xpath": "//*[local-name()='DataSourceReference']",
-      "bucket": "AutoFixed",
+      "bucket": "Clean",
       "message": "Uses a shared data source.",
       "article": "https://support.boldreports.com/kb/shared-datasources"
     },
@@ -88,8 +88,8 @@
     {
       "code": "CF-UNSUPPORTED-TYPE",
       "xpath": "",
-      "bucket": "Blocked",
-      "message": "This item type is not migrated.",
+      "bucket": "NeedsReview",
+      "message": "Uses an item type that needs review.",
       "article": "https://support.boldreports.com/kb/unsupported-types"
     }
   ]
