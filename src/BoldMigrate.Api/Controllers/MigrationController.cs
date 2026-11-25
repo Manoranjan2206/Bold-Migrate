@@ -669,6 +669,59 @@ public class MigrationController : ControllerBase
         });
     }
 
+    [HttpDelete("runs/{id:guid}/validation-results")]
+    public async Task<IActionResult> ClearValidationResults(Guid id, CancellationToken ct)
+    {
+        using var scope = _scopeFactory.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<BoldMigrate.Infrastructure.Data.MigrationDbContext>();
+
+        var reportIds = db.CatalogItems
+            .Where(c => c.RunId == id && c.ItemType == ItemType.Report)
+            .Select(c => c.Id)
+            .ToList();
+
+        if (reportIds.Count > 0)
+        {
+            var oldResults = db.ValidationResults
+                .Where(v => reportIds.Contains(v.ReportId))
+                .ToList();
+            if (oldResults.Count > 0)
+            {
+                db.ValidationResults.RemoveRange(oldResults);
+            }
+
+            var records = db.ReportRecords
+                .Where(r => reportIds.Contains(r.CatalogItemId) &&
+                            (r.State == ReportState.Approved ||
+                             r.State == ReportState.AutoPassed ||
+                             r.State == ReportState.AwaitingReview ||
+                             r.State == ReportState.ValidationFailed))
+                .ToList();
+            foreach (var rec in records)
+            {
+                rec.State = ReportState.Analysed;
+            }
+
+            await db.SaveChangesAsync(ct);
+        }
+
+        // Remove cached screenshot PNGs
+        var screenshotDirs = new[]
+        {
+            Path.Combine(Directory.GetCurrentDirectory(), "staging", id.ToString(), "screenshots"),
+            Path.Combine(_staging.GetRunStagingPath(id), "screenshots")
+        };
+        foreach (var dir in screenshotDirs.Distinct())
+        {
+            if (Directory.Exists(dir))
+            {
+                try { Directory.Delete(dir, recursive: true); } catch { }
+            }
+        }
+
+        return Ok(new { cleared = true });
+    }
+
     [HttpGet("runs/{id:guid}/screenshots/{reportId:guid}.png")]
     public IActionResult GetScreenshot(Guid id, Guid reportId)
     {

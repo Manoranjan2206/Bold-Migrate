@@ -1584,6 +1584,19 @@ async function skipRenderValidationAndUpload() {
   }
 }
 
+async function resetValidationResults() {
+  if (!currentRun) return;
+  if (!confirm("Clear cached validation results and snapshots? Reports will return to 'Not Validated' until you run validation.")) return;
+  try {
+    await Api.clearValidationResults(currentRun.id);
+    selectedValReportIds.clear();
+    await loadValidationSummary(true);
+    showToast("Validation results and cached screenshots cleared.");
+  } catch (err) {
+    showToast("Failed clearing validation results: " + err.message, true);
+  }
+}
+
 // -----------------------------------------------------------------------------
 // Interactive Local & Server Viewer/Designer Modals
 // -----------------------------------------------------------------------------

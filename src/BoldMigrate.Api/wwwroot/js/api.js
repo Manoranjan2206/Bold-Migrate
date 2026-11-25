@@ -75,6 +75,11 @@ const Api = {
     return await res.json();
   },
 
+  async clearValidationResults(runId) {
+    const res = await fetch(`${this.baseUrl}/runs/${runId}/validation-results`, { method: "DELETE" });
+    return await res.json();
+  },
+
   async getValidationSummary(runId) {
     const res = await fetch(`${this.baseUrl}/runs/${runId}/validation-summary`);
     if (!res.ok) throw new Error(`Failed to load validation summary (HTTP ${res.status})`);
