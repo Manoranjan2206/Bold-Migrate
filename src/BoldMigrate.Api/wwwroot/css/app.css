@@ -48,6 +48,7 @@ html, body {
   gap: 6px;
   flex-shrink: 0;
   border-right: 1px solid var(--br-border);
+  overflow-y: auto;
   user-select: none;
 }
 
@@ -568,13 +569,6 @@ td input {
   border-radius: 6px;
   padding: 0 8px;
   font-size: 12.5px;
-}
-
-/* Chips Toolbar */
-.chips {
-  display: flex;
-  gap: 8px;
-  flex-wrap: wrap;
 }
 
 /* One segmented control. .chips and .seg are the same thing; .chip and
@@ -1446,5 +1440,295 @@ td input {
   color: var(--br-text-inverse);
   border-color: var(--br-primary);
 }
+
+/* Scrollable wide table container */
+.table-scroll {
+  width: 100%;
+  overflow-x: auto;
+}
+
+/* RDL Diff Modal panes */
+.diff-split {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}
+
+.diff-pane {
+  border: 1px solid var(--br-border);
+  border-radius: 8px;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  background: var(--br-surface-alt);
+}
+
+.diff-pane-title {
+  padding: 8px 12px;
+  font-size: 12px;
+  font-weight: 700;
+  background: var(--br-surface-hover);
+  border-bottom: 1px solid var(--br-border);
+  color: var(--br-text-secondary);
+}
+
+.diff-code {
+  margin: 0;
+  padding: 12px;
+  font-family: var(--br-font-mono);
+  font-size: 12px;
+  line-height: 1.5;
+  overflow: auto;
+  max-height: 52vh;
+  white-space: pre-wrap;
+  word-break: break-word;
+  color: var(--br-text);
+}
+
+/* ==========================================================================
+   Standalone Compatibility Scanner Styles (scanner.html)
+   ========================================================================== */
+.top-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 14px 28px;
+  background: var(--br-surface);
+  border-bottom: 1px solid var(--br-border);
+}
+
+.top-bar-left {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+
+.brand-title {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  text-decoration: none;
+  color: var(--br-brand-navy);
+  font-weight: 700;
+  font-size: 16px;
+}
+
+.brand-icon-box {
+  width: 28px;
+  height: 28px;
+  border-radius: 6px;
+  background: var(--br-accent);
+  color: var(--br-text-inverse);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 800;
+  font-size: 13px;
+}
+
+.brand-badge {
+  background: var(--br-surface-hover);
+  color: var(--br-text-muted);
+  font-size: 11px;
+  font-weight: 600;
+  padding: 2px 8px;
+  border-radius: 6px;
+}
+
+.breadcrumbs-box {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  color: var(--br-text-muted);
+}
+
+.breadcrumbs-box .active {
+  color: var(--br-text);
+  font-weight: 600;
+}
+
+.main-content {
+  max-width: 1120px;
+  margin: 0 auto;
+  padding: 32px 24px 64px;
+}
+
+.step-header {
+  margin-bottom: 24px;
+}
+
+.step-tagline {
+  font-size: 12px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--br-primary);
+  margin-bottom: 6px;
+}
+
+.step-heading {
+  font-size: 28px;
+  font-weight: 800;
+  color: var(--br-brand-navy);
+  margin: 0 0 8px;
+}
+
+.step-lead {
+  font-size: 15px;
+  color: var(--br-text-muted);
+  margin: 0;
+}
+
+.metrics-row {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 14px;
+  margin-bottom: 20px;
+}
+
+.metric-card {
+  background: var(--br-surface);
+  border: 1px solid var(--br-border);
+  border-radius: var(--br-radius-card);
+  padding: 16px;
+  box-shadow: var(--br-shadow-xs);
+}
+
+.metric-card-top {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 8px;
+}
+
+.metric-label {
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--br-text-muted);
+}
+
+.metric-badge {
+  font-size: 11px;
+  font-weight: 700;
+  padding: 2px 8px;
+  border-radius: var(--br-radius-pill);
+}
+
+.metric-value {
+  font-size: 28px;
+  font-weight: 700;
+  line-height: 1.1;
+  margin-bottom: 4px;
+}
+
+.metric-footer {
+  font-size: 12px;
+  color: var(--br-text-subtle);
+}
+
+.table-card {
+  background: var(--br-surface);
+  border: 1px solid var(--br-border);
+  border-radius: var(--br-radius-card);
+  overflow-x: auto;
+  box-shadow: var(--br-shadow-xs);
+}
+
+.table-toolbar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 14px 18px;
+  border-bottom: 1px solid var(--br-border);
+}
+
+.table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.status-badge {
+  display: inline-block;
+  font-size: 12px;
+  font-weight: 600;
+  padding: 3px 9px;
+  border-radius: var(--br-radius-pill);
+}
+
+.badge-success { background: var(--br-success-bg); color: var(--br-success-text); }
+.badge-danger { background: var(--br-danger-bg); color: var(--br-danger-text); }
+.badge-warning { background: var(--br-warning-bg); color: var(--br-warning-text); }
+.badge-info { background: var(--br-info-bg); color: var(--br-info-text); }
+.badge-neutral { background: var(--br-surface-hover); color: var(--br-text-secondary); }
+
+.btn-primary {
+  background: var(--br-primary);
+  color: var(--br-text-inverse);
+  border-color: var(--br-primary);
+}
+
+.btn-secondary {
+  background: var(--br-surface);
+  color: var(--br-text-secondary);
+  border-color: var(--br-border-strong);
+}
+
+/* Responsive Layout Breakpoints */
+@media (max-width: 1100px) {
+  .grid,
+  .grid-3,
+  .metrics-row,
+  .diff-split {
+    grid-template-columns: 1fr !important;
+  }
+
+  .main {
+    padding: 20px 22px 48px;
+  }
+}
+
+@media (max-width: 768px) {
+  .app-shell {
+    flex-direction: column;
+    height: auto;
+    min-height: 100vh;
+    overflow: auto;
+  }
+
+  .side {
+    width: 100%;
+    border-right: none;
+    border-bottom: 1px solid var(--br-border);
+    padding: 12px 0;
+  }
+
+  .main {
+    height: auto;
+    overflow: visible;
+    padding: 16px;
+  }
+
+  .main-header {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .row2 {
+    grid-template-columns: 1fr;
+  }
+
+  .tiles {
+    flex-direction: column;
+  }
+
+  .top-bar {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 10px;
+    padding: 12px 16px;
+  }
+}
+
 
 

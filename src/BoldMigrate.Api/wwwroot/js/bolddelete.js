@@ -15,9 +15,12 @@ function bdSetStatus(msg) {
 }
 
 async function bdPost(path, body) {
+  const csrf = typeof Api !== "undefined" && Api.getCsrfToken ? Api.getCsrfToken() : "";
+  const headers = { "Content-Type": "application/json" };
+  if (csrf) headers["X-BoldMigrate-Csrf"] = csrf;
   const res = await fetch(`/api/tools/bold-delete/${path}`, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers,
     body: JSON.stringify(body)
   });
   return await res.json().catch(() => ({ success: false, message: `HTTP ${res.status}` }));
@@ -46,9 +49,18 @@ function bdRender() {
   const body = document.getElementById("bd-body");
   body.innerHTML = rows.length
     ? rows.map(r => `<tr>
-        <td><input type="checkbox" ${bdSelected.has(r.id) ? "checked" : ""} onchange="bdToggle('${escapeHtml(r.id)}', this.checked)"></td>
+        <td><input type="checkbox" class="bd-row-check" data-bd-id="${escapeHtml(r.id)}" ${bdSelected.has(r.id) ? "checked" : ""}></td>
         <td>${escapeHtml(r.name)}</td><td>${escapeHtml(r.category)}</td></tr>`).join("")
     : `<tr><td colspan="3" style="color:var(--br-text-subtle);padding:12px;">No reports.</td></tr>`;
+  if (!body.dataset.bdBound) {
+    body.dataset.bdBound = "1";
+    body.addEventListener("change", (ev) => {
+      const target = ev.target;
+      if (target && target.classList.contains("bd-row-check")) {
+        bdToggle(target.dataset.bdId, target.checked);
+      }
+    });
+  }
   bdUpdateButton();
 }
 

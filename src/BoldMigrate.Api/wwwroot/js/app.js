@@ -14,23 +14,74 @@ let isPaused = false;
 let currentDiffMode = "side-by-side";
 let selectedValidationReportId = null;
 let latestValidation = null;
+let destinationSessionCache = { destinationUrl: "", bearerToken: "" };
+let valRenderVersion = Date.now();
 
 document.addEventListener("DOMContentLoaded", async () => {
   // Chrome first: these are pure DOM and must not depend on the API coming up.
   renderSteppers();
   watchStatTiles();
+  bindDynamicActionDelegation();
   await initApp();
 });
 
+function bindDynamicActionDelegation() {
+  const libBody = document.getElementById("library-table-body");
+  if (libBody && !libBody.dataset.delegated) {
+    libBody.dataset.delegated = "1";
+    libBody.addEventListener("click", (ev) => {
+      const btn = ev.target.closest("[data-lib-action]");
+      if (!btn) return;
+      const id = btn.dataset.reportId;
+      const action = btn.dataset.libAction;
+      const rep = (reportsCache || []).find(x => x.id === id);
+      if (action === "validate") selectReportForValidation(id);
+      else if (action === "delete" && rep) deleteSingleBoldReport(rep.id, rep.name);
+    });
+  }
+
+  const valGrid = document.getElementById("val-evidence-grid");
+  if (valGrid && !valGrid.dataset.delegated) {
+    valGrid.dataset.delegated = "1";
+    valGrid.addEventListener("click", (ev) => {
+      const el = ev.target.closest("[data-val-action]");
+      if (!el) return;
+      const action = el.dataset.valAction;
+      const id = el.dataset.reportId;
+      const r = validationSummaryCache?.reports?.find(x => x.reportId === id);
+      if (!r) return;
+      if (action === "validate") runSingleReportValidation(r.reportId);
+      else if (action === "viewer") openInteractiveViewer(r.reportId, r.path, "staged");
+      else if (action === "designer") openInteractiveDesigner(r.reportId, r.path, "staged");
+      else if (action === "diff") openRdlDiffModal(r.reportId);
+      else if (action === "logs") openRenderLogs(r.path);
+      else if (action === "zoom" && r.screenshotUrl) openSnapshotZoom(`${r.screenshotUrl}?t=${valRenderVersion}`, r.name);
+    });
+  }
+
+  const srvBody = document.getElementById("server-uploaded-reports-tbody");
+  if (srvBody && !srvBody.dataset.delegated) {
+    srvBody.dataset.delegated = "1";
+    srvBody.addEventListener("click", (ev) => {
+      const btn = ev.target.closest("[data-srv-action]");
+      if (!btn) return;
+      const action = btn.dataset.srvAction;
+      const id = btn.dataset.reportId;
+      const r = (reportsCache || []).find(x => x.id === id);
+      if (!r) return;
+      const cat = r.folder ? r.folder.replace(/^\//, "") : "General";
+      const serverReportPath = `${cat}/${r.name}`;
+      if (action === "viewer") openInteractiveViewer(r.id, serverReportPath, "server");
+      else if (action === "designer") openInteractiveDesigner(r.id, serverReportPath, "server");
+    });
+  }
+}
+
 async function initApp() {
   try {
-    // Always start fresh on page refresh or app restart: retire any leftover active run
-    // so stale discovered counts from a previous session never appear before connecting.
+    // Resume existing active migration run across reloads; explicit New Run is available in sidebar.
     const existingRun = await Api.getActiveRun();
-    if (existingRun) {
-      await Api.abandonRun(existingRun.id);
-    }
-    currentRun = await Api.createOrGetRun("SSRS Live Migration", "http://localhost:8081/ReportServer");
+    currentRun = existingRun || await Api.createOrGetRun("SSRS Live Migration", "http://localhost:8081/ReportServer");
 
     // Load Expression samples
     expressionSamples = await Api.getExpressionSamples();
@@ -56,6 +107,24 @@ async function initApp() {
     }
   } catch (err) {
     console.error("Initialization error:", err);
+  }
+}
+
+async function startFreshRun() {
+  if (!confirm("Start a brand-new migration run? This will archive the current active run and clear temporary staged progress.")) return;
+  try {
+    const ssrsUrl = (document.getElementById("conn-ssrs-url")?.value || "").trim() || "http://localhost:8081/ReportServer";
+    currentRun = await Api.createOrGetRun("SSRS Live Migration", ssrsUrl, true);
+    resetLocalRunState();
+    destinationSessionCache = { destinationUrl: "", bearerToken: "" };
+    valRenderVersion = Date.now();
+    await refreshConnectionsState();
+    await refreshLibraryState();
+    await refreshDashboardState();
+    switchTab("connections");
+    showToast("Started a fresh migration run.");
+  } catch (err) {
+    showToast("Could not start fresh run: " + err.message);
   }
 }
 
@@ -234,6 +303,11 @@ function hydrateConnectionFields() {
     emailEl.value = currentRun.destinationUserEmail;
   }
 
+  const modeEl = document.getElementById("conn-storage-mode");
+  if (modeEl && currentRun.credentialMode) {
+    modeEl.value = currentRun.credentialMode === "DpapiLocal" ? "DpapiLocal" : "InMemory";
+  }
+
   // Reflect real connection state instead of the optimistic markup defaults.
   const ssrsConnected = !!currentRun.sourceServerUrl &&
     ["Connected", "Fetching", "Analysed", "Uploading", "Uploaded", "Validating", "Validated", "CutOver"]
@@ -286,7 +360,8 @@ function renderDataSourcesTable() {
       <td>
         <div style="display:flex;align-items:center;gap:4px;">
           <input id="ds-conn-${ds.id}" class="ds-conn-str" value="${escapeHtml(ds.connectString || "")}"
-                 placeholder="Server=...;Database=..."
+                 data-initial="${escapeHtml(ds.connectString || "")}"
+                 placeholder="${ds.hasConnectString ? "Configured in staged .rsds" : "Server=...;Database=..."}"
                  style="width:220px;padding:4px 8px;border:1px solid var(--br-border-strong);border-radius:4px;font-family:monospace;font-size:12px;">
           ${(ds.connectString && (ds.connectString.toLowerCase().includes("localhost") || ds.connectString.includes("127.0.0.1"))) ? `
             <button type="button" class="btn2 btn-sm" style="font-size:10px;padding:2px 6px;white-space:nowrap;" title="Replace localhost with host.docker.internal for Bold Reports in Docker" onclick="replaceLocalhostWithDocker('${ds.id}')">Docker Fix</button>
@@ -383,12 +458,30 @@ function hideDataSourceError() {
   if (box) box.style.display = "none";
 }
 
+async function onCredentialStorageModeChange(mode) {
+  if (!currentRun) return;
+  try {
+    const res = await Api.setCredentialMode(currentRun.id, mode);
+    if (res && res.success) {
+      currentRun.credentialMode = mode;
+      showToast(`Credential vault switched to ${mode}.`);
+    } else if (res?.message) {
+      showToast(res.message);
+    }
+  } catch (err) {
+    showToast("Could not update storage mode: " + err.message);
+  }
+}
+
 async function saveDataSourceCredentials(dsId) {
   if (!currentRun) return;
   const mode = document.getElementById(`ds-mode-${dsId}`)?.value || "Prompt";
   const user = document.getElementById(`ds-user-${dsId}`)?.value.trim() || "";
   const pass = document.getElementById(`ds-pass-${dsId}`)?.value || "";
-  const connectString = document.getElementById(`ds-conn-${dsId}`)?.value.trim() || "";
+  const connEl = document.getElementById(`ds-conn-${dsId}`);
+  const rawConn = connEl?.value.trim() || "";
+  // Do not echo redacted connection string masks back over the real staged value unless edited
+  const connectString = connEl && rawConn === (connEl.dataset.initial || "").trim() ? "" : rawConn;
   const pill = document.getElementById(`ds-status-${dsId}`);
   const btn = document.getElementById(`ds-btn-${dsId}`);
   const ds = dataSourcesCache.find(d => d.id === dsId);
@@ -466,6 +559,7 @@ async function testSsrsConnection() {
   if (!currentRun) return;
   const url = document.getElementById("conn-ssrs-url").value;
   const mode = document.getElementById("conn-ssrs-auth").value;
+  const credMode = document.getElementById("conn-storage-mode")?.value || null;
   let user = "";
   let pass = "";
   if (mode !== "Integrated") {
@@ -477,10 +571,10 @@ async function testSsrsConnection() {
   pill.className = "pill run";
   pill.innerText = "Probing...";
 
-  const res = await Api.testConnection(currentRun.id, url, user, pass, mode);
+  const res = await Api.testConnection(currentRun.id, url, user, pass, mode, credMode);
   if (res.success) {
     pill.className = "pill ok";
-    pill.innerText = `Connected · ${res.version || "REST v2.0"}`;
+    pill.innerText = `Connected · ${res.version || "REST v2.0"} (${res.api || "Auto"})`;
     showToast("SSRS Connection verified successfully.");
   } else {
     pill.className = "pill fail";
@@ -510,6 +604,11 @@ async function testDestConnection() {
   );
 
   if (res.success) {
+    currentRun.destinationServerUrl = res.destinationUrl || url;
+    destinationSessionCache = {
+      destinationUrl: res.destinationUrl || url,
+      bearerToken: mode === "token" ? token : ""
+    };
     pill.className = "pill ok";
     pill.innerText = "Token valid";
     showToast("Bold Reports connection verified. Ready for upload.");
@@ -576,10 +675,11 @@ function resetLocalRunState() {
 async function applyFormConnectionsToCurrentRun() {
   const ssrsUrl = (document.getElementById("conn-ssrs-url")?.value || "").trim();
   const ssrsMode = document.getElementById("conn-ssrs-auth")?.value || "Integrated";
+  const credMode = document.getElementById("conn-storage-mode")?.value || null;
   const ssrsUser = ssrsMode !== "Integrated" ? (document.getElementById("conn-ssrs-user")?.value || "") : "";
   const ssrsPass = ssrsMode !== "Integrated" ? (document.getElementById("conn-ssrs-pass")?.value || "") : "";
 
-  const ssrsRes = await Api.testConnection(currentRun.id, ssrsUrl, ssrsUser, ssrsPass, ssrsMode);
+  const ssrsRes = await Api.testConnection(currentRun.id, ssrsUrl, ssrsUser, ssrsPass, ssrsMode, credMode);
   if (!ssrsRes || !ssrsRes.success) {
     throw new Error(ssrsRes?.message || "Could not connect to SSRS server.");
   }
@@ -614,7 +714,7 @@ async function saveAndDiscoverCatalog(forceRescan = false) {
       // Start a brand-new run so old items, edits, and validation results are discarded cleanly
       const ssrsUrl = (document.getElementById("conn-ssrs-url")?.value || "").trim() || "http://localhost:8081/ReportServer";
       await Api.abandonRun(currentRun.id);
-      currentRun = await Api.createOrGetRun("SSRS Live Migration", ssrsUrl);
+      currentRun = await Api.createOrGetRun("SSRS Live Migration", ssrsUrl, true);
       resetLocalRunState();
       await applyFormConnectionsToCurrentRun();
     }
@@ -626,24 +726,28 @@ async function saveAndDiscoverCatalog(forceRescan = false) {
 
     showToast("Scanning SSRS catalog: folders, data sources, datasets, and reports...");
 
-    // 1. Trigger Fetch
+    // 1. Trigger Fetch and poll until discovery populates items (up to ~18s)
     await Api.fetchEstate(currentRun.id);
 
-    // 2. Poll until items are cataloged (wait up to 5 seconds)
-    let discovered = false;
-    for (let i = 0; i < 10; i++) {
+    for (let i = 0; i < 30; i++) {
       await new Promise(r => setTimeout(r, 600));
       const poll = await Api.pollState(currentRun.id);
-      if (poll && poll.reportsTotal > 0) {
-        discovered = true;
+      if (poll && poll.itemsTotal > 0 && poll.status !== "Fetching") {
         break;
       }
     }
 
-    // 3. Trigger Assessment check
+    // 2. Trigger Assessment check and poll until status reaches Analysed
     await Api.checkEstate(currentRun.id);
+    for (let i = 0; i < 20; i++) {
+      await new Promise(r => setTimeout(r, 500));
+      const poll = await Api.pollState(currentRun.id);
+      if (poll && poll.status === "Analysed") {
+        break;
+      }
+    }
 
-    // 4. Refresh caches and stay on Step 1 so the user can enter discovered data source credentials
+    // 3. Refresh caches and stay on Step 1 so the user can enter discovered data source credentials
     await refreshConnectionsState();
     await refreshLibraryState();
 
@@ -652,7 +756,7 @@ async function saveAndDiscoverCatalog(forceRescan = false) {
       const dsTable = document.getElementById("conn-datasources-table");
       if (dsTable) dsTable.scrollIntoView({ behavior: "smooth", block: "center" });
     } else {
-      showToast("Catalog discovery complete! Click 'View Report Library →' when ready.");
+      showToast("Catalog discovery complete! Click 'Continue to Report Library →' when ready.");
     }
   } catch (err) {
     showToast("Discovery error: " + err.message);
@@ -772,8 +876,8 @@ function renderReportLibrary() {
         <td><span class="${bucketClass}">${bucketLabel}</span></td>
         <td style="font-size:12px;color:var(--br-text-secondary);">${blockReasonText}</td>
         <td style="text-align:right;white-space:nowrap;">
-          <button class="btn2 btn-sm" onclick="selectReportForValidation('${r.id}')">Inspect & Validate</button>
-          <button class="btn2 btn-danger btn-sm" onclick="deleteSingleBoldReport('${r.id}', '${escapeHtml(r.name).replace(/'/g, "\\'")}')" title="Delete this report from Bold Reports destination" style="margin-left:4px;padding:4px 8px;">
+          <button class="btn2 btn-sm" data-lib-action="validate" data-report-id="${r.id}">Inspect &amp; Validate</button>
+          <button class="btn2 btn-danger btn-sm" data-lib-action="delete" data-report-id="${r.id}" title="Delete this report from Bold Reports destination" style="margin-left:4px;padding:4px 8px;">
             <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="vertical-align:-1px;"><path d="M3 6h18M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg>
           </button>
         </td>
@@ -1095,7 +1199,7 @@ async function startMigrationWithSelected() {
   try {
     await Api.selectReports(currentRun.id, Array.from(selectedReportIds));
     switchTab("validation");
-    await initValidationTab();
+    await loadValidationSummary(true);
   } catch (err) {
     showToast("Validation navigation error: " + err.message);
   }
@@ -1343,6 +1447,17 @@ async function startBatchUpload() {
   }
 }
 
+async function retryFailedItems() {
+  if (!currentRun) return;
+  showToast("Retrying failed uploads and resetting retry state...");
+  try {
+    await Api.retryFailed(currentRun.id);
+    await refreshMigrationState();
+  } catch (err) {
+    showToast("Retry failed: " + err.message);
+  }
+}
+
 async function togglePauseMigration() {
   if (!currentRun) return;
   const btn = document.getElementById("btn-pause-migration");
@@ -1529,7 +1644,7 @@ function getValidationStatusBadge(r) {
   } else if (r.status === "NeedsManualCheck") {
     return `<span class="pill warn" style="font-size:11px;font-weight:600;" title="Requires parameters without defaults">⚠ Needs Parameters</span>`;
   } else if (r.status === "Failed") {
-    return `<span class="pill warn" style="font-size:11px;font-weight:600;cursor:pointer;" onclick="openRenderLogs('${escapeHtml(r.path)}')" title="Click to view log">⚠ Needs Review</span>`;
+    return `<span class="pill fail" style="font-size:11px;font-weight:600;cursor:pointer;" data-val-action="logs" data-report-id="${r.reportId}" title="Click to view render log">⚠ Render Error</span>`;
   }
   return `<span class="pill" style="font-size:11px;color:var(--br-text-muted);">⚪ Not Validated</span>`;
 }
@@ -1566,7 +1681,7 @@ function renderValidationEvidenceGrid() {
         <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" style="margin-bottom: 8px; opacity: 0.6;">
           <circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line>
         </svg>
-        <p style="margin: 0; font-size: 14px; font-weight: 500;">No reports match the current filter (${currentValFilter}).</p>
+        <p style="margin: 0; font-size: 14px; font-weight: 500;">No reports match the current filter (${escapeHtml(currentValFilter)}).</p>
       </div>`;
     return;
   }
@@ -1575,7 +1690,7 @@ function renderValidationEvidenceGrid() {
     grid.style.display = "block";
     const allChecked = filtered.length > 0 && filtered.every(r => selectedValReportIds.has(r.reportId));
     grid.innerHTML = `
-      <div class="card" style="padding:0;overflow:hidden;">
+      <div class="card table-scroll" style="padding:0;">
         <table>
           <thead>
             <tr>
@@ -1594,7 +1709,7 @@ function renderValidationEvidenceGrid() {
                 `<span style="font-size:10.5px;font-weight:600;padding:1px 5px;border-radius:4px;background:var(--br-info-bg);color:var(--br-primary);border:1px solid var(--br-info-border);margin-right:3px;">${escapeHtml(t)}</span>`
               ).join("");
               const thumbCell = r.screenshotUrl
-                ? `<img src="${r.screenshotUrl}?t=${Date.now()}" alt="${escapeHtml(r.name)}" onclick="openSnapshotZoom('${r.screenshotUrl}', '${escapeHtml(r.name)}')" style="width:68px;height:42px;object-fit:cover;object-position:top;border-radius:4px;border:1px solid var(--br-border);cursor:pointer;" title="Click to expand snapshot">`
+                ? `<img src="${escapeHtml(r.screenshotUrl)}?t=${valRenderVersion}" alt="${escapeHtml(r.name)}" data-val-action="zoom" data-report-id="${r.reportId}" style="width:68px;height:42px;object-fit:cover;object-position:top;border-radius:4px;border:1px solid var(--br-border);cursor:pointer;" title="Click to expand snapshot">`
                 : `<span style="font-size:11px;color:var(--br-text-subtle);">—</span>`;
               const detailMsg = r.status === "DataSourceOffline"
                 ? `<span style="color:var(--br-info-text);">RDL valid (DB offline in local preview)</span>`
@@ -1604,13 +1719,14 @@ function renderValidationEvidenceGrid() {
                 <tr>
                   <td class="check-cell"><input type="checkbox" ${isSel ? "checked" : ""} onchange="toggleValReportSelection('${r.reportId}', this.checked)"></td>
                   <td>${thumbCell}</td>
-                  <td><strong>${escapeHtml(r.name)}</strong><br><small style="color:var(--br-text-muted);font-family:monospace;">${escapeHtml(r.path)}</small></td>
+                  <td><strong>${escapeHtml(r.name)}</strong><br><small style="color:var(--br-text-muted);font-family:var(--br-font-mono);">${escapeHtml(r.path)}</small></td>
                   <td>${getValidationStatusBadge(r)}</td>
                   <td style="font-size:12px;max-width:340px;">${tagsHtml ? `<div style="margin-bottom:3px;">${tagsHtml}</div>` : ""}${detailMsg}</td>
                   <td style="text-align:right;white-space:nowrap;">
-                    <button class="btn2 btn-sm" onclick="runSingleReportValidation('${r.reportId}')" title="Run Playwright validation on this report only">▶ Validate</button>
-                    <button class="btn2 btn-sm" onclick="openInteractiveViewer('${r.reportId}', '${escapeHtml(r.path)}', 'staged')" style="margin-left:4px;">👁 View</button>
-                    <button class="btn2 btn-sm" onclick="openInteractiveDesigner('${r.reportId}', '${escapeHtml(r.path)}', 'staged')" style="margin-left:4px;">✏ Edit</button>
+                    <button class="btn2 btn-sm" data-val-action="validate" data-report-id="${r.reportId}" title="Run Playwright validation on this report only">▶ Validate</button>
+                    <button class="btn2 btn-sm" data-val-action="diff" data-report-id="${r.reportId}" style="margin-left:4px;" title="Compare Original vs Transformed RDL">XML Diff</button>
+                    <button class="btn2 btn-sm" data-val-action="viewer" data-report-id="${r.reportId}" style="margin-left:4px;">👁 View</button>
+                    <button class="btn2 btn-sm" data-val-action="designer" data-report-id="${r.reportId}" style="margin-left:4px;">✏ Edit</button>
                   </td>
                 </tr>
               `;
@@ -1635,14 +1751,15 @@ function renderValidationEvidenceGrid() {
     let borderStyle = "border: 1px solid var(--br-border);";
     if (r.status === "Passed" || r.status === "Approved") borderStyle = "border: 1px solid var(--br-success-border);";
     else if (r.status === "DataSourceOffline") borderStyle = "border: 1px solid var(--br-info-border);";
-    else if (r.status === "NeedsManualCheck" || r.status === "Failed") borderStyle = "border: 1px solid var(--br-warning-border);";
+    else if (r.status === "NeedsManualCheck") borderStyle = "border: 1px solid var(--br-warning-border);";
+    else if (r.status === "Failed") borderStyle = "border: 1px solid var(--br-danger-border);";
 
     // Thumbnail Preview
     let thumbHtml = "";
     if (r.screenshotUrl) {
       thumbHtml = `
-        <div style="height:150px;width:100%;background:var(--br-surface-alt);border-bottom:1px solid var(--br-border);position:relative;overflow:hidden;cursor:pointer;" onclick="openSnapshotZoom('${r.screenshotUrl}', '${escapeHtml(r.name)}')">
-          <img src="${r.screenshotUrl}?t=${Date.now()}" alt="${escapeHtml(r.name)}" style="width:100%;height:100%;object-fit:cover;object-position:top;" loading="lazy">
+        <div style="height:150px;width:100%;background:var(--br-surface-alt);border-bottom:1px solid var(--br-border);position:relative;overflow:hidden;cursor:pointer;" data-val-action="zoom" data-report-id="${r.reportId}">
+          <img src="${escapeHtml(r.screenshotUrl)}?t=${valRenderVersion}" alt="${escapeHtml(r.name)}" style="width:100%;height:100%;object-fit:cover;object-position:top;" loading="lazy">
           <div style="position:absolute;bottom:6px;right:6px;background:rgba(15,23,42,0.7);color:var(--br-text-inverse);font-size:10.5px;padding:2px 6px;border-radius:4px;backdrop-filter:blur(2px);">
             🔍 Click to expand
           </div>
@@ -1663,10 +1780,10 @@ function renderValidationEvidenceGrid() {
         </div>`;
     } else if (r.status === "Failed") {
       thumbHtml = `
-        <div style="height:140px;width:100%;background:var(--br-warning-bg);border-bottom:1px solid var(--br-warning-border);display:flex;flex-direction:column;align-items:center;justify-content:center;color:var(--br-warning);padding:12px;text-align:center;cursor:pointer;" onclick="openRenderLogs('${escapeHtml(r.path)}')">
+        <div style="height:140px;width:100%;background:var(--br-danger-bg);border-bottom:1px solid var(--br-danger-border);display:flex;flex-direction:column;align-items:center;justify-content:center;color:var(--br-danger);padding:12px;text-align:center;cursor:pointer;" data-val-action="logs" data-report-id="${r.reportId}">
           <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" style="margin-bottom:6px;"><path d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/></svg>
-          <span style="font-size:12.5px;font-weight:600;">Needs Review</span>
-          <small style="font-size:11px;color:var(--br-warning-text);margin-top:2px;max-width:90%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">
+          <span style="font-size:12.5px;font-weight:600;">Render Error</span>
+          <small style="font-size:11px;color:var(--br-danger-text);margin-top:2px;max-width:90%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">
             ${escapeHtml(r.errorMessage || "Click to inspect log")}
           </small>
         </div>`;
@@ -1689,7 +1806,7 @@ function renderValidationEvidenceGrid() {
             </label>
             ${statusBadge}
           </div>
-          <div style="font-size:12px;color:var(--br-text-muted);margin-bottom:8px;font-family:monospace;">${escapeHtml(r.path)}</div>
+          <div style="font-size:12px;color:var(--br-text-muted);margin-bottom:8px;font-family:var(--br-font-mono);">${escapeHtml(r.path)}</div>
 
           ${tagsHtml ? `<div style="display:flex;flex-wrap:wrap;gap:4px;margin-bottom:10px;">${tagsHtml}</div>` : ""}
 
@@ -1699,24 +1816,27 @@ function renderValidationEvidenceGrid() {
             </div>` : ""}
 
           ${r.errorMessage && r.status === "Failed" ? `
-            <div style="font-size:11.5px;color:var(--br-warning-text);background:var(--br-warning-bg);border:1px solid var(--br-warning-border);border-radius:6px;padding:6px 8px;margin-bottom:10px;max-height:48px;overflow:hidden;text-overflow:ellipsis;">
+            <div style="font-size:11.5px;color:var(--br-danger-text);background:var(--br-danger-bg);border:1px solid var(--br-danger-border);border-radius:6px;padding:6px 8px;margin-bottom:10px;max-height:48px;overflow:hidden;text-overflow:ellipsis;">
               ${escapeHtml(r.errorMessage)}
             </div>` : ""}
 
-          <div style="margin-top:auto;display:flex;justify-content:space-between;align-items:center;padding-top:10px;border-top:1px solid var(--br-border-subtle);">
-            <div style="display:flex;gap:6px;">
-              <button class="btn2 btn-sm" onclick="runSingleReportValidation('${r.reportId}')" title="Run Playwright validation on this report only">
+          <div style="margin-top:auto;display:flex;justify-content:space-between;align-items:center;padding-top:10px;border-top:1px solid var(--br-border-subtle);flex-wrap:wrap;gap:6px;">
+            <div style="display:flex;gap:6px;flex-wrap:wrap;">
+              <button class="btn2 btn-sm" data-val-action="validate" data-report-id="${r.reportId}" title="Run Playwright validation on this report only">
                 ▶ Validate
               </button>
-              <button class="btn2 btn-sm" onclick="openInteractiveViewer('${r.reportId}', '${escapeHtml(r.path)}', 'staged')" title="Open interactive local viewer">
+              <button class="btn2 btn-sm" data-val-action="diff" data-report-id="${r.reportId}" title="Compare Original vs Transformed RDL">
+                Diff
+              </button>
+              <button class="btn2 btn-sm" data-val-action="viewer" data-report-id="${r.reportId}" title="Open interactive local viewer">
                 👁 View
               </button>
-              <button class="btn2 btn-sm" onclick="openInteractiveDesigner('${r.reportId}', '${escapeHtml(r.path)}', 'staged')" title="Edit in Web Report Designer">
+              <button class="btn2 btn-sm" data-val-action="designer" data-report-id="${r.reportId}" title="Edit in Web Report Designer">
                 ✏ Edit
               </button>
             </div>
             ${r.status === "Failed" || r.status === "DataSourceOffline" ? `
-              <button class="btn2 btn-sm" onclick="openRenderLogs('${escapeHtml(r.path)}')" style="padding:4px 8px;font-size:11px;color:var(--br-text-muted);">
+              <button class="btn2 btn-sm" data-val-action="logs" data-report-id="${r.reportId}" style="padding:4px 8px;font-size:11px;color:var(--br-text-muted);">
                 📜 Log
               </button>` : ""}
           </div>
@@ -1729,10 +1849,11 @@ function renderValidationEvidenceGrid() {
 async function runSingleReportValidation(reportId) {
   if (!currentRun) return;
   showToast("Running render validation for selected report...");
+  valRenderVersion = Date.now();
   try {
     await Api.validateRender(currentRun.id, 1, [reportId]);
-    setTimeout(() => loadValidationSummary(true), 2500);
-    setTimeout(() => loadValidationSummary(true), 6000);
+    setTimeout(() => { valRenderVersion = Date.now(); loadValidationSummary(true); }, 2500);
+    setTimeout(() => { valRenderVersion = Date.now(); loadValidationSummary(true); }, 6000);
   } catch (err) {
     showToast("Validation failed to start: " + err.message, true);
   }
@@ -1757,12 +1878,14 @@ async function startAutomatedRenderValidation(selectedOnly = true) {
     : "Starting automated render validation for all staged reports (5 parallel tabs)...");
 
   try {
+    valRenderVersion = Date.now();
     await Api.validateRender(currentRun.id, 5, targetIds);
 
     if (valPollInterval) clearInterval(valPollInterval);
     let attempts = 0;
     valPollInterval = setInterval(async () => {
       attempts++;
+      valRenderVersion = Date.now();
       await loadValidationSummary();
 
       const summary = validationSummaryCache;
@@ -1770,12 +1893,13 @@ async function startAutomatedRenderValidation(selectedOnly = true) {
         const notDone = selectedOnly
           ? summary.reports.filter(r => targetIds.includes(r.reportId) && r.status === "NotValidated").length
           : summary.reports.filter(r => r.status === "NotValidated").length;
-        if (notDone === 0 || attempts >= 40) {
+        // Wait at least 2 poll cycles so re-runs on already-validated reports complete before closing timer
+        if ((notDone === 0 && attempts >= 2) || attempts >= 40) {
           clearInterval(valPollInterval);
           valPollInterval = null;
           if (btnSel) btnSel.disabled = false;
           if (btnAll) btnAll.disabled = false;
-          showToast(`Validation finished! Passed: ${summary.passed}, Needs Review: ${summary.failed}, Needs Params: ${summary.needsManualCheck}`);
+          showToast(`Validation finished! Passed: ${summary.passed}, Render Errors: ${summary.failed}, Needs Params: ${summary.needsManualCheck}`);
         }
       }
     }, 3000);
@@ -1841,14 +1965,13 @@ function openInteractiveViewer(reportId, reportPath, mode = "staged") {
     });
   } else {
     // Destination Server mode
-    const dest = destinationConfigCache || {};
-    const destUrl = dest.destinationUrl || "http://localhost:8090/reporting/site/site1";
+    const destUrl = currentRun?.destinationServerUrl || destinationSessionCache.destinationUrl || "http://localhost:8090/reporting/site/site1";
     const serviceUrl = destUrl.replace(/\/site\/[^/]+/, "") + "/reporting/reportservice/api/Viewer";
     $(host).boldReportViewer({
       reportServiceUrl: serviceUrl,
       reportServerUrl: destUrl,
       reportPath: reportPath,
-      serviceAuthorizationToken: dest.bearerToken || ""
+      serviceAuthorizationToken: destinationSessionCache.bearerToken ? `bearer ${destinationSessionCache.bearerToken}` : ""
     });
   }
 }
@@ -1904,13 +2027,12 @@ function openInteractiveDesigner(reportId, reportPath, mode = "staged") {
     });
   } else {
     // Destination Server mode
-    const dest = destinationConfigCache || {};
-    const destUrl = dest.destinationUrl || "http://localhost:8090/reporting/site/site1";
+    const destUrl = currentRun?.destinationServerUrl || destinationSessionCache.destinationUrl || "http://localhost:8090/reporting/site/site1";
     const serviceUrl = destUrl.replace(/\/site\/[^/]+/, "") + "/reporting/reportservice/api/Designer";
     $(host).boldReportDesigner({
       serviceUrl: serviceUrl,
       serverUrl: destUrl,
-      serviceAuthorizationToken: dest.bearerToken || "",
+      serviceAuthorizationToken: destinationSessionCache.bearerToken ? `bearer ${destinationSessionCache.bearerToken}` : "",
       create: function () {
         const designer = $(host).data("boldReportDesigner");
         if (designer && targetPath) {
@@ -1999,7 +2121,9 @@ async function loadServerUploadedReports() {
 
   try {
     const res = await Api.getReports(currentRun.id);
-    const uploaded = (res && res.reports) ? res.reports.filter(r => r.state === "Uploaded" || r.uploaded) : [];
+    const list = Array.isArray(res) ? res : (res?.reports || []);
+    reportsCache = list;
+    const uploaded = list.filter(r => r.status === "Uploaded" || r.state === "Uploaded" || r.uploaded);
 
     if (uploaded.length === 0) {
       tbody.innerHTML = `<tr><td colspan="4" style="text-align:center;color:var(--br-text-muted);padding:16px;">No reports have completed upload to Bold Reports Server yet.</td></tr>`;
@@ -2008,17 +2132,16 @@ async function loadServerUploadedReports() {
 
     tbody.innerHTML = uploaded.map(r => {
       const cat = r.folder ? r.folder.replace(/^\//, "") : "General";
-      const serverReportPath = `${cat}/${r.name}`;
       return `
         <tr>
           <td><strong>${escapeHtml(r.name)}</strong></td>
           <td><code>${escapeHtml(cat)}</code></td>
           <td><span class="pill ok">Uploaded</span></td>
           <td style="text-align:right;white-space:nowrap;">
-            <button class="btn2 btn-sm" onclick="openInteractiveViewer('${r.id}', '${escapeHtml(serverReportPath)}', 'server')" title="View directly on destination Bold Reports Server">
+            <button class="btn2 btn-sm" data-srv-action="viewer" data-report-id="${r.id}" title="View directly on destination Bold Reports Server">
               View on Server
             </button>
-            <button class="btn btn-sm" onclick="openInteractiveDesigner('${r.id}', '${escapeHtml(serverReportPath)}', 'server')" style="margin-left:6px;" title="Edit directly on destination Bold Reports Server">
+            <button class="btn btn-sm" data-srv-action="designer" data-report-id="${r.id}" style="margin-left:6px;" title="Edit directly on destination Bold Reports Server">
               Edit on Server
             </button>
           </td>
@@ -2030,6 +2153,46 @@ async function loadServerUploadedReports() {
   }
 }
 
+async function openRdlDiffModal(reportId) {
+  if (!currentRun || !reportId) return;
+  selectedValidationReportId = reportId;
+  const modal = document.getElementById("modal-rdl-diff");
+  const titleEl = document.getElementById("rdl-diff-title");
+  const bucketEl = document.getElementById("rdl-diff-bucket");
+  const origEl = document.getElementById("rdl-code-original");
+  const xfrmEl = document.getElementById("rdl-code-transformed");
+
+  const rep = validationSummaryCache?.reports?.find(x => x.reportId === reportId)
+    || (reportsCache || []).find(x => x.id === reportId);
+  if (titleEl) titleEl.innerText = `RDL Source vs Transformed — ${rep?.name || reportId}`;
+  if (origEl) origEl.innerText = "Loading RDL...";
+  if (xfrmEl) xfrmEl.innerText = "Loading RDL...";
+  if (modal) modal.style.display = "flex";
+
+  await loadReportRdlDiff({ id: reportId, bucket: rep?.bucket });
+  if (bucketEl && rdlCache[reportId]?.bucket) {
+    bucketEl.innerText = rdlCache[reportId].bucket;
+    bucketEl.className = rdlCache[reportId].bucket === "NeedsReview" ? "pill warn" : "pill ok";
+  }
+}
+
+function closeRdlDiffModal() {
+  const modal = document.getElementById("modal-rdl-diff");
+  if (modal) modal.style.display = "none";
+}
+
+async function bulkApproveQueue() {
+  if (!currentRun) return;
+  try {
+    const res = await Api.bulkApprove(currentRun.id);
+    showToast(`Bulk-approved ${res?.approved ?? 0} report(s) meeting accuracy threshold.`);
+    await loadValidationSummary(true);
+    await refreshLibraryState();
+  } catch (err) {
+    showToast("Bulk approve failed: " + err.message);
+  }
+}
+
 async function loadReportRdlDiff(report) {
   if (!currentRun || !report) return;
 
@@ -2038,9 +2201,8 @@ async function loadReportRdlDiff(report) {
 
   try {
     const data = await Api.getReportRdl(currentRun.id, report.id);
+    rdlCache[report.id] = data;
 
-    // Never substitute invented XML for a definition the server did not return —
-    // a fake diff would hide a real transformation problem.
     if (origEl) {
       origEl.innerText = data.originalRdl
         || "The source RDL for this report is not available in staging. Re-run Step 1: Connect & Discover to stage it.";
@@ -2059,6 +2221,8 @@ async function approveReportValidation() {
   if (!currentRun || !selectedValidationReportId) return;
   await Api.approveReport(currentRun.id, selectedValidationReportId, "Approved via Validation viewer");
   showToast("Report validation approved.");
+  closeRdlDiffModal();
+  await loadValidationSummary(true);
   await refreshLibraryState();
 }
 
@@ -2066,6 +2230,8 @@ async function flagReportReview() {
   if (!currentRun || !selectedValidationReportId) return;
   await Api.flagReport(currentRun.id, selectedValidationReportId, "Flagged for Report Designer inspection");
   showToast("Report flagged for Report Designer review.");
+  closeRdlDiffModal();
+  await loadValidationSummary(true);
   await refreshLibraryState();
 }
 
@@ -2113,13 +2279,44 @@ async function refreshCutoverState() {
       banner.style.display = gatesRes && gatesRes.ready ? "none" : "block";
     }
 
-    const btnCutover = document.getElementById("btn-confirm-cutover");
-    if (btnCutover) {
-      btnCutover.disabled = !(gatesRes && gatesRes.ready);
-      btnCutover.style.opacity = gatesRes && gatesRes.ready ? "1" : "0.55";
-      btnCutover.title = gatesRes && gatesRes.ready ? "Confirm production cutover" : "Upload reports in Step 5 before cutover";
+    const ready = !!(gatesRes && gatesRes.ready);
+    document.querySelectorAll(".confirm-cutover-btn").forEach(btn => {
+      btn.disabled = !ready;
+      btn.style.opacity = ready ? "1" : "0.55";
+      btn.title = ready ? "Confirm production cutover" : "Upload and validate all selected reports before cutover";
+    });
+
+    const shimGate = (gatesRes?.gates || []).find(g => g.name === "URL compatibility shim configured");
+    const shimToggle = document.getElementById("setting-shim-enabled");
+    if (shimToggle && shimGate) {
+      shimToggle.checked = !!shimGate.passed;
     }
   } catch { }
+}
+
+async function toggleCutoverShim(enabled) {
+  try {
+    const current = await Api.getSettings();
+    current["UrlShim.Enabled"] = !!enabled;
+    await Api.updateSettings(current);
+    showToast(`URL Compatibility Shim ${enabled ? "enabled" : "disabled"}.`);
+    await refreshCutoverState();
+  } catch (err) {
+    showToast("Failed updating shim setting: " + err.message);
+  }
+}
+
+async function runDeltaSyncAction() {
+  if (!currentRun) return;
+  showToast("Running incremental delta sync against SSRS...");
+  try {
+    const res = await Api.deltaSync(currentRun.id);
+    showToast(`Delta sync finished. Modified: ${res?.modifiedCount ?? 0}, Added: ${res?.addedCount ?? 0}.`);
+    await refreshLibraryState();
+    await refreshCutoverState();
+  } catch (err) {
+    showToast("Delta sync failed: " + err.message);
+  }
 }
 
 async function handleConfirmCutover() {
@@ -2296,14 +2493,35 @@ async function loadSettingsView() {
     };
     // MigrationSettings serializes with dotted names (see JsonPropertyName attributes).
     set("setting-data-threshold", s["Validation.DataAccuracyThreshold"]);
-    set("setting-vis-threshold", s["Validation.VisualSimilarityThreshold"]);
-    set("setting-pixel-tolerance", s["Validation.PixelTolerance"]);
     set("setting-extract-parallel", s["Extraction.MaxParallel"]);
     set("setting-upload-parallel", s["Upload.MaxParallel"]);
     set("setting-row-limit", s["Validation.SampleRowLimit"]);
+    set("setting-shim-path", s["UrlShim.ListenPath"] || "/ReportServer");
+    set("setting-preferred-api", s["Extraction.PreferredApi"] || "Auto");
+
+    const delStaging = document.getElementById("setting-delete-staging");
+    if (delStaging && s["Staging.DeleteOnClose"] !== undefined) delStaging.checked = !!s["Staging.DeleteOnClose"];
+
+    const untrustedSql = document.getElementById("setting-allow-untrusted-sql");
+    if (untrustedSql && s["Preview.AllowUntrustedSqlCert"] !== undefined) untrustedSql.checked = !!s["Preview.AllowUntrustedSqlCert"];
 
     const shim = document.getElementById("setting-shim-enabled");
     if (shim && s["UrlShim.Enabled"] !== undefined) shim.checked = !!s["UrlShim.Enabled"];
+
+    const rulesTbody = document.getElementById("settings-rules-tbody");
+    if (rulesTbody) {
+      const rulesRes = await Api.getRules();
+      const rules = rulesRes?.rules || rulesRes?.Rules || [];
+      rulesTbody.innerHTML = rules.length > 0
+        ? rules.map(r => `
+            <tr>
+              <td><code>${escapeHtml(r.id || r.Id)}</code></td>
+              <td><span class="pill ${(r.severity || r.Severity) === "Blocked" ? "fail" : "warn"}">${escapeHtml(r.severity || r.Severity || "Info")}</span></td>
+              <td><code>${escapeHtml(r.match || r.Match || r.element || "")}</code></td>
+              <td style="font-size:12.5px;color:var(--br-text-secondary);">${escapeHtml(r.message || r.Message || "")}</td>
+            </tr>`).join("")
+        : `<tr><td colspan="4" style="color:var(--br-text-muted);padding:12px;">No compatibility rules found.</td></tr>`;
+    }
   } catch (err) {
     showToast("Could not load settings: " + err.message);
   }
@@ -2318,13 +2536,14 @@ async function saveSettings() {
 
   const payload = {
     "Validation.DataAccuracyThreshold": num("setting-data-threshold", 99.5),
-    "Validation.VisualSimilarityThreshold": num("setting-vis-threshold", 95.0),
-    "Validation.PixelTolerance": Math.round(num("setting-pixel-tolerance", 2)),
     "Validation.SampleRowLimit": Math.round(num("setting-row-limit", 10000)),
     "Extraction.MaxParallel": Math.round(num("setting-extract-parallel", 4)),
+    "Extraction.PreferredApi": document.getElementById("setting-preferred-api")?.value || "Auto",
     "Upload.MaxParallel": Math.round(num("setting-upload-parallel", 4)),
+    "Staging.DeleteOnClose": document.getElementById("setting-delete-staging")?.checked ?? true,
+    "Preview.AllowUntrustedSqlCert": document.getElementById("setting-allow-untrusted-sql")?.checked ?? false,
     "UrlShim.Enabled": document.getElementById("setting-shim-enabled")?.checked ?? false,
-    "UrlShim.ListenPath": "/ReportServer"
+    "UrlShim.ListenPath": (document.getElementById("setting-shim-path")?.value || "/ReportServer").trim() || "/ReportServer"
   };
 
   try {
@@ -2347,8 +2566,7 @@ async function handleLandingFileScan(event) {
   try {
     const formData = new FormData();
     formData.append("file", file);
-    const res = await fetch("/api/scanner/analyse", { method: "POST", body: formData });
-    const data = await res.json();
+    const data = await Api.scanFile(formData);
 
     let badgeClass = "pill ok";
     if (data.bucket === "NeedsReview") badgeClass = "pill warn";
