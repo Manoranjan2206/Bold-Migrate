@@ -55,10 +55,26 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 COPY --from=build /app/publish ./
 COPY data/compatibility-rules.json ./data/
 
+# Pre-install Playwright Chromium for headless Step 4 validation & run as non-root user
+ENV PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
+RUN if [ -x /app/.playwright/node/linux-x64/node ]; then \
+        /app/.playwright/node/linux-x64/node /app/.playwright/package/cli.js install chromium; \
+    elif [ -x /app/.playwright/node/linux-arm64/node ]; then \
+        /app/.playwright/node/linux-arm64/node /app/.playwright/package/cli.js install chromium; \
+    fi \
+    && groupadd -r boldmigrate \
+    && useradd -r -g boldmigrate -m -d /home/boldmigrate boldmigrate \
+    && mkdir -p /app/data /app/staging /app/logs /ms-playwright \
+    && chown -R boldmigrate:boldmigrate /app /ms-playwright
+
+USER boldmigrate
+
 # Environment settings
 ENV ASPNETCORE_URLS=http://+:8080
 ENV ASPNETCORE_ENVIRONMENT=Production
 ENV BoldMigrate__StagingRootPath=/app/staging
+ENV BoldMigrate__DatabasePath=/app/data/boldmigrate.db
+ENV BoldMigrate__LogsPath=/app/logs
 
 EXPOSE 8080
 

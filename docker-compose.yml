@@ -11,9 +11,12 @@ services:
       - ASPNETCORE_URLS=http://+:8080
       - ASPNETCORE_ENVIRONMENT=Production
       - BoldMigrate__StagingRootPath=/app/staging
+      - BoldMigrate__DatabasePath=/app/data/boldmigrate.db
+      - BoldMigrate__LogsPath=/app/logs
     volumes:
       - boldmigrate_data:/app/data
       - boldmigrate_staging:/app/staging
+      - boldmigrate_logs:/app/logs
     healthcheck:
       test: ["CMD-SHELL", "curl -f http://localhost:8080/health || exit 1"]
       interval: 15s
@@ -24,3 +27,4 @@ services:
 volumes:
   boldmigrate_data:
   boldmigrate_staging:
+  boldmigrate_logs:

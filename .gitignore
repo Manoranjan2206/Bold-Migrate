@@ -27,4 +27,13 @@
 .DS_Store
 Thumbs.db
 desktop.ini
-logs/ 
+logs/
+
+## Secrets & runtime state
+.env
+.env.*
+*.key
+*.pem
+*.vault
+settings.json
+_designer-cache/
