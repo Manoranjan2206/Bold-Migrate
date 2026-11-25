@@ -54,4 +54,17 @@ public class DataComparerTests
         Assert.Equal(1, result.DifferingCellsCount);
         Assert.Contains("Source='200' vs Dest='999'", result.DifferingCellSummary);
     }
+
+    [Fact]
+    public void CompareCsvData_QuotedCommasEscapedQuotesAndBom_ParsesRfc4180Correctly()
+    {
+        var src = "\uFEFFId,Company,Note\r\n1,\"Acme, Corp\",\"Quoted \"\"VIP\"\" account\"\r\n2,\"Line1\nLine2\",Simple\r\n";
+        var dst = "Id,Company,Note\n1,\"Acme, Corp\",\"Quoted \"\"VIP\"\" account\"\n2,\"Line1\nLine2\",Simple\n";
+
+        var result = DataComparer.CompareCsvData(src, dst);
+
+        Assert.Equal(100.0m, result.AccuracyPercentage);
+        Assert.True(result.RowCountMatched);
+        Assert.Equal(0, result.DifferingCellsCount);
+    }
 }
