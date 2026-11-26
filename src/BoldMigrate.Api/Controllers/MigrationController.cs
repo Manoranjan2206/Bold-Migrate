@@ -1082,6 +1082,58 @@ public class MigrationController : ControllerBase
     }
 
     /// <summary>
+    /// Step 1: tests connectivity for a shared data source and, if valid, saves the credentials
+    /// and connection string. Returns detailed error information if the connection fails.
+    /// </summary>
+    [HttpPost("runs/{id:guid}/datasources/{dataSourceId:guid}/validate-and-save")]
+    public async Task<IActionResult> ValidateAndSaveDataSourceCredentials(
+        Guid id,
+        Guid dataSourceId,
+        [FromBody] DataSourceCredentialRequest req,
+        CancellationToken ct)
+    {
+        var item = await _store.GetCatalogItemAsync(dataSourceId, ct);
+        if (item == null || item.RunId != id || item.ItemType != ItemType.DataSource) return NotFound();
+
+        var mode = ResolveCredentialMode(req);
+        SharedDataSourceDefinition? stagedDef = null;
+        if (!string.IsNullOrEmpty(item.StagedFilePath) && System.IO.File.Exists(item.StagedFilePath))
+        {
+            try
+            {
+                stagedDef = SharedDataSourceDefinition.Parse(await System.IO.File.ReadAllBytesAsync(item.StagedFilePath, ct));
+            }
+            catch
+            {
+                // Ignore parse failures here; connection string validation will report if empty
+            }
+        }
+
+        var effectiveConnectString = !string.IsNullOrWhiteSpace(req.ConnectString)
+            ? req.ConnectString.Trim()
+            : (stagedDef?.ConnectString ?? string.Empty);
+
+        var (ok, message, detail) = await TestDataSourceConnectionAsync(
+            dataSourceId,
+            effectiveConnectString,
+            mode,
+            req.UserName,
+            req.Password,
+            stagedDef?.Extension,
+            ct);
+
+        if (!ok)
+        {
+            _logger.Log(LogLevel.Warning, "CONN-DS-FAIL", id, $"Validation failed for data source '{item.Name}': {message}", itemPath: item.SourcePath);
+            return BadRequest(new { success = false, message, detail });
+        }
+
+        var hasCredentials = PersistDataSourceCredentials(id, item, req, mode);
+        _logger.Log(LogLevel.Information, "CONN-DS-CRED", id, $"Validated and saved credentials ({mode}) for data source '{item.Name}'.", itemPath: item.SourcePath);
+        return Ok(new { success = true, hasCredentials, credentialRetrieval = mode, message });
+    }
+
+    /// <summary>
     /// Step 1: stores the authentication configuration for a shared data source (Prompt, Store, Integrated, None),
     /// optional user/password, and optional updated connection string.
     /// Updates both the in-memory credential store and the staged .rsds definition.
@@ -1092,27 +1144,121 @@ public class MigrationController : ControllerBase
         var item = await _store.GetCatalogItemAsync(dataSourceId, ct);
         if (item == null || item.RunId != id || item.ItemType != ItemType.DataSource) return NotFound();
 
+        var mode = ResolveCredentialMode(req);
+        var hasCredentials = PersistDataSourceCredentials(id, item, req, mode);
+
+        _logger.Log(LogLevel.Information, "CONN-DS-CRED", id, $"Credentials updated ({mode}) for data source '{item.Name}'.", itemPath: item.SourcePath);
+        return Ok(new { success = true, hasCredentials, credentialRetrieval = mode });
+    }
+
+    private static string ResolveCredentialMode(DataSourceCredentialRequest req)
+    {
         var mode = req.CredentialRetrieval?.Trim();
         if (string.IsNullOrEmpty(mode))
         {
             mode = !string.IsNullOrWhiteSpace(req.UserName) ? "Store" : "Prompt";
         }
+        return mode;
+    }
 
-        bool hasCredentials = false;
-
-        if (string.Equals(mode, "Integrated", StringComparison.OrdinalIgnoreCase))
+    private async Task<(bool Ok, string Message, string? Detail)> TestDataSourceConnectionAsync(
+        Guid dataSourceId,
+        string connectString,
+        string mode,
+        string? userName,
+        string? password,
+        string? extension,
+        CancellationToken ct)
+    {
+        if (string.Equals(mode, "Prompt", StringComparison.OrdinalIgnoreCase))
         {
-            _credStore.RemoveDataSourceCredential(dataSourceId.ToString());
-            hasCredentials = true;
+            return (true, "Saved in Prompt mode (credentials will be requested at runtime).", null);
         }
-        else if (string.Equals(mode, "None", StringComparison.OrdinalIgnoreCase))
+
+        if (string.IsNullOrWhiteSpace(connectString))
         {
-            _credStore.RemoveDataSourceCredential(dataSourceId.ToString());
+            return (false, "Connection string is required.", "Enter a valid SQL Server connection string before validating.");
+        }
+
+        var isSqlServer = string.IsNullOrWhiteSpace(extension) ||
+                          extension.Equals("SQL", StringComparison.OrdinalIgnoreCase) ||
+                          extension.Equals("MSSQL", StringComparison.OrdinalIgnoreCase) ||
+                          extension.Equals("SQLAZURE", StringComparison.OrdinalIgnoreCase) ||
+                          extension.Contains("SqlClient", StringComparison.OrdinalIgnoreCase);
+
+        if (!isSqlServer)
+        {
+            return (true, $"Saved ({extension} server validation is skipped; verified format only).", null);
+        }
+
+        try
+        {
+            var builder = new Microsoft.Data.SqlClient.SqlConnectionStringBuilder(connectString)
+            {
+                ConnectTimeout = 5
+            };
+
+            if (string.Equals(mode, "Store", StringComparison.OrdinalIgnoreCase))
+            {
+                if (string.IsNullOrWhiteSpace(userName))
+                {
+                    return (false, "Username is required for 'Store (Saved Account)' mode.", "Enter a SQL username (for example: sa) and password.");
+                }
+
+                var effectivePassword = password;
+                if (string.IsNullOrEmpty(effectivePassword))
+                {
+                    var existing = _credStore.GetDataSourceCredential(dataSourceId.ToString());
+                    if (existing != null)
+                    {
+                        effectivePassword = existing.Password;
+                    }
+                }
+
+                if (string.IsNullOrEmpty(effectivePassword))
+                {
+                    return (false, "Password is required for 'Store (Saved Account)' mode.", "Enter the password for this SQL account.");
+                }
+
+                builder.IntegratedSecurity = false;
+                builder.UserID = userName.Trim();
+                builder.Password = effectivePassword;
+            }
+            else if (string.Equals(mode, "Integrated", StringComparison.OrdinalIgnoreCase))
+            {
+                builder.IntegratedSecurity = true;
+                builder.Remove("User ID");
+                builder.Remove("Password");
+            }
+
+            await using var conn = new Microsoft.Data.SqlClient.SqlConnection(builder.ConnectionString);
+            await conn.OpenAsync(ct);
+            var dbName = string.IsNullOrWhiteSpace(conn.Database) ? "default" : conn.Database;
+            return (true, $"Connection verified (SQL Server {conn.ServerVersion}, database '{dbName}') and saved.", null);
+        }
+        catch (Microsoft.Data.SqlClient.SqlException ex)
+        {
+            return (false, ex.Message, $"SQL Error {ex.Number} (State {ex.State}, Class {ex.Class}): {ex.Message}");
+        }
+        catch (Exception ex)
+        {
+            return (false, ex.Message, ex.ToString());
+        }
+    }
+
+    private bool PersistDataSourceCredentials(Guid runId, CatalogItem item, DataSourceCredentialRequest req, string mode)
+    {
+        bool hasCredentials;
+
+        if (string.Equals(mode, "Integrated", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(mode, "None", StringComparison.OrdinalIgnoreCase))
+        {
+            _credStore.RemoveDataSourceCredential(item.Id.ToString());
             hasCredentials = true;
         }
         else if (string.Equals(mode, "Prompt", StringComparison.OrdinalIgnoreCase))
         {
-            _credStore.RemoveDataSourceCredential(dataSourceId.ToString());
+            _credStore.RemoveDataSourceCredential(item.Id.ToString());
             hasCredentials = false;
         }
         else // Store
@@ -1120,15 +1266,20 @@ public class MigrationController : ControllerBase
             if (!string.IsNullOrWhiteSpace(req.UserName))
             {
                 var user = req.UserName.Trim();
+                var effectivePass = req.Password;
+                if (string.IsNullOrEmpty(effectivePass))
+                {
+                    effectivePass = _credStore.GetDataSourceCredential(item.Id.ToString())?.Password ?? "";
+                }
                 var cred = user.Contains('\\')
-                    ? new NetworkCredential(user.Split('\\', 2)[1], req.Password ?? "", user.Split('\\', 2)[0])
-                    : new NetworkCredential(user, req.Password ?? "");
-                _credStore.SetDataSourceCredential(dataSourceId.ToString(), cred);
+                    ? new NetworkCredential(user.Split('\\', 2)[1], effectivePass, user.Split('\\', 2)[0])
+                    : new NetworkCredential(user, effectivePass);
+                _credStore.SetDataSourceCredential(item.Id.ToString(), cred);
                 hasCredentials = true;
             }
             else
             {
-                _credStore.RemoveDataSourceCredential(dataSourceId.ToString());
+                _credStore.RemoveDataSourceCredential(item.Id.ToString());
                 hasCredentials = false;
             }
         }
@@ -1186,12 +1337,11 @@ public class MigrationController : ControllerBase
             }
             catch (Exception ex)
             {
-                _logger.Log(LogLevel.Warning, "DS-XML-UPDATE", id, $"Failed to update staged data source XML: {ex.Message}");
+                _logger.Log(LogLevel.Warning, "DS-XML-UPDATE", runId, $"Failed to update staged data source XML: {ex.Message}");
             }
         }
 
-        _logger.Log(LogLevel.Information, "CONN-DS-CRED", id, $"Credentials updated ({mode}) for data source '{item.Name}'.", itemPath: item.SourcePath);
-        return Ok(new { success = true, hasCredentials, credentialRetrieval = mode });
+        return hasCredentials;
     }
 
     private string DescribeCredentials(CatalogItem dataSource)

@@ -24,11 +24,13 @@ document.addEventListener("DOMContentLoaded", async () => {
 
 async function initApp() {
   try {
-    // Load or create active migration run
-    currentRun = await Api.getActiveRun();
-    if (!currentRun) {
-      currentRun = await Api.createOrGetRun("SSRS Live Migration", "http://localhost:8081/ReportServer");
+    // Always start fresh on page refresh or app restart: retire any leftover active run
+    // so stale discovered counts from a previous session never appear before connecting.
+    const existingRun = await Api.getActiveRun();
+    if (existingRun) {
+      await Api.abandonRun(existingRun.id);
     }
+    currentRun = await Api.createOrGetRun("SSRS Live Migration", "http://localhost:8081/ReportServer");
 
     // Load Expression samples
     expressionSamples = await Api.getExpressionSamples();
@@ -183,9 +185,11 @@ async function refreshConnectionsState() {
     hydrateConnectionFields();
 
     const poll = await Api.pollState(currentRun.id);
+    const banner = document.getElementById("discovery-status-banner");
+    const nextBtn = document.getElementById("btn-step1-next");
     if (poll && poll.itemsTotal > 0) {
-      const banner = document.getElementById("discovery-status-banner");
       if (banner) banner.style.display = "flex";
+      if (nextBtn) nextBtn.style.display = "inline-flex";
 
       const titleEl = document.getElementById("discovery-banner-title");
       if (titleEl) titleEl.innerText = `Active Estate Discovered (${poll.itemsTotal} items)`;
@@ -198,6 +202,9 @@ async function refreshConnectionsState() {
           + `${plural(poll.datasetsCount, "dataset", "datasets")} across `
           + `${plural(poll.foldersCount, "folder", "folders")}.`;
       }
+    } else {
+      if (banner) banner.style.display = "none";
+      if (nextBtn) nextBtn.style.display = "none";
     }
 
     // Load real data sources into credentials vault
@@ -314,7 +321,7 @@ function renderDataSourcesTable() {
         <span class="pill ${isIntegrated || ds.hasCredentials || isNone ? "ok" : ""}" id="ds-status-${ds.id}">
           ${isIntegrated ? "Windows Auth" : (ds.hasCredentials ? "Stored" : (isNone ? "None" : "Prompt"))}
         </span>
-        <button class="btn2 btn-sm" style="margin-left:6px;" onclick="saveDataSourceCredentials('${ds.id}')">Save</button>
+        <button class="btn2 btn-sm" id="ds-btn-${ds.id}" style="margin-left:6px;" onclick="saveDataSourceCredentials('${ds.id}')">Validate &amp; Save</button>
       </td>
     </tr>
   `}).join("");
@@ -348,6 +355,34 @@ function replaceLocalhostWithDocker(dsId) {
   }
 }
 
+function showDataSourceError(dsName, message, detail) {
+  const box = document.getElementById("conn-ds-error-box");
+  const titleEl = document.getElementById("conn-ds-error-title");
+  const msgEl = document.getElementById("conn-ds-error-msg");
+  const wrapEl = document.getElementById("conn-ds-error-details-wrap");
+  const detailEl = document.getElementById("conn-ds-error-detail");
+  if (!box) return;
+
+  if (titleEl) titleEl.innerText = `Connection failed for '${dsName || "Data Source"}'`;
+  if (msgEl) msgEl.innerText = message || "Could not connect to the data source server.";
+  if (wrapEl && detailEl) {
+    if (detail && detail.trim()) {
+      detailEl.innerText = detail;
+      wrapEl.style.display = "block";
+    } else {
+      detailEl.innerText = "";
+      wrapEl.style.display = "none";
+    }
+  }
+  box.style.display = "block";
+  box.scrollIntoView({ behavior: "smooth", block: "nearest" });
+}
+
+function hideDataSourceError() {
+  const box = document.getElementById("conn-ds-error-box");
+  if (box) box.style.display = "none";
+}
+
 async function saveDataSourceCredentials(dsId) {
   if (!currentRun) return;
   const mode = document.getElementById(`ds-mode-${dsId}`)?.value || "Prompt";
@@ -355,10 +390,31 @@ async function saveDataSourceCredentials(dsId) {
   const pass = document.getElementById(`ds-pass-${dsId}`)?.value || "";
   const connectString = document.getElementById(`ds-conn-${dsId}`)?.value.trim() || "";
   const pill = document.getElementById(`ds-status-${dsId}`);
+  const btn = document.getElementById(`ds-btn-${dsId}`);
   const ds = dataSourcesCache.find(d => d.id === dsId);
 
+  hideDataSourceError();
+  if (pill) {
+    pill.className = "pill run";
+    pill.innerText = "Validating...";
+  }
+  if (btn) {
+    btn.disabled = true;
+    btn.innerText = "Validating...";
+  }
+
   try {
-    const res = await Api.setDataSourceCredentials(currentRun.id, dsId, user, pass, mode, connectString);
+    const res = await Api.validateAndSaveDataSourceCredentials(currentRun.id, dsId, user, pass, mode, connectString);
+    if (!res || !res.success) {
+      if (pill) {
+        pill.className = "pill fail";
+        pill.innerText = "Failed";
+      }
+      showDataSourceError(ds?.name || "Data Source", res?.message, res?.detail);
+      showToast(`Validation failed: ${res?.message || "Connection error"}`);
+      return;
+    }
+
     if (ds) {
       ds.credentialRetrieval = mode;
       if (connectString) ds.connectString = connectString;
@@ -373,11 +429,21 @@ async function saveDataSourceCredentials(dsId) {
     if (pill) {
       const isOk = mode === "Integrated" || res.hasCredentials || mode === "None";
       pill.className = isOk ? "pill ok" : "pill";
-      pill.innerText = mode === "Integrated" ? "Windows Auth" : (res.hasCredentials ? "Stored" : (mode === "None" ? "None" : "Prompt"));
+      pill.innerText = mode === "Integrated" ? "Windows Auth" : (res.hasCredentials ? "Verified" : (mode === "None" ? "None" : "Prompt"));
     }
-    showToast(`Data source settings updated (${mode}).`);
+    showToast(res.message || `Data source verified and saved (${mode}).`);
   } catch (err) {
-    showToast(`Failed to save: ${err.message}`, true);
+    if (pill) {
+      pill.className = "pill fail";
+      pill.innerText = "Failed";
+    }
+    showDataSourceError(ds?.name || "Data Source", err.message, "");
+    showToast(`Failed to validate: ${err.message}`);
+  } finally {
+    if (btn) {
+      btn.disabled = false;
+      btn.innerText = "Validate & Save";
+    }
   }
 }
 
@@ -454,17 +520,112 @@ async function testDestConnection() {
   }
 }
 
+function confirmRescanModal(poll) {
+  const modal = document.getElementById("modal-confirm-rescan");
+  const msgEl = document.getElementById("rescan-modal-msg");
+  const btnConfirm = document.getElementById("btn-rescan-confirm");
+  const btnCancel = document.getElementById("btn-rescan-cancel");
+  const btnClose = document.getElementById("btn-rescan-close");
+
+  if (!modal || !btnConfirm || !btnCancel) {
+    return Promise.resolve(
+      confirm("We already fetched the SSRS catalog. If you fetch again, you may lose modified reports, approvals, or validation results. Please confirm — do you want to rerun?")
+    );
+  }
+
+  if (msgEl && poll) {
+    msgEl.innerText = `We already fetched the SSRS catalog (${poll.itemsTotal} items, ${poll.reportsTotal} reports). `
+      + "If you fetch again, you may lose modified reports, approvals, validation results, or selections. "
+      + "Please confirm — do you want to rerun?";
+  }
+
+  modal.style.display = "flex";
+
+  return new Promise(resolve => {
+    const cleanup = (result) => {
+      modal.style.display = "none";
+      btnConfirm.removeEventListener("click", onConfirm);
+      btnCancel.removeEventListener("click", onCancel);
+      if (btnClose) btnClose.removeEventListener("click", onCancel);
+      modal.removeEventListener("click", onOverlay);
+      document.removeEventListener("keydown", onKey);
+      resolve(result);
+    };
+    const onConfirm = () => cleanup(true);
+    const onCancel = () => cleanup(false);
+    const onOverlay = (e) => { if (e.target === modal) cleanup(false); };
+    const onKey = (e) => { if (e.key === "Escape") cleanup(false); };
+
+    btnConfirm.addEventListener("click", onConfirm);
+    btnCancel.addEventListener("click", onCancel);
+    if (btnClose) btnClose.addEventListener("click", onCancel);
+    modal.addEventListener("click", onOverlay);
+    document.addEventListener("keydown", onKey);
+  });
+}
+
+function resetLocalRunState() {
+  reportsCache = [];
+  selectedReportIds = new Set();
+  rdlCache = {};
+  dataSourcesCache = [];
+  selectedValidationReportId = null;
+  latestValidation = null;
+}
+
+async function applyFormConnectionsToCurrentRun() {
+  const ssrsUrl = (document.getElementById("conn-ssrs-url")?.value || "").trim();
+  const ssrsMode = document.getElementById("conn-ssrs-auth")?.value || "Integrated";
+  const ssrsUser = ssrsMode !== "Integrated" ? (document.getElementById("conn-ssrs-user")?.value || "") : "";
+  const ssrsPass = ssrsMode !== "Integrated" ? (document.getElementById("conn-ssrs-pass")?.value || "") : "";
+
+  const ssrsRes = await Api.testConnection(currentRun.id, ssrsUrl, ssrsUser, ssrsPass, ssrsMode);
+  if (!ssrsRes || !ssrsRes.success) {
+    throw new Error(ssrsRes?.message || "Could not connect to SSRS server.");
+  }
+
+  // Re-apply destination connection if the user already filled it in
+  const destUrl = (document.getElementById("conn-dest-url")?.value || "").trim();
+  const destMode = document.getElementById("conn-dest-auth-mode")?.value || "credentials";
+  const destEmail = (document.getElementById("conn-dest-email")?.value || "").trim();
+  const destPass = document.getElementById("conn-dest-pass")?.value || "";
+  const destToken = (document.getElementById("conn-dest-token")?.value || "").trim();
+  if (destUrl && ((destMode === "credentials" && destEmail && destPass) || (destMode === "token" && destToken))) {
+    await Api.testDestinationConnection(
+      currentRun.id,
+      destUrl,
+      destMode === "credentials" ? destEmail : null,
+      destMode === "credentials" ? destPass : null,
+      destMode === "token" ? destToken : null
+    );
+  }
+}
+
 async function saveAndDiscoverCatalog(forceRescan = false) {
   if (!currentRun) return;
   const btn = document.getElementById("btn-discover-primary");
-  if (btn) {
-    btn.disabled = true;
-    btn.innerText = "Discovering SSRS Catalog...";
-  }
-
-  showToast("Scanning SSRS catalog: folders, data sources, datasets, and reports...");
 
   try {
+    const existingPoll = await Api.pollState(currentRun.id);
+    if (existingPoll && existingPoll.itemsTotal > 0) {
+      const confirmed = await confirmRescanModal(existingPoll);
+      if (!confirmed) return;
+
+      // Start a brand-new run so old items, edits, and validation results are discarded cleanly
+      const ssrsUrl = (document.getElementById("conn-ssrs-url")?.value || "").trim() || "http://localhost:8081/ReportServer";
+      await Api.abandonRun(currentRun.id);
+      currentRun = await Api.createOrGetRun("SSRS Live Migration", ssrsUrl);
+      resetLocalRunState();
+      await applyFormConnectionsToCurrentRun();
+    }
+
+    if (btn) {
+      btn.disabled = true;
+      btn.innerText = "Discovering SSRS Catalog...";
+    }
+
+    showToast("Scanning SSRS catalog: folders, data sources, datasets, and reports...");
+
     // 1. Trigger Fetch
     await Api.fetchEstate(currentRun.id);
 
@@ -482,12 +643,17 @@ async function saveAndDiscoverCatalog(forceRescan = false) {
     // 3. Trigger Assessment check
     await Api.checkEstate(currentRun.id);
 
-    showToast("Catalog discovery complete! Proceeding to Report Library...");
-
-    // 4. Refresh caches and transition to Step 2: Report Library
+    // 4. Refresh caches and stay on Step 1 so the user can enter discovered data source credentials
     await refreshConnectionsState();
     await refreshLibraryState();
-    switchTab("library");
+
+    if (dataSourcesCache && dataSourcesCache.length > 0) {
+      showToast("Catalog discovered! Enter data source credentials below, then continue to Report Library.");
+      const dsTable = document.getElementById("conn-datasources-table");
+      if (dsTable) dsTable.scrollIntoView({ behavior: "smooth", block: "center" });
+    } else {
+      showToast("Catalog discovery complete! Click 'View Report Library →' when ready.");
+    }
   } catch (err) {
     showToast("Discovery error: " + err.message);
   } finally {
@@ -2228,14 +2394,18 @@ function updateJourneyBadges(poll) {
   if (sideCount) sideCount.innerText = poll.reportsTotal || 0;
 
   const step1Sub = document.getElementById("side-step1-sub");
-  if (step1Sub && poll.itemsTotal > 0) {
-    step1Sub.innerText = `${poll.itemsTotal} items discovered`;
+  if (step1Sub) {
+    step1Sub.innerText = poll.itemsTotal > 0 ? `${poll.itemsTotal} items discovered` : "SSRS & Bold Reports";
   }
 
   const step3Sub = document.getElementById("side-step3-sub");
-  if (step3Sub && poll.reportsTotal > 0) {
-    const score = Math.round(((poll.reportsClean + poll.reportsAutoFixed) / poll.reportsTotal) * 100);
-    step3Sub.innerText = `Readiness: ${score}%`;
+  if (step3Sub) {
+    if (poll.reportsTotal > 0) {
+      const score = Math.round(((poll.reportsClean + poll.reportsAutoFixed) / poll.reportsTotal) * 100);
+      step3Sub.innerText = `Readiness: ${score}%`;
+    } else {
+      step3Sub.innerText = "Readiness & Blockers";
+    }
   }
 
   const step4Sub = document.getElementById("side-step4-sub");
