@@ -8,8 +8,8 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700&family=Geist+Mono:wght@400;500;600&display=swap">
-  <link rel="stylesheet" href="/css/tokens.css">
-  <link rel="stylesheet" href="/css/app.css">
+  <link rel="stylesheet" href="/css/tokens.css?v=2.8">
+  <link rel="stylesheet" href="/css/app.css?v=2.8">
   <!-- Bold Reports Designer Dependencies Styles -->
   <link href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.37.0/codemirror.min.css" rel="stylesheet" />
   <link href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.37.0/addon/hint/show-hint.min.css" rel="stylesheet" />
@@ -31,9 +31,8 @@
       </div>
       <span>
         <a href="#how-it-works">How it works</a>
-        <a href="/workflow-guide.html" target="_blank" style="color:var(--primary);font-weight:600;">📘 Workflow Guide</a>
+        <a href="/workflow-guide.html" target="_blank" style="color:var(--br-primary);font-weight:600;">📘 Workflow Guide</a>
         <a href="#scan-section">Scanner</a>
-        <a href="javascript:void(0)" onclick="showAppView('expression-tester')">Expression Tester</a>
         <a href="https://help.boldreports.com" target="_blank">Docs</a>
       </span>
       <button class="btn" onclick="showAppView('connections')">Launch Migration Console</button>
@@ -46,7 +45,6 @@
         <div style="display:flex;gap:12px;flex-wrap:wrap;">
           <button class="btn" onclick="showAppView('connections')">Start Live Migration Journey</button>
           <button class="btn2" onclick="showAppView('local-folder')">Local Folder Import</button>
-          <button class="btn2" onclick="showAppView('expression-tester')">AI Expression Tester</button>
         </div>
       </div>
       <div class="card" style="box-shadow: 0 10px 25px rgba(0,0,0,0.06); padding: 24px;">
@@ -85,7 +83,7 @@
     <!-- How It Works Section -->
     <section class="land-sec" id="how-it-works" style="background:var(--br-background);">
       <h2>The Migration Journey</h2>
-      <div class="tiles" style="grid-template-columns: repeat(4, 1fr); margin-top:20px;">
+      <div class="tiles" style="margin-top:20px;">
         <div class="card">
           <div class="num">1</div>
           <b>Connect & Discover</b>
@@ -142,122 +140,137 @@
   <div id="app-shell" class="app-shell">
 
     <!-- Left Sidebar: Migration Journey Navigation -->
-    <aside class="side">
-      <div class="side-logo" onclick="showLandingView()">
-        <div class="side-logo-icon">BM</div>
-        <span>Bold Migrate</span>
-        <span class="side-logo-badge">Enterprise</span>
+    <aside class="side" id="app-sidebar" aria-label="Migration navigation">
+      <div class="side-header">
+        <div class="side-logo" onclick="showLandingView()" title="Bold Migrate Home">
+          <div class="side-logo-icon">BM</div>
+          <span class="side-logo-text">Bold Migrate</span>
+          <span class="side-logo-badge">Enterprise</span>
+        </div>
+        <button type="button" id="btn-toggle-sidebar" class="side-toggle-btn" onclick="toggleSidebar()" aria-controls="app-sidebar" aria-expanded="true" aria-label="Collapse sidebar" title="Collapse sidebar">
+          <svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M10.5 3.5L6 8l4.5 4.5" />
+          </svg>
+        </button>
       </div>
 
       <div class="side-section-label">MIGRATION JOURNEY</div>
-      <nav class="side-nav">
+      <nav class="side-nav" aria-label="Migration steps">
         <!-- Step 1: Connect & Discover -->
-        <div class="step on" id="nav-connections" onclick="switchTab('connections')">
+        <button type="button" class="step on" id="nav-connections" onclick="switchTab('connections')" title="1. Connect &amp; Discover — SSRS &amp; Bold Reports">
           <b>1</b>
           <div class="step-text">
             <span class="step-title">Connect & Discover</span>
             <small class="step-sub" id="side-step1-sub">SSRS & Bold Reports</small>
           </div>
-        </div>
+        </button>
 
         <!-- Step 2: Report Library -->
-        <div class="step" id="nav-library" onclick="switchTab('library')">
+        <button type="button" class="step" id="nav-library" onclick="switchTab('library')" title="2. Report Library — Discovered items">
           <b>2</b>
           <div class="step-text">
             <span class="step-title">Report Library</span>
             <small class="step-sub" id="side-step2-sub">Discovered items (<span id="side-count-reports">0</span>)</small>
           </div>
-        </div>
+        </button>
 
         <!-- Step 3: Assessment Dashboard -->
-        <div class="step" id="nav-dashboard" onclick="switchTab('dashboard')">
+        <button type="button" class="step" id="nav-dashboard" onclick="switchTab('dashboard')" title="3. Assessment — Readiness &amp; Blockers">
           <b>3</b>
           <div class="step-text">
             <span class="step-title">Assessment</span>
             <small class="step-sub" id="side-step3-sub">Readiness & Blockers</small>
           </div>
-        </div>
+        </button>
 
         <!-- Step 4: Validation & Preview -->
-        <div class="step" id="nav-validation" onclick="switchTab('validation')">
+        <button type="button" class="step" id="nav-validation" onclick="switchTab('validation')" title="4. Validation &amp; Preview — Side-by-side &amp; edit">
           <b>4</b>
           <div class="step-text">
             <span class="step-title">Validation & Preview</span>
             <small class="step-sub" id="side-step4-sub">Side-by-side & edit</small>
           </div>
-        </div>
+        </button>
 
         <!-- Step 5: Migration Pipeline -->
-        <div class="step" id="nav-migration" onclick="switchTab('migration')">
+        <button type="button" class="step" id="nav-migration" onclick="switchTab('migration')" title="5. Migration Pipeline — 4-stage batch upload">
           <b>5</b>
           <div class="step-text">
             <span class="step-title">Migration Pipeline</span>
             <small class="step-sub" id="side-step5-sub">4-stage batch upload</small>
           </div>
-        </div>
+        </button>
 
         <!-- Step 6: Cutover & Audit -->
-        <div class="step" id="nav-cutover" onclick="switchTab('cutover')">
+        <button type="button" class="step" id="nav-cutover" onclick="switchTab('cutover')" title="6. Cutover &amp; Audit — Pre-flight &amp; Shim">
           <b>6</b>
           <div class="step-text">
             <span class="step-title">Cutover & Audit</span>
             <small class="step-sub" id="side-step6-sub">Pre-flight & Shim</small>
           </div>
-        </div>
+        </button>
       </nav>
 
       <div class="side-section-label">STANDALONE TOOLS</div>
-      <nav class="side-nav">
-        <div class="step" id="nav-local-folder" onclick="switchTab('local-folder')">
+      <nav class="side-nav" aria-label="Standalone tools">
+        <button type="button" class="step" id="nav-local-folder" onclick="switchTab('local-folder')" title="Local Folder Import — Recursive RDL / RSDS">
           <b>F</b>
           <div class="step-text">
             <span class="step-title">Local Folder Import</span>
             <small class="step-sub">Recursive RDL / RSDS</small>
           </div>
-        </div>
-        <div class="step" id="nav-expression-tester" onclick="switchTab('expression-tester')">
-          <b>E</b>
-          <div class="step-text">
-            <span class="step-title">AI Expression Tester</span>
-            <small class="step-sub">Formula compatibility</small>
-          </div>
-        </div>
-        <div class="step" id="nav-bold-delete" onclick="switchTab('bold-delete')">
+        </button>
+        <button type="button" class="step" id="nav-bold-delete" onclick="switchTab('bold-delete')" title="Bulk Delete Reports — Clean up Bold Reports">
           <b>D</b>
           <div class="step-text">
             <span class="step-title">Bulk Delete Reports</span>
             <small class="step-sub">Clean up Bold Reports</small>
           </div>
-        </div>
-        <div class="step" id="nav-settings" onclick="switchTab('settings')">
+        </button>
+        <button type="button" class="step" id="nav-settings" onclick="switchTab('settings')" title="Settings &amp; Rules — Thresholds &amp; options">
           <b>S</b>
           <div class="step-text">
             <span class="step-title">Settings & Rules</span>
             <small class="step-sub">Thresholds & options</small>
           </div>
-        </div>
+        </button>
       </nav>
 
       <div class="side-footer">
-        <div class="side-status-item">
-          <span class="status-dot" id="side-ssrs-dot"></span>
-          <span>SSRS: <strong id="side-ssrs-text">Not connected</strong></span>
-        </div>
-        <div class="side-status-item">
-          <span class="status-dot" id="side-dest-dot"></span>
-          <span>Bold Reports: <strong id="side-dest-text">Not connected</strong></span>
-        </div>
-        <button class="btn2 btn-sm" style="margin-top:6px;width:100%;font-size:12px;" onclick="showLandingView()">
-          Landing Overview
+        <button type="button" id="btn-fresh-run" class="btn2 btn-sm side-fresh-btn" onclick="startFreshRun()" title="New Migration Run">
+          <span aria-hidden="true">↻</span>
+          <span class="side-fresh-label">New Migration Run</span>
         </button>
-        <a href="/workflow-guide.html" target="_blank" class="btn2 btn-sm" style="margin-top:6px;width:100%;font-size:12px;display:flex;align-items:center;justify-content:center;text-decoration:none;gap:4px;">
-          📘 Workflow &amp; Features Guide
-        </a>
+        <div class="side-status-item" id="side-ssrs-status-item" title="SSRS: Not connected">
+          <span class="status-dot" id="side-ssrs-dot"></span>
+          <span class="side-status-text">SSRS: <strong id="side-ssrs-text">Not connected</strong></span>
+        </div>
+        <div class="side-status-item" id="side-dest-status-item" title="Bold Reports: Not connected">
+          <span class="status-dot" id="side-dest-dot"></span>
+          <span class="side-status-text">Bold Reports: <strong id="side-dest-text">Not connected</strong></span>
+        </div>
       </div>
     </aside>
 
     <!-- Main Content Area -->
     <main class="main" id="main-viewport">
+
+      <!-- Global Live Process / Progress Indicator -->
+      <div id="global-activity-bar" class="bm-activity-bar" style="display:none;" role="status" aria-live="polite">
+        <div class="bm-activity-inner">
+          <div class="bm-activity-left">
+            <div class="bm-activity-spinner" aria-hidden="true"></div>
+            <div style="min-width:0;">
+              <div class="bm-activity-title" id="global-activity-title">Processing...</div>
+              <div class="bm-activity-detail" id="global-activity-detail">Working on request</div>
+            </div>
+          </div>
+          <span class="bm-activity-pct" id="global-activity-pct"></span>
+        </div>
+        <div class="bm-activity-track">
+          <div class="bm-activity-fill is-indeterminate" id="global-activity-progress"></div>
+        </div>
+      </div>
 
       <!-- =====================================================================
            STEP 1: CONNECT & DISCOVER
@@ -297,7 +310,7 @@
             <h2>1. Source SSRS Server</h2>
             <label class="f">
               Report server URL
-              <input type="text" id="conn-ssrs-url" value="http://localhost:8081/ReportServer" placeholder="http://ssrs.example.com/ReportServer">
+              <input type="text" id="conn-ssrs-url" placeholder="https://ssrs.example.com/ReportServer">
             </label>
             <div class="row2">
               <label class="f">
@@ -332,7 +345,7 @@
               Using current Windows session identity (SSPI / NTLM). No username or password required.
             </div>
             <div style="display:flex;align-items:center;gap:12px;margin-top:12px;">
-              <button class="btn2 btn-sm" onclick="testSsrsConnection()">Test connection</button>
+              <button class="btn2 btn-sm" id="btn-test-ssrs" onclick="testSsrsConnection()">Test connection</button>
               <span class="pill" id="conn-ssrs-status-pill">Not connected</span>
             </div>
           </div>
@@ -342,7 +355,7 @@
             <h2>2. Destination Bold Reports Server</h2>
             <label class="f">
               Server URL
-              <input type="text" id="conn-dest-url" value="http://localhost:8090/reporting/site/site1" placeholder="http://reports.example.com">
+              <input type="text" id="conn-dest-url" placeholder="https://reports.example.com/reporting/site/site1">
             </label>
             <label class="f">
               Authentication Method
@@ -368,7 +381,7 @@
               </label>
             </div>
             <div style="display:flex;align-items:center;gap:12px;margin-top:12px;">
-              <button class="btn2 btn-sm" onclick="testDestConnection()">Test connection</button>
+              <button class="btn2 btn-sm" id="btn-test-dest" onclick="testDestConnection()">Test connection</button>
               <span class="pill" id="conn-dest-status-pill">Not connected</span>
             </div>
           </div>
@@ -376,23 +389,83 @@
 
         <!-- 3. Real Data Source Credentials Vault -->
         <div class="card" style="margin-top:4px;">
-          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;flex-wrap:wrap;gap:12px;">
             <div>
               <h2>3. Discovered Data Source Credentials</h2>
               <p class="sub">SSRS stores connection strings but never exposes stored passwords. Enter passwords for discovered data sources below.</p>
+              <label style="display:inline-flex;align-items:center;gap:8px;margin-top:8px;font-size:12.5px;color:var(--br-text-secondary);cursor:pointer;">
+                <input type="checkbox" id="conn-ds-trust-cert" onchange="onToggleTrustSqlCert(this.checked)">
+                <span>Trust self-signed / internal SQL Server TLS certificates (fixes SQL Error -2146893019)</span>
+              </label>
             </div>
             <div style="width:260px;">
               <label class="f" style="margin-bottom:0;">
                 Storage Mode
-                <select id="conn-storage-mode">
+                <select id="conn-storage-mode" onchange="onCredentialStorageModeChange(this.value)">
                   <option value="InMemory" selected>In memory only (session)</option>
-                  <option value="DPAPI">Encrypted file (DPAPI)</option>
-                  <option value="KeyVault">Azure Key Vault</option>
+                  <option value="DpapiLocal">Encrypted vault (DPAPI / AES)</option>
+                  <option value="ExternalVault" disabled>External KMS / Key Vault (Not configured)</option>
                 </select>
               </label>
             </div>
           </div>
 
+          <div style="margin-bottom:12px;">
+            <button type="button" class="btn2 btn-sm" id="btn-toggle-bulk-remap" onclick="toggleBulkRemapPanel()" aria-expanded="false">⇄ Bulk Host / Database Remapping</button>
+          </div>
+          <div id="bulk-remap-panel" class="note" style="display:none;margin-bottom:14px;">
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;flex-wrap:wrap;gap:8px;">
+              <strong style="font-size:13px;color:var(--br-text);">Bulk Host, Database &amp; Credential Remapping</strong>
+              <span style="font-size:11.5px;color:var(--br-text-muted);">Applies across all discovered shared data sources (.rsds)</span>
+            </div>
+            <div class="row2" style="margin-bottom:8px;">
+              <label class="f">
+                Find Server / Host
+                <input type="text" id="remap-find-server" placeholder="e.g. DEV-SQL01 (blank = replace any)">
+              </label>
+              <label class="f">
+                Replace Server / Host
+                <input type="text" id="remap-replace-server" placeholder="e.g. PROD-SQL01.corp.local">
+              </label>
+            </div>
+            <div class="row2" style="margin-bottom:8px;">
+              <label class="f">
+                Find Database
+                <input type="text" id="remap-find-db" placeholder="e.g. Sales_Staging (blank = replace any)">
+              </label>
+              <label class="f">
+                Replace Database
+                <input type="text" id="remap-replace-db" placeholder="e.g. Sales_Prod">
+              </label>
+            </div>
+            <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;margin-bottom:10px;">
+              <label class="f">
+                Bulk Auth Mode
+                <select id="remap-auth-mode">
+                  <option value="">Keep existing per row</option>
+                  <option value="Integrated">Integrated (Windows Login)</option>
+                  <option value="Store">Store (Saved Account)</option>
+                  <option value="Prompt">Prompt (At Runtime)</option>
+                  <option value="None">None (In Connection String)</option>
+                </select>
+              </label>
+              <label class="f">
+                Bulk Username (optional)
+                <input type="text" id="remap-username" placeholder="e.g. svc_reports">
+              </label>
+              <label class="f">
+                Bulk Password (optional)
+                <input type="password" id="remap-password" autocomplete="new-password" placeholder="••••••••">
+              </label>
+            </div>
+            <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
+              <button type="button" class="btn2 btn-sm" id="btn-preview-remap" onclick="runBulkRemap(true)">Preview Remap</button>
+              <button type="button" class="btn btn-sm" id="btn-apply-remap" onclick="runBulkRemap(false)">Apply Remap to Staged (.rsds)</button>
+            </div>
+            <div id="remap-preview-box" style="display:none;margin-top:10px;"></div>
+          </div>
+
+          <div class="table-scroll">
           <table>
             <thead>
               <tr>
@@ -413,12 +486,16 @@
               </tr>
             </tbody>
           </table>
+          </div>
 
           <div id="conn-ds-error-box" style="display:none;margin-top:12px;padding:12px 14px;border-radius:8px;border:1px solid var(--br-danger);background:rgba(220,38,38,0.06);">
             <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px;">
               <div style="flex:1;min-width:0;">
                 <strong id="conn-ds-error-title" style="color:var(--br-danger);font-size:13.5px;display:block;">Data Source Connection Failed</strong>
                 <p id="conn-ds-error-msg" style="margin:4px 0 0;font-size:13px;color:var(--br-text);"></p>
+                <div id="conn-ds-cert-fix-wrap" style="display:none;margin-top:10px;">
+                  <button type="button" class="btn btn-sm" id="btn-retry-trust-cert" onclick="trustSqlCertAndRetry()">Enable Trust Certificate & Retry Validation</button>
+                </div>
                 <details id="conn-ds-error-details-wrap" style="margin-top:8px;display:none;">
                   <summary style="cursor:pointer;font-size:12px;color:var(--br-text-muted);">View technical error details</summary>
                   <pre id="conn-ds-error-detail" style="margin:6px 0 0;padding:8px 10px;background:var(--br-surface);border:1px solid var(--br-border);border-radius:6px;font-size:11.5px;white-space:pre-wrap;word-break:break-word;color:var(--br-text-muted);"></pre>
@@ -436,7 +513,7 @@
             <span>Step 1 of 6: Connect & Discover Catalog</span>
           </div>
           <div style="display:flex;gap:10px;">
-            <button class="btn2" onclick="saveAndDiscoverCatalog()">Save & Discover Catalog</button>
+            <button class="btn2" id="btn-discover-footer" onclick="saveAndDiscoverCatalog()">Save & Discover Catalog</button>
             <button class="btn" id="btn-step1-next" style="display:none;" onclick="switchTab('library')">Continue to Report Library →</button>
           </div>
         </div>
@@ -464,7 +541,7 @@
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="margin-right:6px;vertical-align:-2px;"><path d="M3 6h18M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path><line x1="10" y1="11" x2="10" y2="17"></line><line x1="14" y1="11" x2="14" y2="17"></line></svg>
               Delete in Bold Reports...
             </button>
-            <button class="btn2" onclick="runAssessmentAndGoToDashboard()">Run Assessment</button>
+            <button class="btn2" id="btn-run-assessment" onclick="runAssessmentAndGoToDashboard()">Run Assessment</button>
             <button class="btn" id="btn-header-migrate" onclick="startMigrationWithSelected()"><span id="btn-header-migrate-text">Migrate Selected (0) →</span></button>
           </div>
         </div>
@@ -490,14 +567,14 @@
         </div>
 
         <!-- Filter Chips -->
-        <div class="chips" id="library-filter-chips">
-          <span class="chip active" data-filter="all" onclick="setLibraryFilter('all', this)">All (<span id="lib-count-all">0</span>)</span>
-          <span class="chip" data-filter="clean" onclick="setLibraryFilter('clean', this)">Compatible (<span id="lib-count-clean">0</span>)</span>
-          <span class="chip" data-filter="review" onclick="setLibraryFilter('review', this)">Needs Review (<span id="lib-count-review">0</span>)</span>
+        <div class="chips" id="library-filter-chips" role="group" aria-label="Filter reports by compatibility">
+          <button type="button" class="chip active" data-filter="all" onclick="setLibraryFilter('all', this)">All (<span id="lib-count-all">0</span>)</button>
+          <button type="button" class="chip" data-filter="clean" onclick="setLibraryFilter('clean', this)">Compatible (<span id="lib-count-clean">0</span>)</button>
+          <button type="button" class="chip" data-filter="review" onclick="setLibraryFilter('review', this)">Needs Review (<span id="lib-count-review">0</span>)</button>
         </div>
 
         <!-- Real Table -->
-        <div class="card" style="padding:0;overflow:hidden;">
+        <div class="card table-scroll" style="padding:0;">
           <table>
             <thead>
               <tr>
@@ -551,7 +628,7 @@
             <p class="sub">Automated static analysis of RDL schemas, expressions, datasources, and assemblies.</p>
           </div>
           <div style="display:flex;gap:10px;">
-            <button class="btn2" onclick="recheckEstate()">Re-run Assessment</button>
+            <button class="btn2" id="btn-recheck-estate" onclick="recheckEstate()">Re-run Assessment</button>
             <button class="btn" onclick="startMigrationWithSelected()"><span id="btn-dash-migrate-text">Proceed to Validation (0) →</span></button>
           </div>
         </div>
@@ -618,6 +695,20 @@
           </div>
         </div>
 
+        <!-- Dependency & Subreport Link Verification -->
+        <div class="card" style="margin-top:16px;">
+          <div style="display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:10px;">
+            <div>
+              <h2 style="margin:0 0 4px;">Subreport, Shared Dataset &amp; Data Source Link Verification</h2>
+              <p class="sub" style="margin:0;">Verifies every RDL reference against staged items and detects subreport cycles before upload.</p>
+            </div>
+            <button type="button" class="btn2 btn-sm" id="btn-verify-links" onclick="runDependencyVerification()">🔗 Verify All Links</button>
+          </div>
+          <div id="dep-verify-results" style="font-size:12.5px;color:var(--br-text-muted);">
+            Click "Verify All Links" to audit Subreport, Shared Dataset, and Shared Data Source references.
+          </div>
+        </div>
+
         <!-- Journey Navigation Footer -->
         <div class="journey-nav-bar">
           <button class="btn2" onclick="switchTab('library')">← Back to Report Library</button>
@@ -656,8 +747,12 @@
           </div>
         </div>
 
-        <!-- 4 Metric Tiles -->
+        <!-- 5 Metric Tiles -->
         <div class="tiles">
+          <div class="card tile">
+            <div class="n" id="val-stat-total">0</div>
+            <div class="l">Total Reports</div>
+          </div>
           <div class="card tile">
             <div class="n is-ok" id="val-stat-passed">0</div>
             <div class="l">Passed (Visual Snapshot OK)</div>
@@ -671,8 +766,8 @@
             <div class="l">Needs Manual Check (Params)</div>
           </div>
           <div class="card tile">
-            <div class="n is-warn" id="val-stat-failed">0</div>
-            <div class="l">Needs Review</div>
+            <div class="n is-err" id="val-stat-failed">0</div>
+            <div class="l">Render Errors</div>
           </div>
         </div>
 
@@ -684,10 +779,11 @@
             <button class="btn2 btn-sm" id="val-btn-filter-passed" onclick="filterValidationCards('passed')">Passed (<span id="val-pill-passed">0</span>)</button>
             <button class="btn2 btn-sm" id="val-btn-filter-offline" onclick="filterValidationCards('offline')">Data Source Offline (<span id="val-pill-offline">0</span>)</button>
             <button class="btn2 btn-sm" id="val-btn-filter-manual" onclick="filterValidationCards('manual')">Needs Params (<span id="val-pill-manual">0</span>)</button>
-            <button class="btn2 btn-sm" id="val-btn-filter-failed" onclick="filterValidationCards('failed')">Needs Review (<span id="val-pill-failed">0</span>)</button>
+            <button class="btn2 btn-sm" id="val-btn-filter-failed" onclick="filterValidationCards('failed')">Render Errors (<span id="val-pill-failed">0</span>)</button>
           </div>
           <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
             <input type="text" id="val-search-input" placeholder="Search report name or folder..." style="height:34px;width:220px;padding:0 12px;border:1px solid var(--br-border-strong);border-radius:6px;font-size:13px;" oninput="onValidationSearch(this.value)">
+            <button class="btn2 btn-sm" onclick="bulkApproveQueue()" title="Approve awaiting reports with >=99% accuracy">✓ Bulk Approve Queue</button>
             <div style="display:inline-flex;border:1px solid var(--br-border-strong);border-radius:6px;overflow:hidden;background:var(--br-surface);">
               <button class="btn2 btn-sm filter-active" id="val-view-details-btn" onclick="setValidationViewMode('details')" style="border:none;border-radius:0;border-right:1px solid var(--br-border);" title="Details Table View">☰ Details</button>
               <button class="btn2 btn-sm" id="val-view-cards-btn" onclick="setValidationViewMode('cards')" style="border:none;border-radius:0;" title="Visual Cards View">▦ Cards</button>
@@ -695,6 +791,19 @@
             <button class="btn2 btn-sm" onclick="loadValidationSummary(true)" title="Refresh validation results">↻ Refresh</button>
             <button class="btn2 btn-sm" onclick="resetValidationResults()" title="Clear cached validation results and screenshots">🗑 Reset</button>
           </div>
+        </div>
+
+        <!-- Active Validation Progress Banner -->
+        <div id="val-progress-banner" class="bm-stage-banner" style="display:none;">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">
+            <div style="display:flex;align-items:center;gap:8px;font-weight:700;font-size:13.5px;color:var(--br-primary);">
+              <span class="bm-spin"></span>
+              <span id="val-progress-title">Running automated Playwright render validation...</span>
+            </div>
+            <span id="val-progress-pct" style="font-weight:700;font-size:13px;color:var(--br-primary);">0%</span>
+          </div>
+          <div id="val-progress-detail" style="font-size:12.5px;color:var(--br-text-secondary);margin-bottom:6px;">Preparing browser workers...</div>
+          <div class="bar"><i id="val-progress-bar" style="width:0%;"></i></div>
         </div>
 
         <!-- Evidence Cards Grid -->
@@ -728,11 +837,12 @@
             <h1>Step 5: Batch Migration Pipeline</h1>
             <p class="sub">Batch extraction and upload to Bold Reports in strict dependency order.</p>
           </div>
-          <div style="display:flex;gap:10px;">
+          <div style="display:flex;gap:10px;flex-wrap:wrap;">
             <button class="btn2 btn-danger" onclick="openDeleteReportsModal('all')" title="Delete uploaded reports from Bold Reports destination">
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="margin-right:6px;vertical-align:-2px;"><path d="M3 6h18M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path><line x1="10" y1="11" x2="10" y2="17"></line><line x1="14" y1="11" x2="14" y2="17"></line></svg>
               Delete in Bold Reports...
             </button>
+            <button class="btn2" id="btn-retry-failed" onclick="retryFailedItems()">↻ Retry Failed</button>
             <button class="btn2" id="btn-pause-migration" onclick="togglePauseMigration()">Pause</button>
             <button class="btn" id="btn-start-migration-tab" onclick="startBatchUpload()">Start Upload Pipeline</button>
           </div>
@@ -745,6 +855,25 @@
             <span id="migration-progress-pct">0%</span>
           </div>
           <div class="bar"><i id="migration-progress-bar" style="width:0%;"></i></div>
+        </div>
+
+        <!-- Conflict Resolution Policy & Dry-Run Preview -->
+        <div class="card" style="margin-bottom:14px;">
+          <div style="display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;">
+            <div>
+              <h2 style="margin:0 0 4px;">Conflict Resolution &amp; Pre-Flight Dry Run</h2>
+              <p class="sub" style="margin:0;">Choose how existing items on Bold Reports are handled during upload.</p>
+            </div>
+            <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;">
+              <select id="upload-conflict-policy" aria-label="Conflict resolution policy" style="height:36px;border:1px solid var(--br-border-strong);border-radius:6px;padding:0 10px;">
+                <option value="Skip">Skip existing (Safe default)</option>
+                <option value="Overwrite">Overwrite existing (Update in place)</option>
+                <option value="Rename">Rename new items on conflict (_migrated)</option>
+              </select>
+              <button type="button" class="btn2 btn-sm" id="btn-upload-dryrun" onclick="runUploadDryRun()">🔍 Dry-Run Plan</button>
+            </div>
+          </div>
+          <div id="upload-dryrun-box" style="display:none;margin-top:12px;"></div>
         </div>
 
         <!-- Upload Order and Live Log -->
@@ -811,6 +940,7 @@
             </div>
             <button class="btn2 btn-sm" onclick="loadServerUploadedReports()">↻ Refresh Uploaded List</button>
           </div>
+          <div class="table-scroll">
           <table>
             <thead>
               <tr>
@@ -824,6 +954,7 @@
               <tr><td colspan="4" style="text-align:center;color:var(--br-text-muted);padding:16px;">Reports will appear here once uploaded in Step 5.</td></tr>
             </tbody>
           </table>
+          </div>
         </div>
 
         <!-- Journey Navigation Footer -->
@@ -832,7 +963,7 @@
           <div class="jnav-info">
             <span id="migration-footer-info">Nothing discovered yet.</span>
           </div>
-          <button class="btn" onclick="switchTab('validation')">Proceed to Validation & Diff →</button>
+          <button class="btn" onclick="switchTab('cutover')">Proceed to Step 6: Cutover & Audit →</button>
         </div>
       </section>
 
@@ -850,15 +981,16 @@
             <h1>Step 6: Production Cutover & Audit</h1>
             <p class="sub">Verify the pre-flight gates, activate URL redirection shim, and export compliance audit reports.</p>
           </div>
-          <div style="display:flex;gap:10px;">
+          <div style="display:flex;gap:10px;flex-wrap:wrap;">
+            <button class="btn2" id="btn-delta-sync" onclick="runDeltaSyncAction()">↻ Delta Sync</button>
             <button class="btn2" onclick="downloadReportPdf()">Download Audit PDF</button>
-            <button class="btn" onclick="handleConfirmCutover()">Confirm Production Cutover</button>
+            <button class="btn confirm-cutover-btn" onclick="handleConfirmCutover()">Confirm Production Cutover</button>
           </div>
         </div>
 
         <!-- 2 Column Grid -->
         <div class="grid">
-          <!-- Card 1: 7 Cutover Gates Checklist -->
+          <!-- Card 1: Cutover Gates Checklist -->
           <div class="card">
             <h2>Production Cutover Gates</h2>
             <p class="sub" style="margin-bottom:12px;">All enterprise gates must pass before SSRS can be decommissioned.</p>
@@ -871,7 +1003,7 @@
               <p style="font-size:12.5px;color:var(--br-danger-hover);margin:4px 0 8px;line-height:1.4;">
                 You cannot finalize production cutover because 0 reports have been uploaded to Bold Reports Server.
               </p>
-              <button class="btn btn-sm" onclick="switchTab('migration')">Go to Step 4: Upload Pipeline →</button>
+              <button class="btn btn-sm" onclick="switchTab('migration')">Go to Step 5: Upload Pipeline →</button>
             </div>
 
             <div id="cutover-gates-list" style="display:flex;flex-direction:column;gap:8px;">
@@ -885,7 +1017,7 @@
             <p class="sub" style="margin-bottom:12px;">Seamless client URL redirection without breaking bookmarks.</p>
 
             <label class="note" style="display:flex;align-items:center;gap:10px;font-size:13.5px;font-weight:600;cursor:pointer;">
-              <input type="checkbox" id="setting-shim-enabled" checked>
+              <input type="checkbox" id="setting-shim-enabled" onchange="toggleCutoverShim(this.checked)">
               <span>Enable URL Compatibility Shim (/ReportServer & /Reports redirect)</span>
             </label>
 
@@ -900,18 +1032,18 @@
             <div style="margin-top:20px;padding-top:14px;border-top:1px solid var(--br-border);">
               <span style="font-size:12px;color:var(--br-danger);font-weight:700;display:block;margin-bottom:4px;">FINAL PRODUCTION SWITCHOVER</span>
               <p class="sub" style="font-size:12.5px;margin-bottom:12px;">Marks SSRS as read-only, activates Bold Reports as primary, and creates signed audit event.</p>
-              <button class="btn" style="width:100%;" id="btn-confirm-cutover" onclick="handleConfirmCutover()">Confirm Production Cutover</button>
+              <button class="btn confirm-cutover-btn" style="width:100%;" id="btn-confirm-cutover" onclick="handleConfirmCutover()">Confirm Production Cutover</button>
             </div>
           </div>
         </div>
 
         <!-- Journey Navigation Footer -->
         <div class="journey-nav-bar">
-          <button class="btn2" onclick="switchTab('validation')">← Back to Validation</button>
+          <button class="btn2" onclick="switchTab('migration')">← Back to Upload Pipeline</button>
           <div class="jnav-info">
             <span id="cutover-footer-status">Checking cutover gates...</span>
           </div>
-          <button class="btn" onclick="handleConfirmCutover()">Confirm Production Cutover</button>
+          <button class="btn confirm-cutover-btn" onclick="handleConfirmCutover()">Confirm Production Cutover</button>
         </div>
       </section>
 
@@ -927,7 +1059,7 @@
           </div>
           <div style="display:flex;gap:10px;">
             <button class="btn2" onclick="prefillLocalFolderDemo()">Prefill sample paths</button>
-            <button class="btn" onclick="executeLocalFolderMigration()">Start Local Migration</button>
+            <button class="btn" id="btn-start-lf" onclick="executeLocalFolderMigration()">Start Local Migration</button>
           </div>
         </div>
 
@@ -961,7 +1093,7 @@
             </div>
             <label class="f">
               Fallback Shared DataSource Name
-              <input type="text" id="lf-target-ds" value="SalesDB" placeholder="SalesDB">
+              <input type="text" id="lf-target-ds" placeholder="Target DataSource name (optional)">
             </label>
             <label style="display:flex;align-items:center;gap:8px;font-size:13px;font-weight:600;margin-top:6px;cursor:pointer;">
               <input type="checkbox" id="lf-export-layout" checked>
@@ -974,12 +1106,12 @@
             <h2>2. Target Bold Reports Server</h2>
             <label class="f">
               Server URL
-              <input type="text" id="lf-server-url" value="http://localhost:8090/reporting/site/site1" placeholder="http://localhost:8090/reporting/site/site1">
+              <input type="text" id="lf-server-url" placeholder="https://reports.example.com/reporting/site/site1">
             </label>
             <div class="row2">
               <label class="f">
                 Tenant / Site ID
-                <input type="text" id="lf-tenant-id" value="site1" placeholder="site1">
+                <input type="text" id="lf-tenant-id" placeholder="e.g. site1">
               </label>
               <label class="f">
                 Auth Method
@@ -1022,7 +1154,7 @@
           <h2>Migration Execution Status</h2>
           <div id="lf-status-summary" style="margin-bottom:12px;font-weight:600;font-size:14px;color:var(--br-info-text);"></div>
 
-          <div class="tiles" style="grid-template-columns:repeat(3, 1fr);margin-bottom:14px;">
+          <div class="tiles" style="margin-bottom:14px;">
             <div class="card tile" style="padding:12px;">
               <div class="n" id="lf-rep-stat">0 / 0</div>
               <div class="l">Reports Uploaded</div>
@@ -1045,94 +1177,13 @@
 
 
       <!-- =====================================================================
-           TOOL 2: AI SSRS EXPRESSION TESTER
-           ===================================================================== -->
-      <section id="tab-expression-tester" class="tab-pane" style="display:none;">
-        <div class="main-header">
-          <div>
-            <h1>AI SSRS Expression Builder & Tester</h1>
-            <p class="sub">Analyze, validate, and test SSRS expressions against Bold Reports compatibility rules.</p>
-          </div>
-          <div style="display:flex;gap:10px;align-items:center;">
-            <select id="expr-sample-select" style="height:36px;border:1px solid var(--br-border-strong);border-radius:6px;padding:0 10px;" onchange="loadSelectedSample(this.value)">
-              <option value="">Load a sample expression...</option>
-              <option value="0">Conditional Formatting (IIf)</option>
-              <option value="1">Currency Formatting (Format)</option>
-              <option value="2">Cross-Dataset Lookup (Lookup)</option>
-              <option value="3">Scoped Aggregate (Sum)</option>
-              <option value="4">Nested Status (Switch)</option>
-              <option value="5">Custom Assembly (CodeModule)</option>
-            </select>
-            <button class="btn" onclick="evaluateExpression()">Evaluate & Check</button>
-          </div>
-        </div>
-
-        <div class="grid">
-          <!-- Left: Expression & Mock Inputs -->
-          <div class="card">
-            <h2>SSRS Expression</h2>
-            <label class="f">
-              Expression formula (starts with '=')
-              <textarea id="expr-input" style="height:100px;font-family:'JetBrains Mono',monospace;font-size:13px;" placeholder="=IIf(Fields!Sales.Value > 1000, &quot;High&quot;, &quot;Low&quot;)"></textarea>
-            </label>
-
-            <div class="row2">
-              <label class="f">
-                Mock Fields JSON (Fields!...Value)
-                <textarea id="expr-fields-json" style="height:90px;font-family:'JetBrains Mono',monospace;font-size:12px;" placeholder="{&quot;Sales&quot;: 1450.00, &quot;Region&quot;: &quot;North&quot;}"></textarea>
-              </label>
-              <label class="f">
-                Mock Parameters JSON (Parameters!...Value)
-                <textarea id="expr-params-json" style="height:90px;font-family:'JetBrains Mono',monospace;font-size:12px;" placeholder="{&quot;Threshold&quot;: 1000}"></textarea>
-              </label>
-            </div>
-          </div>
-
-          <!-- Right: Evaluation & Compatibility Analysis -->
-          <div class="card" id="expr-results-card">
-            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
-              <h2>Compatibility & AI Analysis</h2>
-              <span class="pill ok" id="expr-status-pill">Compatible</span>
-            </div>
-
-            <div style="margin-bottom:12px;">
-              <span style="font-size:12px;color:var(--br-text-muted);font-weight:600;display:block;">CATEGORY</span>
-              <strong id="expr-category-text" style="font-size:14px;color:var(--br-text);">Conditional / Logical</strong>
-            </div>
-
-            <div style="margin-bottom:12px;">
-              <span style="font-size:12px;color:var(--br-text-muted);font-weight:600;display:block;">AI PLAIN-LANGUAGE EXPLANATION</span>
-              <p id="expr-explanation-text" style="font-size:13px;color:var(--br-text-secondary);margin:2px 0 0;line-height:1.5;">
-                Evaluates a condition: if true, returns the first branch value; otherwise returns the second branch value.
-              </p>
-            </div>
-
-            <div class="note" style="margin-bottom:12px;">
-              <span style="font-size:12px;color:var(--br-text-muted);font-weight:600;display:block;">EVALUATED OUTPUT (SIMULATION)</span>
-              <div id="expr-eval-output" style="font-family:'JetBrains Mono',monospace;font-size:14px;font-weight:700;color:var(--br-info-text);margin-top:2px;">
-                "High Performer"
-              </div>
-            </div>
-
-            <div>
-              <span style="font-size:12px;color:var(--br-text-muted);font-weight:600;display:block;">BOLD REPORTS MIGRATION GUIDANCE</span>
-              <p id="expr-guidance-text" style="font-size:12.5px;color:var(--br-text-secondary);margin:2px 0 0;">
-                This expression is 100% compatible with Bold Reports Server and Web Report Viewer.
-              </p>
-            </div>
-          </div>
-        </div>
-      </section>
-
-
-      <!-- =====================================================================
-           TOOL 3: SETTINGS
+           TOOL 2: BULK DELETE REPORTS
            ===================================================================== -->
       <section id="tab-bold-delete" class="tab-pane" style="display:none;">
         <div class="main-header">
           <div>
-            <h1>Bulk Delete Reports</h1>
-            <p class="sub">Connect to a Bold Reports server, pick reports, and permanently delete them. Independent of any migration run.</p>
+            <h1>Bulk Delete Items</h1>
+            <p class="sub">Connect to a Bold Reports server, select reports, datasets, data sources, or folders, and permanently delete them.</p>
           </div>
         </div>
         <div class="card" style="padding:16px;margin-bottom:14px;">
@@ -1140,22 +1191,36 @@
             <label>Bold Reports URL<input id="bd-url" type="text" placeholder="https://reports.example.com" style="width:100%;height:36px;border:1px solid var(--br-border-strong);border-radius:6px;padding:0 10px;"></label>
             <label>Email<input id="bd-email" type="text" autocomplete="off" style="width:100%;height:36px;border:1px solid var(--br-border-strong);border-radius:6px;padding:0 10px;"></label>
             <label>Password<input id="bd-password" type="password" autocomplete="new-password" style="width:100%;height:36px;border:1px solid var(--br-border-strong);border-radius:6px;padding:0 10px;"></label>
-            <button class="btn" onclick="bdLoadReports()">Load Reports</button>
+            <button class="btn" id="btn-bd-load" onclick="bdLoadReports()">Load Items</button>
           </div>
         </div>
         <div class="card" style="padding:16px;">
           <div style="display:flex;gap:10px;align-items:center;margin-bottom:10px;flex-wrap:wrap;">
-            <input id="bd-filter" type="text" placeholder="Filter by name or folder..." oninput="bdRender()" style="height:34px;border:1px solid var(--br-border-strong);border-radius:6px;padding:0 10px;min-width:260px;">
-            <a href="javascript:void(0)" onclick="bdSelectVisible(true)">Select visible</a>
-            <a href="javascript:void(0)" onclick="bdSelectVisible(false)">Clear</a>
+            <div class="chips" id="bd-type-chips" role="group" aria-label="Filter items by type">
+              <button type="button" class="chip active" data-type="all" onclick="bdSetTypeFilter('all', this)">All (<span id="bd-count-all">0</span>)</button>
+              <button type="button" class="chip" data-type="Report" onclick="bdSetTypeFilter('Report', this)">Reports (<span id="bd-count-report">0</span>)</button>
+              <button type="button" class="chip" data-type="Dataset" onclick="bdSetTypeFilter('Dataset', this)">Datasets (<span id="bd-count-dataset">0</span>)</button>
+              <button type="button" class="chip" data-type="Datasource" onclick="bdSetTypeFilter('Datasource', this)">Data Sources (<span id="bd-count-datasource">0</span>)</button>
+              <button type="button" class="chip" data-type="Folder" onclick="bdSetTypeFilter('Folder', this)">Folders (<span id="bd-count-folder">0</span>)</button>
+            </div>
+            <input id="bd-filter" type="text" placeholder="Filter by name, type, or folder..." oninput="bdRender()" style="height:34px;border:1px solid var(--br-border-strong);border-radius:6px;padding:0 10px;min-width:220px;">
+            <button type="button" class="btn2 btn-sm" onclick="bdSelectVisible(true)">Select visible</button>
+            <button type="button" class="btn2 btn-sm" onclick="bdSelectVisible(false)">Clear</button>
             <span style="flex:1"></span>
             <span id="bd-status" style="font-size:12.5px;color:var(--br-text-muted);"></span>
             <button class="btn2 btn-danger" id="bd-delete-btn" onclick="bdDeleteSelected()" disabled>Delete Selected (0)</button>
           </div>
           <div style="max-height:480px;overflow:auto;">
             <table style="width:100%;border-collapse:collapse;">
-              <thead><tr style="text-align:left;"><th style="width:32px;"></th><th>Report</th><th>Folder</th></tr></thead>
-              <tbody id="bd-body"><tr><td colspan="3" style="color:var(--br-text-muted);padding:12px;">Load reports to begin.</td></tr></tbody>
+              <thead>
+                <tr style="text-align:left;">
+                  <th style="width:32px;"><input type="checkbox" id="bd-select-all" onchange="bdSelectVisible(this.checked)" title="Select / Deselect visible"></th>
+                  <th>Name</th>
+                  <th style="width:130px;">Type</th>
+                  <th>Folder / Category</th>
+                </tr>
+              </thead>
+              <tbody id="bd-body"><tr><td colspan="4" style="color:var(--br-text-muted);padding:12px;">Load items to begin.</td></tr></tbody>
             </table>
           </div>
         </div>
@@ -1167,30 +1232,34 @@
             <h1>Migration Settings & Rules</h1>
             <p class="sub">Configure validation thresholds, concurrency limits, and compatibility rules.</p>
           </div>
-          <button class="btn" onclick="saveSettings()">Save changes</button>
+          <button class="btn" id="btn-save-settings" onclick="saveSettings()">Save changes</button>
         </div>
 
         <div class="grid">
-          <!-- Thresholds -->
+          <!-- Thresholds & Security -->
           <div class="card">
-            <h2>Validation Thresholds</h2>
+            <h2>Validation & Preview Options</h2>
             <label class="f">
               Data accuracy auto-pass threshold (%)
               <input type="number" id="setting-data-threshold" value="99.5" min="90" max="100" step="0.1">
             </label>
             <label class="f">
-              Visual similarity auto-pass threshold (%)
-              <input type="number" id="setting-vis-threshold" value="95.0" min="80" max="100" step="0.5">
+              Sample Row Limit for Validation
+              <input type="number" id="setting-row-limit" value="10000" min="100" max="1000000">
             </label>
             <label class="f">
-              Pixel tolerance (per channel delta)
-              <input type="number" id="setting-pixel-tolerance" value="2" min="0" max="10">
+              URL Shim Listen Path
+              <input type="text" id="setting-shim-path" value="/ReportServer" placeholder="/ReportServer">
+            </label>
+            <label class="note" style="display:flex;align-items:center;gap:8px;font-size:13px;margin-top:8px;cursor:pointer;">
+              <input type="checkbox" id="setting-allow-untrusted-sql">
+              <span>Allow untrusted SQL Server TLS certificates in local preview</span>
             </label>
           </div>
 
-          <!-- Concurrency & Staging -->
+          <!-- Concurrency & Extraction -->
           <div class="card">
-            <h2>Execution Concurrency</h2>
+            <h2>Execution & Staging</h2>
             <div class="row2">
               <label class="f">
                 Extraction Max Parallel
@@ -1202,9 +1271,45 @@
               </label>
             </div>
             <label class="f">
-              Sample Row Limit for Validation
-              <input type="number" id="setting-row-limit" value="1000" min="100" max="10000">
+              Preferred SSRS Extraction API
+              <select id="setting-preferred-api">
+                <option value="Auto" selected>Auto (REST v2 with SOAP fallback)</option>
+                <option value="RestV2">REST v2.0 only</option>
+                <option value="Soap2010">SOAP 2010 preferred</option>
+              </select>
             </label>
+            <label class="f">
+              Default Upload Conflict Policy
+              <select id="setting-conflict-policy">
+                <option value="Skip" selected>Skip existing (Safe default)</option>
+                <option value="Overwrite">Overwrite existing</option>
+                <option value="Rename">Rename new items (_migrated)</option>
+              </select>
+            </label>
+            <label class="note" style="display:flex;align-items:center;gap:8px;font-size:13px;margin-top:8px;cursor:pointer;">
+              <input type="checkbox" id="setting-delete-staging" checked>
+              <span>Delete staging directory automatically on cutover/abandon</span>
+            </label>
+          </div>
+        </div>
+
+        <div class="card" style="margin-top:14px;">
+          <h2>Active Compatibility Rules</h2>
+          <p class="sub" style="margin-bottom:10px;">Rules evaluated during RDL analysis in Step 3.</p>
+          <div class="table-scroll">
+            <table>
+              <thead>
+                <tr>
+                  <th>Rule ID</th>
+                  <th>Severity</th>
+                  <th>Element / Match</th>
+                  <th>Description</th>
+                </tr>
+              </thead>
+              <tbody id="settings-rules-tbody">
+                <tr><td colspan="4" style="color:var(--br-text-muted);padding:12px;">Open Settings to load rules.</td></tr>
+              </tbody>
+            </table>
           </div>
         </div>
       </section>
@@ -1213,7 +1318,7 @@
   </div>
 
   <!-- Delete Reports in Bold Reports Modal -->
-  <div id="modal-delete-reports" class="modal-overlay" style="display:none;">
+  <div id="modal-delete-reports" class="modal-overlay" role="dialog" aria-modal="true" style="display:none;">
     <div class="modal-dialog">
       <div class="modal-header" style="border-bottom:1px solid var(--br-border);padding:16px 20px;display:flex;justify-content:space-between;align-items:center;">
         <div style="display:flex;align-items:center;gap:10px;">
@@ -1301,7 +1406,7 @@
   </div>
 
   <!-- Interactive Report Viewer Modal (Local Staged or Server Integrated) -->
-  <div id="modal-interactive-viewer" class="modal-overlay" style="display:none;z-index:9999;">
+  <div id="modal-interactive-viewer" class="modal-overlay" role="dialog" aria-modal="true" style="display:none;z-index:9999;">
     <div class="modal-dialog" style="max-width:92vw;width:1200px;height:90vh;display:flex;flex-direction:column;padding:0;background:var(--br-surface);border-radius:14px;overflow:hidden;">
       <div class="modal-header" style="border-bottom:1px solid var(--br-border);padding:12px 20px;display:flex;justify-content:space-between;align-items:center;background:var(--br-surface-alt);">
         <div style="display:flex;align-items:center;gap:10px;">
@@ -1310,7 +1415,7 @@
         </div>
         <div style="display:flex;align-items:center;gap:10px;">
           <button class="btn2 btn-sm" onclick="switchViewerToDesigner()" title="Open this report in Web Report Designer">✏ Edit in Designer</button>
-          <button class="modal-close-btn" onclick="closeInteractiveViewer()" style="background:none;border:none;font-size:24px;line-height:1;cursor:pointer;color:var(--br-text-subtle);">&times;</button>
+          <button class="modal-close-btn" onclick="closeInteractiveViewer()" aria-label="Close viewer">&times;</button>
         </div>
       </div>
       <div class="modal-body" style="padding:0;flex:1;overflow:hidden;position:relative;">
@@ -1320,7 +1425,7 @@
   </div>
 
   <!-- Interactive Report Designer Modal (Local Staged or Server Integrated) -->
-  <div id="modal-interactive-designer" class="modal-overlay" style="display:none;z-index:9999;">
+  <div id="modal-interactive-designer" class="modal-overlay" role="dialog" aria-modal="true" style="display:none;z-index:9999;">
     <div class="modal-dialog" style="max-width:95vw;width:1400px;height:94vh;display:flex;flex-direction:column;padding:0;background:var(--br-surface);border-radius:14px;overflow:hidden;">
       <div class="modal-header" style="border-bottom:1px solid var(--br-border);padding:12px 20px;display:flex;justify-content:space-between;align-items:center;background:var(--br-surface-alt);">
         <div style="display:flex;align-items:center;gap:10px;">
@@ -1328,7 +1433,7 @@
           <span class="pill warn" id="interactive-designer-mode-pill">Local Staged</span>
           <small style="color:var(--br-text-muted);">Saves directly to staging and marks report for updated upload.</small>
         </div>
-        <button class="modal-close-btn" onclick="closeInteractiveDesigner()" style="background:none;border:none;font-size:24px;line-height:1;cursor:pointer;color:var(--br-text-subtle);">&times;</button>
+        <button class="modal-close-btn" onclick="closeInteractiveDesigner()" aria-label="Close designer">&times;</button>
       </div>
       <div class="modal-body" style="padding:0;flex:1;overflow:hidden;position:relative;">
         <div id="interactive-designer-host" style="width:100%;height:100%;"></div>
@@ -1337,47 +1442,177 @@
   </div>
 
   <!-- Render Error Logs Modal -->
-  <div id="modal-render-logs" class="modal-overlay" style="display:none;z-index:9999;">
+  <div id="modal-render-logs" class="modal-overlay" role="dialog" aria-modal="true" style="display:none;z-index:9999;">
     <div class="modal-dialog" style="max-width:750px;width:90%;background:var(--br-surface);border-radius:14px;overflow:hidden;">
-      <div class="modal-header" style="border-bottom:1px solid var(--br-border);padding:14px 20px;display:flex;justify-content:space-between;align-items:center;">
+      <div class="modal-header modal-header-clean">
         <h3 id="render-logs-title" style="margin:0;font-size:16px;color:var(--br-danger);">Rendering Error Diagnostic</h3>
-        <button class="modal-close-btn" onclick="closeRenderLogsModal()" style="background:none;border:none;font-size:24px;line-height:1;cursor:pointer;color:var(--br-text-subtle);">&times;</button>
+        <button class="modal-close-btn" onclick="closeRenderLogsModal()" aria-label="Close logs">&times;</button>
       </div>
       <div class="modal-body" style="padding:16px 20px;max-height:65vh;overflow-y:auto;" id="render-logs-body">
         <!-- Error logs content -->
       </div>
-      <div class="modal-footer" style="border-top:1px solid var(--br-border);padding:12px 20px;display:flex;justify-content:flex-end;background:var(--br-surface-alt);">
+      <div class="modal-footer modal-footer-end">
         <button class="btn2" onclick="closeRenderLogsModal()">Close</button>
       </div>
     </div>
   </div>
 
+  <!-- Visual Comparison Slider & Pixel-Diff Modal -->
+  <div id="modal-visual-compare" class="modal-overlay" role="dialog" aria-modal="true" aria-labelledby="cmp-modal-title" style="display:none;z-index:10010;">
+    <div class="modal-dialog" style="max-width:94vw;width:1180px;background:var(--br-surface);border-radius:14px;overflow:hidden;">
+      <div class="modal-header modal-header-clean" style="background:var(--br-surface-alt);">
+        <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
+          <h3 id="cmp-modal-title" class="modal-title-text">Visual Comparison &amp; Pixel Diff</h3>
+          <span class="pill" id="cmp-similarity-pill">Calculating...</span>
+        </div>
+        <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
+          <div class="chips" role="group" aria-label="Comparison view mode">
+            <button type="button" class="chip active" id="cmp-mode-swipe" onclick="setCompareMode('swipe')">◫ Swipe Slider</button>
+            <button type="button" class="chip" id="cmp-mode-side" onclick="setCompareMode('side')">▯▯ Side-by-Side</button>
+            <button type="button" class="chip" id="cmp-mode-diff" onclick="setCompareMode('diff')">◈ Pixel Diff</button>
+          </div>
+          <label class="btn2 btn-sm" style="cursor:pointer;display:inline-flex;align-items:center;" title="Load local reference screenshot">
+            📁 Reference PNG
+            <input type="file" id="cmp-ref-file" accept="image/*" style="display:none;" onchange="loadCompareReferenceFile(event)">
+          </label>
+          <button type="button" class="btn2 btn-sm" onclick="retryCaptureSourceSnapshot()" title="Fetch SSRS render snapshot">↻ SSRS Snapshot</button>
+          <button type="button" class="modal-close-btn" onclick="closeVisualCompareModal()" aria-label="Close comparison">&times;</button>
+        </div>
+      </div>
+
+      <div class="modal-body modal-body-pad">
+        <div id="cmp-source-notice" class="note" style="display:none;margin-bottom:10px;font-size:12.5px;"></div>
+
+        <!-- Swipe Slider Mode -->
+        <div id="cmp-pane-swipe">
+          <div style="display:flex;align-items:center;gap:10px;margin-bottom:8px;">
+            <span class="cmp-label-badge">Left: Source (SSRS)</span>
+            <input type="range" id="cmp-swipe-range" min="0" max="100" value="50" oninput="onCompareSliderInput(this.value)" style="flex:1;accent-color:var(--br-accent);" aria-label="Swipe comparison slider">
+            <span class="cmp-label-badge">Right: Migrated (Bold Reports)</span>
+          </div>
+          <div class="cmp-stage">
+            <div class="cmp-swipe-container">
+              <img id="cmp-after-img" src="" alt="Migrated Bold Reports Render">
+              <div class="cmp-swipe-top" id="cmp-swipe-top" style="clip-path:inset(0 50% 0 0);">
+                <img id="cmp-before-img" src="" alt="Source SSRS Render">
+              </div>
+              <div class="cmp-swipe-divider" id="cmp-swipe-divider" style="left:50%;">
+                <div class="cmp-swipe-handle">⇄</div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Side-by-Side Mode -->
+        <div id="cmp-pane-side" style="display:none;">
+          <div class="cmp-side-grid">
+            <div class="cmp-stage" style="padding:8px;">
+              <span class="cmp-label-badge">Source (SSRS / Reference)</span>
+              <img id="cmp-side-before" src="" alt="Source SSRS Render" style="width:100%;height:auto;display:block;border-radius:4px;">
+            </div>
+            <div class="cmp-stage" style="padding:8px;">
+              <span class="cmp-label-badge">Migrated (Bold Reports)</span>
+              <img id="cmp-side-after" src="" alt="Migrated Bold Reports Render" style="width:100%;height:auto;display:block;border-radius:4px;">
+            </div>
+          </div>
+        </div>
+
+        <!-- Pixel-Diff Canvas Mode -->
+        <div id="cmp-pane-diff" style="display:none;">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;flex-wrap:wrap;gap:8px;">
+            <span style="font-size:12px;color:var(--br-text-secondary);" id="cmp-diff-stats">Magenta highlights pixels differing beyond tolerance.</span>
+            <label style="font-size:12px;display:inline-flex;align-items:center;gap:6px;">
+              Channel tolerance:
+              <input type="number" id="cmp-tolerance" value="8" min="0" max="50" style="width:58px;padding:2px 6px;border:1px solid var(--br-border-strong);border-radius:4px;" onchange="recomputeVisualPixelDiff()">
+            </label>
+          </div>
+          <div class="cmp-stage" style="padding:8px;text-align:center;">
+            <canvas id="cmp-diff-canvas" style="max-width:100%;height:auto;border-radius:4px;"></canvas>
+          </div>
+        </div>
+      </div>
+
+      <div class="modal-footer modal-footer-end">
+        <button type="button" class="btn2" onclick="closeVisualCompareModal()">Close</button>
+      </div>
+    </div>
+  </div>
+
   <!-- Snapshot Zoom Modal -->
-  <div id="modal-snapshot-zoom" class="modal-overlay" style="display:none;z-index:9999;" onclick="closeSnapshotZoom()">
+  <div id="modal-snapshot-zoom" class="modal-overlay" role="dialog" aria-modal="true" style="display:none;z-index:9999;" onclick="closeSnapshotZoom()">
     <div style="max-width:90vw;max-height:90vh;background:var(--br-surface);padding:12px;border-radius:12px;box-shadow:0 25px 50px -12px rgba(0,0,0,0.25);position:relative;" onclick="event.stopPropagation()">
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
         <h4 id="snapshot-zoom-title" style="margin:0;font-size:14px;color:var(--br-text);">Visual Snapshot</h4>
-        <button onclick="closeSnapshotZoom()" style="background:none;border:none;font-size:20px;cursor:pointer;color:var(--br-text-muted);">&times;</button>
+        <button onclick="closeSnapshotZoom()" class="modal-close-btn" aria-label="Close snapshot">&times;</button>
       </div>
       <img id="snapshot-zoom-img" src="" alt="Report Snapshot" style="max-width:100%;max-height:80vh;border-radius:6px;border:1px solid var(--br-border);display:block;">
     </div>
   </div>
 
   <!-- Confirm Re-fetch / Rerun Modal -->
-  <div id="modal-confirm-rescan" class="modal-overlay" style="display:none;z-index:9999;">
-    <div class="modal-dialog" style="max-width:480px;width:92%;background:var(--br-surface);border-radius:14px;overflow:hidden;">
-      <div class="modal-header" style="border-bottom:1px solid var(--br-border);padding:16px 20px;display:flex;justify-content:space-between;align-items:center;">
-        <h3 style="margin:0;font-size:16px;color:var(--br-text);">Re-fetch SSRS Catalog?</h3>
-        <button class="modal-close-btn" id="btn-rescan-close" style="background:none;border:none;font-size:24px;line-height:1;cursor:pointer;color:var(--br-text-subtle);">&times;</button>
+  <div id="modal-confirm-rescan" class="modal-overlay" role="dialog" aria-modal="true" style="display:none;z-index:9999;">
+    <div class="modal-dialog modal-dialog-sm">
+      <div class="modal-header modal-header-clean">
+        <h3 class="modal-title-text">Re-fetch SSRS Catalog?</h3>
+        <button class="modal-close-btn" id="btn-rescan-close" aria-label="Close">&times;</button>
       </div>
-      <div class="modal-body" style="padding:18px 20px;">
-        <p id="rescan-modal-msg" style="margin:0;font-size:14px;line-height:1.55;color:var(--br-text-muted);">
+      <div class="modal-body modal-body-pad">
+        <p id="rescan-modal-msg" class="modal-body-msg">
           We have already fetched the SSRS catalog for this session. If you fetch again, any modified reports, approvals, validation results, or selections will be lost. Please confirm — do you want to rerun?
         </p>
       </div>
-      <div class="modal-footer" style="border-top:1px solid var(--br-border);padding:12px 20px;display:flex;justify-content:flex-end;gap:10px;background:var(--br-surface-alt);">
+      <div class="modal-footer modal-footer-end">
         <button class="btn2" id="btn-rescan-cancel">Cancel</button>
         <button class="btn" id="btn-rescan-confirm">Yes, Rerun Fresh</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Reusable In-App Confirm / Alert Dialog -->
+  <div id="modal-app-dialog" class="modal-overlay" role="dialog" aria-modal="true" aria-labelledby="app-dialog-title" style="display:none;z-index:10050;">
+    <div class="modal-dialog modal-dialog-sm">
+      <div class="modal-header modal-header-clean">
+        <h3 id="app-dialog-title" class="modal-title-text">Confirm Action</h3>
+        <button type="button" class="modal-close-btn" id="app-dialog-close" aria-label="Close dialog">&times;</button>
+      </div>
+      <div class="modal-body modal-body-pad">
+        <p id="app-dialog-message" class="modal-body-msg"></p>
+      </div>
+      <div class="modal-footer modal-footer-end">
+        <button type="button" class="btn2" id="app-dialog-cancel">Cancel</button>
+        <button type="button" class="btn" id="app-dialog-confirm">Confirm</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- RDL Diff & Manual Sign-off Modal -->
+  <div id="modal-rdl-diff" class="modal-overlay" role="dialog" aria-modal="true" style="display:none;z-index:9999;">
+    <div class="modal-dialog" style="max-width:92vw;width:1200px;background:var(--br-surface);border-radius:14px;overflow:hidden;">
+      <div class="modal-header" style="border-bottom:1px solid var(--br-border);padding:14px 20px;display:flex;justify-content:space-between;align-items:center;background:var(--br-surface-alt);">
+        <div style="display:flex;align-items:center;gap:10px;">
+          <h3 id="rdl-diff-title" style="margin:0;font-size:16px;color:var(--br-text);">RDL Source vs Transformed XML</h3>
+          <span class="pill" id="rdl-diff-bucket">Clean</span>
+        </div>
+        <button class="modal-close-btn" onclick="closeRdlDiffModal()" aria-label="Close diff modal">&times;</button>
+      </div>
+      <div class="modal-body" style="padding:16px 20px;">
+        <div class="diff-split">
+          <div class="diff-pane">
+            <div class="diff-pane-title">Original Source RDL</div>
+            <pre class="diff-code" id="rdl-code-original"></pre>
+          </div>
+          <div class="diff-pane">
+            <div class="diff-pane-title">Transformed / Staged RDL</div>
+            <pre class="diff-code" id="rdl-code-transformed"></pre>
+          </div>
+        </div>
+      </div>
+      <div class="modal-footer" style="border-top:1px solid var(--br-border);padding:12px 20px;display:flex;justify-content:space-between;align-items:center;background:var(--br-surface-alt);">
+        <div style="display:flex;gap:8px;">
+          <button class="btn2 btn-sm" onclick="flagReportReview()">⚑ Flag for Designer</button>
+          <button class="btn btn-sm" onclick="approveReportValidation()">✓ Approve Report</button>
+        </div>
+        <button class="btn2" onclick="closeRdlDiffModal()">Close</button>
       </div>
     </div>
   </div>
@@ -1394,10 +1629,15 @@
   <script src="https://cdn.boldreports.com/15.1.17/scripts/v2.0/bold.report-viewer.min.js"></script>
   <script src="https://cdn.boldreports.com/15.1.17/scripts/v2.0/bold.report-designer.min.js"></script>
 
-  <script src="/js/api.js?v=2.5"></script>
-  <script src="/js/app.js?v=2.5"></script>
-  <script src="/js/preview.js?v=3"></script>
-  <script src="/js/bolddelete.js?v=1"></script>
+  <script src="/js/api.js?v=3.1"></script>
+  <script src="/js/app.js?v=3.1"></script>
+  <script src="/js/modals.js?v=3.1"></script>
+  <script src="/js/connections.js?v=3.1"></script>
+  <script src="/js/library.js?v=3.1"></script>
+  <script src="/js/validation.js?v=3.1"></script>
+  <script src="/js/migration.js?v=3.1"></script>
+  <script src="/js/tools.js?v=3.1"></script>
+  <script src="/js/bolddelete.js?v=8"></script>
 </body>
 
 </html>

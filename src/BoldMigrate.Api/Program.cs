@@ -45,10 +45,16 @@ builder.Logging.AddProvider(new BoldMigrate.Api.Logging.FileLoggerProvider(logsP
 
 var settings = new MigrationSettings();
 builder.Configuration.GetSection("BoldMigrate").Bind(settings);
+BoldMigrate.Api.Controllers.SettingsController.LoadPersistedSettings(settings);
+settings.ValidateAndNormalize();
 builder.Services.AddSingleton(settings);
 
-// Database (SQLite)
-var dbPath = Path.Combine(AppContext.BaseDirectory, "boldmigrate.db");
+// Database (SQLite) — prefer configured path or container /app/data volume
+var dataDir = BoldMigrate.Api.Controllers.SettingsController.ResolveDataDirectory(settings);
+Directory.CreateDirectory(dataDir);
+var dbPath = !string.IsNullOrWhiteSpace(settings.DatabasePath)
+    ? settings.DatabasePath!
+    : Path.Combine(dataDir, "boldmigrate.db");
 builder.Services.AddDbContext<MigrationDbContext>(options =>
 {
     options.UseSqlite($"Data Source={dbPath}");
@@ -57,21 +63,21 @@ builder.Services.AddDbContext<MigrationDbContext>(options =>
 // Infrastructure services
 builder.Services.AddScoped<IMigrationStore, MigrationStoreRepository>();
 builder.Services.AddSingleton<IStagingStore>(new FileSystemStagingStore(settings.StagingRootPath));
-builder.Services.AddSingleton<ICredentialStore, InMemoryCredentialStore>();
+builder.Services.AddSingleton<ICredentialStore>(_ => new InMemoryCredentialStore(dataDir));
 builder.Services.AddSingleton<BoldMigrate.Engine.Preview.IRenderLogStore, BoldMigrate.Engine.Preview.InMemoryRenderLogStore>();
 builder.Services.AddMemoryCache();
 
 // Logging & Rules
 builder.Services.AddSingleton<CompatibilityRulesLoader>(sp =>
 {
-    var resolvedPath = CompatibilityRulesLoader.ResolveRulesFilePath();
-    return new CompatibilityRulesLoader(resolvedPath);
+    return new CompatibilityRulesLoader(null, settings);
 });
 builder.Services.AddScoped<MigrationLogger>(sp =>
 {
     var store = sp.GetRequiredService<IMigrationStore>();
     var logger = sp.GetRequiredService<ILogger<MigrationLogger>>();
-    return new MigrationLogger(logger, store);
+    var scopeFactory = sp.GetRequiredService<IServiceScopeFactory>();
+    return new MigrationLogger(logger, store, scopeFactory);
 });
 
 // Engine services
@@ -82,7 +88,7 @@ builder.Services.AddScoped<ValidationEngine>();
 builder.Services.AddScoped<RenderValidationEngine>();
 builder.Services.AddScoped<DeltaSyncEngine>();
 builder.Services.AddScoped<BoldMigrate.Api.Preview.StagedReportSession>();
-builder.Services.AddSingleton<LocalFolderMigrationService>();
+builder.Services.AddScoped<LocalFolderMigrationService>();
 builder.Services.AddSingleton<ExpressionTesterEngine>();
 
 // Orchestrator (Single instance hosted background service)
@@ -103,7 +109,16 @@ builder.Services.AddControllers()
 
 builder.Services.AddCors(options =>
 {
-    options.AddPolicy("AllowAll", p => p.AllowAnyOrigin().AllowAnyMethod().AllowAnyHeader());
+    options.AddPolicy("BoldMigrateCors", p =>
+    {
+        if (settings.AllowedOrigins is { Length: > 0 })
+        {
+            p.WithOrigins(settings.AllowedOrigins)
+             .AllowAnyMethod()
+             .AllowAnyHeader()
+             .AllowCredentials();
+        }
+    });
 });
 
 var app = builder.Build();
@@ -113,6 +128,7 @@ using (var scope = app.Services.CreateScope())
 {
     var db = scope.ServiceProvider.GetRequiredService<MigrationDbContext>();
     db.Database.EnsureCreated();
+    await db.Database.ExecuteSqlRawAsync("PRAGMA journal_mode=WAL; PRAGMA busy_timeout=5000;");
 
     // EnsureCreated does not alter an existing schema. ValidationResults gained nullable
     // page-count columns and VisualSimilarity became nullable, so a database created before
@@ -238,41 +254,6 @@ using (var scope = app.Services.CreateScope())
         {
             await db.Database.ExecuteSqlRawAsync("ALTER TABLE ValidationResults ADD COLUMN ErrorMessage TEXT NULL;");
         }
-
-        // Native SSRS features (Shared DS/DSet, Simple Code) are Clean/Compatible, not AutoFixed.
-        await db.Database.ExecuteSqlRawAsync(
-            "UPDATE ReportRecords SET Bucket = 'Clean', BlockReasonCode = NULL WHERE Bucket = 'AutoFixed';");
-
-        // Reclassify any stale NeedsReview records (other than CF-ASSEMBLY) to Clean.
-        await db.Database.ExecuteSqlRawAsync(
-            "UPDATE ReportRecords SET Bucket = 'Clean', BlockReasonCode = NULL WHERE (Bucket = 'NeedsReview' OR Bucket = '2') AND (BlockReasonCode IS NULL OR BlockReasonCode != 'CF-ASSEMBLY');");
-
-        // Custom assemblies should be tagged as NeedsReview rather than Blocked.
-        await db.Database.ExecuteSqlRawAsync(
-            "UPDATE ReportRecords SET Bucket = 'NeedsReview' WHERE Bucket = 'Blocked';");
-        await db.Database.ExecuteSqlRawAsync(
-            "UPDATE ReportRecords SET State = 'Analysed' WHERE State = 'Blocked';");
-
-        // Reclassify SQL Server offline connection errors in validation results as DataSourceOffline (not Failed)
-        await db.Database.ExecuteSqlRawAsync(@"
-            UPDATE ValidationResults
-            SET RenderStatus = 'DataSourceOffline',
-                RenderSummary = 'RDL structure valid. Database offline in local preview; report is ready for server upload.'
-            WHERE RenderStatus = 'Failed'
-              AND (ErrorMessage LIKE '%SQL Server%'
-                OR ErrorMessage LIKE '%Named Pipes Provider%'
-                OR ErrorMessage LIKE '%Data cannot be retrieved%');
-        ");
-
-        // Keep state aligned for DataSourceOffline reports so they are ready for upload
-        await db.Database.ExecuteSqlRawAsync(@"
-            UPDATE ReportRecords
-            SET State = 'Approved'
-            WHERE (State = 'ValidationFailed' OR State = '3')
-              AND CatalogItemId IN (
-                  SELECT ReportId FROM ValidationResults WHERE RenderStatus = 'DataSourceOffline'
-              );
-        ");
     }
     catch (Exception ex)
     {
@@ -298,7 +279,8 @@ BoldReports.Web.ReportConfig.DefaultSettings = new BoldReports.Web.ReportSetting
     "BoldReports.Data.WebData"
 });
 
-app.UseCors("AllowAll");
+app.UseCors("BoldMigrateCors");
+app.UseMiddleware<SecurityMiddleware>();
 
 // Serve frontend from wwwroot (pure HTML + JavaScript + CSS design tokens)
 app.UseDefaultFiles();
@@ -319,3 +301,5 @@ app.MapControllers();
 app.MapFallbackToFile("index.html");
 
 app.Run();
+
+public partial class Program { }

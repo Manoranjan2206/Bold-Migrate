@@ -88,6 +88,13 @@ public class MigrationSettings
     public int UploadMaxAttempts { get; set; } = 3;
 
     /// <summary>
+    /// Upload.ConflictPolicy: How destination conflicts are handled during upload: Skip, Overwrite, or Rename.
+    /// Default: "Skip"
+    /// </summary>
+    [JsonPropertyName("Upload.ConflictPolicy")]
+    public string UploadConflictPolicy { get; set; } = "Skip";
+
+    /// <summary>
     /// Upload.RetryBackoffSeconds: Fixed schedule, not exponential, so a run's duration is predictable.
     /// Default: [2, 8, 30]
     /// </summary>
@@ -170,4 +177,84 @@ public class MigrationSettings
     /// </summary>
     [JsonPropertyName("UrlShim.ListenPath")]
     public string UrlShimListenPath { get; set; } = "/ReportServer";
+
+    /// <summary>
+    /// Optional explicit CORS allowed origins. Empty = same-origin only (no wildcard AllowAll).
+    /// </summary>
+    public string[] AllowedOrigins { get; set; } = [];
+
+    /// <summary>
+    /// Optional allowlisted parent directories for Local Folder Migration.
+    /// When empty, relative traversal segments are still rejected.
+    /// </summary>
+    public string[] AllowedLocalFolderRoots { get; set; } = [];
+
+    /// <summary>
+    /// Optional static operator access token. When set, all /api requests require Bearer/session auth.
+    /// </summary>
+    [JsonIgnore]
+    public string? ApiAccessToken { get; set; }
+
+    /// <summary>
+    /// Optional SQLite database file path override (defaults to /app/data/boldmigrate.db in containers).
+    /// </summary>
+    public string? DatabasePath { get; set; }
+
+    /// <summary>
+    /// When true, local preview injects TrustServerCertificate=True for SQL Server connections.
+    /// Default: false (only injected for loopback hosts unless explicitly enabled).
+    /// </summary>
+    [JsonPropertyName("Preview.AllowUntrustedSqlCert")]
+    public bool PreviewAllowUntrustedSqlCert { get; set; } = false;
+
+    /// <summary>
+    /// Clamps and validates mutable settings to safe operational bounds.
+    /// </summary>
+    public (bool Valid, string? Error) ValidateAndNormalize()
+    {
+        ExtractionTimeoutSeconds = Math.Clamp(ExtractionTimeoutSeconds, 30, 600);
+        ExtractionMaxParallel = Math.Clamp(ExtractionMaxParallel, 1, 16);
+        TransformMaxAutoFixAttempts = Math.Clamp(TransformMaxAutoFixAttempts, 1, 5);
+        TransformRulesRefreshHours = Math.Clamp(TransformRulesRefreshHours, 1, 720);
+        UploadMaxParallel = Math.Clamp(UploadMaxParallel, 1, 16);
+        UploadMaxAttempts = Math.Clamp(UploadMaxAttempts, 1, 10);
+        ValidationDataAccuracyThreshold = Math.Clamp(ValidationDataAccuracyThreshold, 90.0m, 100.0m);
+        ValidationVisualSimilarityThreshold = Math.Clamp(ValidationVisualSimilarityThreshold, 80.0m, 100.0m);
+        ValidationPixelTolerance = Math.Clamp(ValidationPixelTolerance, 0, 10);
+        ValidationSampleRowLimit = Math.Clamp(ValidationSampleRowLimit, 100, 1_000_000);
+        ValidationMaxParallel = Math.Clamp(ValidationMaxParallel, 1, 8);
+        LoggingRetentionDays = Math.Clamp(LoggingRetentionDays, 7, 365);
+
+        if (ValidationRenderDpi is not (96 or 150))
+            ValidationRenderDpi = 96;
+
+        if (UploadRetryBackoffSeconds == null || UploadRetryBackoffSeconds.Length == 0)
+            UploadRetryBackoffSeconds = [2, 8, 30];
+
+        UploadConflictPolicy = NormalizeConflictPolicy(UploadConflictPolicy);
+
+        var listen = string.IsNullOrWhiteSpace(UrlShimListenPath) ? "/ReportServer" : UrlShimListenPath.Trim();
+        if (!listen.StartsWith('/')) listen = "/" + listen;
+        listen = listen.TrimEnd('/');
+        if (string.IsNullOrEmpty(listen) ||
+            listen.Equals("/api", StringComparison.OrdinalIgnoreCase) ||
+            listen.StartsWith("/api/", StringComparison.OrdinalIgnoreCase) ||
+            listen.Equals("/health", StringComparison.OrdinalIgnoreCase))
+        {
+            return (false, "UrlShim.ListenPath cannot be '/', '/api', or '/health'.");
+        }
+
+        UrlShimListenPath = listen;
+        return (true, null);
+    }
+
+    public static string NormalizeConflictPolicy(string? policy)
+    {
+        return policy?.Trim().ToLowerInvariant() switch
+        {
+            "overwrite" => "Overwrite",
+            "rename" => "Rename",
+            _ => "Skip"
+        };
+    }
 }

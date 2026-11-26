@@ -17,20 +17,19 @@ public class MigrationStoreRepository : IMigrationStore
     public async Task<MigrationRun?> GetRunAsync(Guid runId, CancellationToken ct = default)
     {
         return await _db.MigrationRuns
-            .Include(r => r.CatalogItems)
             .FirstOrDefaultAsync(r => r.Id == runId, ct);
     }
 
     public async Task<MigrationRun?> GetActiveRunAsync(CancellationToken ct = default)
     {
         return await _db.MigrationRuns
-            .Include(r => r.CatalogItems)
+            .OrderByDescending(r => r.CreatedUtc)
             .FirstOrDefaultAsync(r => r.Status != RunStatus.CutOver && r.Status != RunStatus.Abandoned, ct);
     }
 
     public async Task<IReadOnlyList<MigrationRun>> ListRunsAsync(CancellationToken ct = default)
     {
-        return await _db.MigrationRuns.OrderByDescending(r => r.CreatedUtc).ToListAsync(ct);
+        return await _db.MigrationRuns.AsNoTracking().OrderByDescending(r => r.CreatedUtc).ToListAsync(ct);
     }
 
     public async Task CreateRunAsync(MigrationRun run, CancellationToken ct = default)
@@ -184,7 +183,21 @@ public class MigrationStoreRepository : IMigrationStore
     public async Task<IReadOnlyList<ValidationResult>> GetValidationResultsAsync(Guid reportId, CancellationToken ct = default)
     {
         return await _db.ValidationResults
+            .AsNoTracking()
             .Where(v => v.ReportId == reportId)
+            .OrderByDescending(v => v.RunUtc)
+            .ToListAsync(ct);
+    }
+
+    public async Task<IReadOnlyList<ValidationResult>> GetValidationResultsByRunAsync(Guid runId, CancellationToken ct = default)
+    {
+        var reportIds = _db.CatalogItems
+            .Where(c => c.RunId == runId && c.ItemType == ItemType.Report)
+            .Select(c => c.Id);
+
+        return await _db.ValidationResults
+            .AsNoTracking()
+            .Where(v => reportIds.Contains(v.ReportId))
             .OrderByDescending(v => v.RunUtc)
             .ToListAsync(ct);
     }

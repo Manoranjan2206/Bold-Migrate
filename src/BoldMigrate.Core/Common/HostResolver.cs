@@ -1,21 +1,23 @@
+using System.Text.RegularExpressions;
+
 namespace BoldMigrate.Core.Common;
 
 /// <summary>
 /// Resolves localhost/127.0.0.1 to host.docker.internal when running inside Docker containers
 /// so that host-hosted services (SSRS, Bold Reports) are seamlessly reachable.
 /// </summary>
-public static class HostResolver
+public static partial class HostResolver
 {
+    [GeneratedRegex(@"://(?:localhost|127\.0\.0\.1)(?=[:/]|$)", RegexOptions.IgnoreCase)]
+    private static partial Regex LoopbackAuthorityRegex();
+
     public static string Resolve(string? url)
     {
         if (string.IsNullOrWhiteSpace(url)) return url ?? string.Empty;
 
         if (IsRunningInContainer())
         {
-            return url.Replace("://localhost:", "://host.docker.internal:")
-                      .Replace("://127.0.0.1:", "://host.docker.internal:")
-                      .Replace("://localhost/", "://host.docker.internal/")
-                      .Replace("://127.0.0.1/", "://host.docker.internal/");
+            return LoopbackAuthorityRegex().Replace(url, "://host.docker.internal");
         }
 
         return url;

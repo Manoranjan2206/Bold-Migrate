@@ -1,4 +1,5 @@
 using System.Security.Cryptography;
+using BoldMigrate.Core.Configuration;
 using BoldMigrate.Core.Interfaces;
 using BoldMigrate.Core.Models;
 using BoldMigrate.Engine.Logging;
@@ -16,6 +17,7 @@ public sealed class StagedReportSession
     private readonly IMigrationStore _store;
     private readonly IStagingStore _staging;
     private readonly ICredentialStore _credentials;
+    private readonly MigrationSettings _settings;
     private readonly MigrationLogger _migrationLogger;
     private readonly ILogger<StagedReportSession> _logger;
 
@@ -23,12 +25,14 @@ public sealed class StagedReportSession
         IMigrationStore store,
         IStagingStore staging,
         ICredentialStore credentials,
+        MigrationSettings settings,
         MigrationLogger migrationLogger,
         ILogger<StagedReportSession> logger)
     {
         _store = store;
         _staging = staging;
         _credentials = credentials;
+        _settings = settings;
         _migrationLogger = migrationLogger;
         _logger = logger;
     }
@@ -39,7 +43,12 @@ public sealed class StagedReportSession
 
         var catalog = new StagedCatalog(runId, await _store.GetCatalogItemsAsync(runId, ct: ct));
         // The Bold Reports helpers call the server synchronously, so the save runs synchronously too.
-        return new StagedReportServer(catalog, _credentials, (item, bytes) => SaveReportAsync(item, bytes).GetAwaiter().GetResult(), _logger);
+        return new StagedReportServer(
+            catalog,
+            _credentials,
+            (item, bytes) => SaveReportAsync(item, bytes).GetAwaiter().GetResult(),
+            _logger,
+            _settings.PreviewAllowUntrustedSqlCert);
     }
 
     /// <summary>

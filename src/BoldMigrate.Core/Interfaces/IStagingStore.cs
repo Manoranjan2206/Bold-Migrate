@@ -30,4 +30,15 @@ public interface IStagingStore
     /// Returns available disk space in bytes on the staging volume.
     /// </summary>
     Task<long> GetAvailableSpaceAsync(CancellationToken ct = default);
+
+    /// <summary>
+    /// Preserves an unmodified original copy of a staged file (for diffing after transforms).
+    /// </summary>
+    Task<string> StageOriginalAsync(Guid runId, string sourcePath, byte[] content, CancellationToken ct = default) =>
+        StageFileAsync(runId, "__originals/" + sourcePath.TrimStart('/', '\\'), content, ct);
+
+    /// <summary>
+    /// Resolves the preserved original file path for a staged item, if present.
+    /// </summary>
+    string? ResolveOriginalPath(Guid runId, string sourcePath) => null;
 }

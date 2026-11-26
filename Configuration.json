@@ -1,9 +1,9 @@
 {
-  "SourceRsUri": "http://synclapn-35985/ReportServer/ReportService2010.asmx?wsdl",
-  "FolderPath": "C:\\SSRS_Export6",
-  "BaseUrl": "http://localhost:62913",
-  "Tenant": "site4",
-  "BearerToken": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJlbWFpbCI6ImFydW11Z2FzYW1pLm11cnVnZXNhbkBzeW5jZnVzaW9uLmNvbSIsIm5hbWVpZCI6IjEiLCJ1bmlxdWVfbmFtZSI6IjRiMzliNTk4LTFjYjktNDU0YS1iMmViLWU4YTUzOThlMzE0ZiIsIklQIjoiOjoxIiwiaXNzdWVkX2RhdGUiOiIxNzg2NjMyMTQyIiwibmJmIjoxNzg2NjMyMTQyLCJleHAiOjE3ODcyNTA2MDAsImlhdCI6MTc4NjYzMjE0MiwiaXNzIjoiaHR0cDovL2xvY2FsaG9zdDo2MjkxMy9yZXBvcnRpbmcvc2l0ZS9zaXRlNCIsImF1ZCI6Imh0dHA6Ly9sb2NhbGhvc3Q6NjI5MTMvcmVwb3J0aW5nL3NpdGUvc2l0ZTQifQ.RpwVfVJ50hByknckcaUePhBPwVFgVk8KQCHll2IVNRQ",
-  "UserName": "", 
+  "SourceRsUri": "http://localhost/ReportServer/ReportService2010.asmx?wsdl",
+  "FolderPath": "C:\\SSRS_Export",
+  "BaseUrl": "http://localhost:8090",
+  "Tenant": "site1",
+  "BearerToken": "",
+  "UserName": "",
   "Password": ""
 }

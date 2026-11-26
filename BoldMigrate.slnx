@@ -6,6 +6,7 @@
     <Project Path="src/BoldMigrate.Infrastructure/BoldMigrate.Infrastructure.csproj" />
   </Folder>
   <Folder Name="/tests/">
+    <Project Path="tests/BoldMigrate.Api.Tests/BoldMigrate.Api.Tests.csproj" />
     <Project Path="tests/BoldMigrate.Core.Tests/BoldMigrate.Core.Tests.csproj" />
     <Project Path="tests/BoldMigrate.Engine.Tests/BoldMigrate.Engine.Tests.csproj" />
   </Folder>

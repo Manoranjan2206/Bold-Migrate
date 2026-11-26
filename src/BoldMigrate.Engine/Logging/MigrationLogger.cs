@@ -1,12 +1,14 @@
 using System.Collections.Concurrent;
 using BoldMigrate.Core.Interfaces;
 using BoldMigrate.Core.Models;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 
 namespace BoldMigrate.Engine.Logging;
 
 public class LiveLogEntry
 {
+    public Guid RunId { get; set; }
     public DateTime Timestamp { get; set; } = DateTime.UtcNow;
     public string Level { get; set; } = "Information";
     public string Message { get; set; } = string.Empty;
@@ -17,12 +19,14 @@ public class MigrationLogger
 {
     private readonly ILogger _systemLogger;
     private readonly IMigrationStore _store;
+    private readonly IServiceScopeFactory? _scopeFactory;
     private static readonly ConcurrentQueue<LiveLogEntry> _liveLogs = new();
 
-    public MigrationLogger(ILogger systemLogger, IMigrationStore store)
+    public MigrationLogger(ILogger systemLogger, IMigrationStore store, IServiceScopeFactory? scopeFactory = null)
     {
         _systemLogger = systemLogger;
         _store = store;
+        _scopeFactory = scopeFactory;
     }
 
     public void Log(
@@ -59,6 +63,7 @@ public class MigrationLogger
         {
             var liveEntry = new LiveLogEntry
             {
+                RunId = runId,
                 Timestamp = DateTime.UtcNow,
                 Level = level.ToString(),
                 Message = redactedMessage,
@@ -76,21 +81,32 @@ public class MigrationLogger
         // Audit Trail when person or important action is involved
         if (!string.IsNullOrEmpty(userId) || eventCode.StartsWith("CUT-") || eventCode.StartsWith("VALD-APPROVE"))
         {
+            var auditEvent = new AuditEvent
+            {
+                Id = Guid.NewGuid(),
+                RunId = runId,
+                UserId = userId ?? "System",
+                Action = eventCode,
+                TargetType = itemType ?? "System",
+                TargetId = itemPath ?? runId.ToString(),
+                OccurredUtc = DateTime.UtcNow,
+                Detail = redactedMessage
+            };
+
             _ = Task.Run(async () =>
             {
                 try
                 {
-                    await _store.AddAuditEventAsync(new AuditEvent
+                    if (_scopeFactory != null)
                     {
-                        Id = Guid.NewGuid(),
-                        RunId = runId,
-                        UserId = userId ?? "System",
-                        Action = eventCode,
-                        TargetType = itemType ?? "System",
-                        TargetId = itemPath ?? runId.ToString(),
-                        OccurredUtc = DateTime.UtcNow,
-                        Detail = redactedMessage
-                    });
+                        using var scope = _scopeFactory.CreateScope();
+                        var scopedStore = scope.ServiceProvider.GetRequiredService<IMigrationStore>();
+                        await scopedStore.AddAuditEventAsync(auditEvent);
+                    }
+                    else
+                    {
+                        await _store.AddAuditEventAsync(auditEvent);
+                    }
                 }
                 catch
                 {
@@ -100,5 +116,11 @@ public class MigrationLogger
         }
     }
 
-    public IReadOnlyList<LiveLogEntry> GetLiveLog() => _liveLogs.ToArray();
+    public IReadOnlyList<LiveLogEntry> GetLiveLog(Guid? runId = null)
+    {
+        if (runId == null || runId == Guid.Empty)
+            return _liveLogs.ToArray();
+
+        return _liveLogs.Where(e => e.RunId == runId.Value).ToArray();
+    }
 }

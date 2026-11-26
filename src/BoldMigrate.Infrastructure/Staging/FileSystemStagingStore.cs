@@ -1,4 +1,3 @@
-using System.Security.Cryptography;
 using BoldMigrate.Core.Interfaces;
 
 namespace BoldMigrate.Infrastructure.Staging;
@@ -9,7 +8,7 @@ public class FileSystemStagingStore : IStagingStore
 
     public FileSystemStagingStore(string? baseStagingPath = null)
     {
-        _baseStagingPath = baseStagingPath ?? Path.Combine(AppContext.BaseDirectory, "staging");
+        _baseStagingPath = Path.GetFullPath(baseStagingPath ?? Path.Combine(AppContext.BaseDirectory, "staging"));
         if (!Directory.Exists(_baseStagingPath))
         {
             Directory.CreateDirectory(_baseStagingPath);
@@ -21,12 +20,70 @@ public class FileSystemStagingStore : IStagingStore
         return Path.Combine(_baseStagingPath, runId.ToString("N"));
     }
 
+    /// <summary>
+    /// Safely resolves a catalog path inside the run's staging folder, rejecting path traversal.
+    /// </summary>
+    public string ResolveSafeRunFilePath(Guid runId, string sourcePath)
+    {
+        var runPath = Path.GetFullPath(GetRunStagingPath(runId));
+        var normalizedSegments = (sourcePath ?? string.Empty)
+            .Replace('\\', '/')
+            .Split('/', StringSplitOptions.RemoveEmptyEntries);
+
+        var safeSegments = new List<string>(normalizedSegments.Length);
+        foreach (var seg in normalizedSegments)
+        {
+            var trimmed = seg.Trim();
+            if (trimmed is "" or ".") continue;
+            if (trimmed == ".." || trimmed.Contains(':') || trimmed.IndexOfAny(Path.GetInvalidFileNameChars()) >= 0)
+            {
+                throw new InvalidOperationException($"Invalid or unsafe path segment '{seg}' in '{sourcePath}'.");
+            }
+            safeSegments.Add(trimmed);
+        }
+
+        if (safeSegments.Count == 0)
+        {
+            throw new InvalidOperationException("Source path cannot be empty.");
+        }
+
+        var combined = Path.GetFullPath(Path.Combine(new[] { runPath }.Concat(safeSegments).ToArray()));
+        var expectedPrefix = runPath.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar) + Path.DirectorySeparatorChar;
+        if (!combined.StartsWith(expectedPrefix, StringComparison.OrdinalIgnoreCase))
+        {
+            throw new InvalidOperationException($"Resolved staging path escapes run directory for '{sourcePath}'.");
+        }
+
+        return combined;
+    }
+
     public async Task<string> StageFileAsync(Guid runId, string sourcePath, byte[] content, CancellationToken ct = default)
     {
-        var runPath = GetRunStagingPath(runId);
-        var normalizedRelPath = sourcePath.TrimStart('/', '\\').Replace('/', Path.DirectorySeparatorChar);
-        var fullPath = Path.Combine(runPath, normalizedRelPath);
+        var fullPath = ResolveSafeRunFilePath(runId, sourcePath);
+        return await WriteCleanBytesAsync(fullPath, content, ct);
+    }
 
+    public async Task<string> StageOriginalAsync(Guid runId, string sourcePath, byte[] content, CancellationToken ct = default)
+    {
+        var fullPath = ResolveSafeRunFilePath(runId, "__originals/" + sourcePath.TrimStart('/', '\\'));
+        return await WriteCleanBytesAsync(fullPath, content, ct);
+    }
+
+    public string? ResolveOriginalPath(Guid runId, string sourcePath)
+    {
+        try
+        {
+            var fullPath = ResolveSafeRunFilePath(runId, "__originals/" + sourcePath.TrimStart('/', '\\'));
+            return File.Exists(fullPath) ? fullPath : null;
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    private static async Task<string> WriteCleanBytesAsync(string fullPath, byte[] content, CancellationToken ct)
+    {
         var dir = Path.GetDirectoryName(fullPath);
         if (!string.IsNullOrEmpty(dir) && !Directory.Exists(dir))
         {
@@ -47,12 +104,19 @@ public class FileSystemStagingStore : IStagingStore
 
     public async Task<byte[]> ReadStagedFileAsync(string stagedPath, CancellationToken ct = default)
     {
-        if (!File.Exists(stagedPath))
+        var fullPath = Path.GetFullPath(stagedPath);
+        var basePrefix = _baseStagingPath.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar) + Path.DirectorySeparatorChar;
+        if (!fullPath.StartsWith(basePrefix, StringComparison.OrdinalIgnoreCase))
         {
-            throw new FileNotFoundException("Staged file not found.", stagedPath);
+            throw new InvalidOperationException($"Refusing to read path outside staging root: '{stagedPath}'.");
         }
 
-        return await File.ReadAllBytesAsync(stagedPath, ct);
+        if (!File.Exists(fullPath))
+        {
+            throw new FileNotFoundException("Staged file not found.", fullPath);
+        }
+
+        return await File.ReadAllBytesAsync(fullPath, ct);
     }
 
     public Task DeleteRunStagingAsync(Guid runId, CancellationToken ct = default)
@@ -60,7 +124,14 @@ public class FileSystemStagingStore : IStagingStore
         var runPath = GetRunStagingPath(runId);
         if (Directory.Exists(runPath))
         {
-            Directory.Delete(runPath, recursive: true);
+            try
+            {
+                Directory.Delete(runPath, recursive: true);
+            }
+            catch (IOException)
+            {
+                // Best effort cleanup if a file handle is momentarily held
+            }
         }
         return Task.CompletedTask;
     }

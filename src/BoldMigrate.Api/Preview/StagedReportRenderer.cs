@@ -45,6 +45,18 @@ public class StagedReportRenderer : IStagedReportRenderer
             writer.ReportingServer = server;
             writer.ReportPath = reportPath;
 
+            if (parameters is { Count: > 0 })
+            {
+                var reportParams = parameters
+                    .Select(kvp => new BoldReports.Web.ReportParameter
+                    {
+                        Name = kvp.Key,
+                        Values = new List<string> { kvp.Value }
+                    })
+                    .ToList();
+                writer.SetParameters(reportParams);
+            }
+
             var writerFormat = format.Equals("CSV", StringComparison.OrdinalIgnoreCase)
                 ? BoldReports.Writer.WriterFormat.CSV
                 : BoldReports.Writer.WriterFormat.PDF;

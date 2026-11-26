@@ -120,6 +120,15 @@ function parseRdlInBrowser(fileName, xmlText) {
   return { name: fileName, schema, bucket, findings, severity };
 }
 
+function escapeScannerHtml(text) {
+  return String(text ?? "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
 function displayResults(results) {
   // Sort worst first (highest severity first)
   results.sort((a, b) => b.severity - a.severity);
@@ -143,10 +152,10 @@ function displayResults(results) {
 
     return `
       <tr>
-        <td style="font-weight: 600;">${r.name}</td>
-        <td><span class="status-badge badge-neutral">RDL ${r.schema}</span></td>
-        <td><span class="status-badge ${badgeClass}">${r.bucket}</span></td>
-        <td style="color: var(--br-text-muted);">${r.findings}</td>
+        <td style="font-weight: 600;">${escapeScannerHtml(r.name)}</td>
+        <td><span class="status-badge badge-neutral">RDL ${escapeScannerHtml(r.schema)}</span></td>
+        <td><span class="status-badge ${badgeClass}">${escapeScannerHtml(r.bucket)}</span></td>
+        <td style="color: var(--br-text-muted);">${escapeScannerHtml(r.findings)}</td>
       </tr>
     `;
   }).join("");
