@@ -285,7 +285,7 @@ public class MigrationController : ControllerBase
     }
 
     [HttpPost("runs/{id:guid}/upload")]
-    public async Task<IActionResult> StartUpload(Guid id, [FromQuery] string? action, CancellationToken ct)
+    public async Task<IActionResult> StartUpload(Guid id, [FromQuery] string? action, [FromQuery] string? conflictPolicy = null, CancellationToken ct = default)
     {
         if (action == "pause")
         {
@@ -299,8 +299,8 @@ public class MigrationController : ControllerBase
         }
 
         if (await _store.GetRunAsync(id, ct) == null) return NotFound();
-        QueueBackgroundWork(id, "UPLD-ERROR", "Upload", (orch, token) => orch.StartUploadAsync(id, token));
-        return Accepted(new { message = "Upload started" });
+        QueueBackgroundWork(id, "UPLD-ERROR", "Upload", (orch, token) => orch.StartUploadAsync(id, conflictPolicy, token));
+        return Accepted(new { message = "Upload started", conflictPolicy = UploadLayer.ParseConflictPolicy(conflictPolicy ?? _settings.UploadConflictPolicy).ToString() });
     }
 
     [HttpPost("runs/{id:guid}/validate")]
@@ -1109,22 +1109,23 @@ public class MigrationController : ControllerBase
             ? req.ConnectString.Trim()
             : (stagedDef?.ConnectString ?? string.Empty);
 
-        var (ok, message, detail) = await TestDataSourceConnectionAsync(
+        var (ok, message, detail, certUntrusted) = await TestDataSourceConnectionAsync(
             dataSourceId,
             effectiveConnectString,
             mode,
             req.UserName,
             req.Password,
             stagedDef?.Extension,
+            req.TrustServerCertificate,
             ct);
 
         if (!ok)
         {
             _logger.Log(LogLevel.Warning, "CONN-DS-FAIL", id, $"Validation failed for data source '{item.Name}': {message}", itemPath: item.SourcePath);
-            return BadRequest(new { success = false, message, detail });
+            return BadRequest(new { success = false, message, detail, certUntrusted });
         }
 
-        var hasCredentials = PersistDataSourceCredentials(id, item, req, mode);
+        var hasCredentials = PersistDataSourceCredentials(id, item, req, mode, effectiveConnectString);
         _logger.Log(LogLevel.Information, "CONN-DS-CRED", id, $"Validated and saved credentials ({mode}) for data source '{item.Name}'.", itemPath: item.SourcePath);
         return Ok(new { success = true, hasCredentials, credentialRetrieval = mode, message });
     }
@@ -1157,34 +1158,29 @@ public class MigrationController : ControllerBase
         return mode;
     }
 
-    private async Task<(bool Ok, string Message, string? Detail)> TestDataSourceConnectionAsync(
+    private async Task<(bool Ok, string Message, string? Detail, bool CertUntrusted)> TestDataSourceConnectionAsync(
         Guid dataSourceId,
         string connectString,
         string mode,
         string? userName,
         string? password,
         string? extension,
+        bool? explicitTrustCert,
         CancellationToken ct)
     {
         if (string.Equals(mode, "Prompt", StringComparison.OrdinalIgnoreCase))
         {
-            return (true, "Saved in Prompt mode (credentials will be requested at runtime).", null);
+            return (true, "Saved in Prompt mode (credentials will be requested at runtime).", null, false);
         }
 
         if (string.IsNullOrWhiteSpace(connectString))
         {
-            return (false, "Connection string is required.", "Enter a valid SQL Server connection string before validating.");
+            return (false, "Connection string is required.", "Enter a valid SQL Server connection string before validating.", false);
         }
 
-        var isSqlServer = string.IsNullOrWhiteSpace(extension) ||
-                          extension.Equals("SQL", StringComparison.OrdinalIgnoreCase) ||
-                          extension.Equals("MSSQL", StringComparison.OrdinalIgnoreCase) ||
-                          extension.Equals("SQLAZURE", StringComparison.OrdinalIgnoreCase) ||
-                          extension.Contains("SqlClient", StringComparison.OrdinalIgnoreCase);
-
-        if (!isSqlServer)
+        if (!BoldMigrate.Core.Common.SqlConnectionHelper.IsSqlServerConnection(connectString, extension))
         {
-            return (true, $"Saved ({extension} server validation is skipped; verified format only).", null);
+            return (true, $"Saved ({extension} server validation is skipped; verified format only).", null, false);
         }
 
         try
@@ -1194,11 +1190,21 @@ public class MigrationController : ControllerBase
                 ConnectTimeout = 5
             };
 
+            if (explicitTrustCert == true)
+            {
+                builder.TrustServerCertificate = true;
+            }
+            else if (BoldMigrate.Core.Common.SqlConnectionHelper.ShouldTrustSqlCertificate(
+                         connectString, extension, _settings.PreviewAllowUntrustedSqlCert))
+            {
+                builder.TrustServerCertificate = true;
+            }
+
             if (string.Equals(mode, "Store", StringComparison.OrdinalIgnoreCase))
             {
                 if (string.IsNullOrWhiteSpace(userName))
                 {
-                    return (false, "Username is required for 'Store (Saved Account)' mode.", "Enter a SQL username (for example: sa) and password.");
+                    return (false, "Username is required for 'Store (Saved Account)' mode.", "Enter a SQL username (for example: sa) and password.", false);
                 }
 
                 var effectivePassword = password;
@@ -1213,7 +1219,7 @@ public class MigrationController : ControllerBase
 
                 if (string.IsNullOrEmpty(effectivePassword))
                 {
-                    return (false, "Password is required for 'Store (Saved Account)' mode.", "Enter the password for this SQL account.");
+                    return (false, "Password is required for 'Store (Saved Account)' mode.", "Enter the password for this SQL account.", false);
                 }
 
                 builder.IntegratedSecurity = false;
@@ -1230,19 +1236,25 @@ public class MigrationController : ControllerBase
             await using var conn = new Microsoft.Data.SqlClient.SqlConnection(builder.ConnectionString);
             await conn.OpenAsync(ct);
             var dbName = string.IsNullOrWhiteSpace(conn.Database) ? "default" : conn.Database;
-            return (true, $"Connection verified (SQL Server {conn.ServerVersion}, database '{dbName}') and saved.", null);
+            return (true, $"Connection verified (SQL Server {conn.ServerVersion}, database '{dbName}') and saved.", null, false);
         }
         catch (Microsoft.Data.SqlClient.SqlException ex)
         {
-            return (false, Redactor.RedactSecrets(ex.Message), $"SQL Error {ex.Number} (State {ex.State}, Class {ex.Class}): {Redactor.RedactSecrets(ex.Message)}");
+            var redacted = Redactor.RedactSecrets(ex.Message);
+            var isCertIssue = BoldMigrate.Core.Common.SqlConnectionHelper.IsUntrustedCertificateSqlError(ex.Number, ex.Message);
+            var friendlyMsg = isCertIssue
+                ? "SQL Server presented a TLS certificate issued by an authority that is not trusted. Enable 'Trust self-signed SQL Server certificates' and retry."
+                : redacted;
+            return (false, friendlyMsg, $"SQL Error {ex.Number} (State {ex.State}, Class {ex.Class}): {redacted}", isCertIssue);
         }
         catch (Exception ex)
         {
-            return (false, Redactor.RedactSecrets(ex.Message), $"{ex.GetType().Name}: {Redactor.RedactSecrets(ex.Message)}");
+            var redacted = Redactor.RedactSecrets(ex.Message);
+            return (false, redacted, $"{ex.GetType().Name}: {redacted}", false);
         }
     }
 
-    private bool PersistDataSourceCredentials(Guid runId, CatalogItem item, DataSourceCredentialRequest req, string mode)
+    private bool PersistDataSourceCredentials(Guid runId, CatalogItem item, DataSourceCredentialRequest req, string mode, string? effectiveConnectString = null)
     {
         bool hasCredentials;
 
@@ -1298,7 +1310,19 @@ public class MigrationController : ControllerBase
                     };
                     if (props != null)
                     {
-                        if (!string.IsNullOrWhiteSpace(req.ConnectString))
+                        var updatedConnStr = !string.IsNullOrWhiteSpace(req.ConnectString)
+                            ? req.ConnectString.Trim()
+                            : effectiveConnectString;
+                        if (req.TrustServerCertificate == true &&
+                            !string.IsNullOrWhiteSpace(updatedConnStr) &&
+                            BoldMigrate.Core.Common.SqlConnectionHelper.IsSqlServerConnection(updatedConnStr) &&
+                            !BoldMigrate.Core.Common.SqlConnectionHelper.HasTrustServerCertificateSetting(updatedConnStr))
+                        {
+                            updatedConnStr = updatedConnStr.TrimEnd(';') + ";TrustServerCertificate=True;";
+                        }
+
+                        if (!string.IsNullOrWhiteSpace(updatedConnStr) &&
+                            (!string.IsNullOrWhiteSpace(req.ConnectString) || req.TrustServerCertificate == true))
                         {
                             var csElem = props.Element(ns + "ConnectString");
                             if (csElem == null)
@@ -1306,7 +1330,7 @@ public class MigrationController : ControllerBase
                                 csElem = new System.Xml.Linq.XElement(ns + "ConnectString");
                                 props.Add(csElem);
                             }
-                            csElem.Value = req.ConnectString.Trim();
+                            csElem.Value = updatedConnStr;
                         }
 
                         var crElem = props.Element(ns + "CredentialRetrieval");
@@ -1591,13 +1615,228 @@ public class MigrationController : ControllerBase
             : live.FirstOrDefault(l => string.Equals(l.Name, local.Name, StringComparison.OrdinalIgnoreCase));
         if (match != null) into[match.Id] = match;
     }
+
+    /// <summary>
+    /// Feature 1: Bulk Data Source Host / Database Remapping (+ optional bulk credentials).
+    /// Supports DryRun preview or persisting updated .rsds XML and credential vault entries.
+    /// </summary>
+    [HttpPost("runs/{id:guid}/datasources/bulk-remap")]
+    public async Task<IActionResult> BulkRemapDataSources(Guid id, [FromBody] BulkRemapDataSourcesRequest req, CancellationToken ct)
+    {
+        if (await _store.GetRunAsync(id, ct) == null) return NotFound(new { message = "Run not found." });
+
+        var dataSources = (await _store.GetCatalogItemsAsync(id, ItemType.DataSource, ct)).ToList();
+        if (req.DataSourceIds != null && req.DataSourceIds.Length > 0)
+        {
+            var idSet = req.DataSourceIds.ToHashSet();
+            dataSources = dataSources.Where(d => idSet.Contains(d.Id)).ToList();
+        }
+
+        var previews = new List<object>();
+        var updatedCount = 0;
+        var changedCount = 0;
+
+        foreach (var ds in dataSources)
+        {
+            SharedDataSourceDefinition? def = null;
+            if (!string.IsNullOrEmpty(ds.StagedFilePath) && System.IO.File.Exists(ds.StagedFilePath))
+            {
+                try { def = SharedDataSourceDefinition.Parse(await System.IO.File.ReadAllBytesAsync(ds.StagedFilePath, ct)); }
+                catch { }
+            }
+
+            var before = def?.ConnectString ?? string.Empty;
+            var after = BoldMigrate.Core.Common.SqlConnectionHelper.RemapConnectionString(
+                before,
+                req.FindServer,
+                req.ReplaceServer,
+                req.FindDatabase,
+                req.ReplaceDatabase,
+                req.RawFind,
+                req.RawReplace,
+                req.TrustServerCertificate);
+
+            var hasConnChange = !string.Equals(before, after, StringComparison.Ordinal);
+            var hasCredOverride = !string.IsNullOrWhiteSpace(req.CredentialRetrieval);
+            var changed = hasConnChange || hasCredOverride;
+            if (changed) changedCount++;
+
+            if (!req.DryRun && changed)
+            {
+                var effectiveMode = !string.IsNullOrWhiteSpace(req.CredentialRetrieval)
+                    ? req.CredentialRetrieval.Trim()
+                    : (def?.CredentialRetrieval ?? (_credStore.GetDataSourceCredential(ds.Id.ToString()) != null ? "Store" : "Prompt"));
+
+                var existingCred = _credStore.GetDataSourceCredential(ds.Id.ToString());
+                var effectiveUser = !string.IsNullOrWhiteSpace(req.UserName)
+                    ? req.UserName
+                    : (!string.IsNullOrEmpty(existingCred?.Domain) ? $"{existingCred.Domain}\\{existingCred.UserName}" : existingCred?.UserName);
+                var effectivePass = !string.IsNullOrEmpty(req.Password) ? req.Password : existingCred?.Password;
+
+                var credReq = new DataSourceCredentialRequest(effectiveUser, effectivePass, effectiveMode, after, req.TrustServerCertificate);
+                PersistDataSourceCredentials(id, ds, credReq, effectiveMode, after);
+                updatedCount++;
+            }
+
+            previews.Add(new
+            {
+                id = ds.Id,
+                name = ds.Name,
+                before,
+                after,
+                changed
+            });
+        }
+
+        if (!req.DryRun && updatedCount > 0)
+        {
+            _logger.Log(LogLevel.Information, "CONN-DS-BULK", id, $"Bulk remapped {updatedCount} data source(s).");
+        }
+
+        return Ok(new
+        {
+            success = true,
+            dryRun = req.DryRun,
+            total = previews.Count,
+            updatedCount = req.DryRun ? changedCount : updatedCount,
+            items = previews
+        });
+    }
+
+    /// <summary>
+    /// Feature 2: Pre-flight dry-run preview of Step 5 upload actions under the selected conflict policy.
+    /// </summary>
+    [HttpPost("runs/{id:guid}/upload/dry-run")]
+    public async Task<IActionResult> DryRunUpload(Guid id, [FromQuery] string? conflictPolicy = null, CancellationToken ct = default)
+    {
+        var run = await _store.GetRunAsync(id, ct);
+        if (run == null) return NotFound(new { message = "Run not found." });
+
+        var destUrl = !string.IsNullOrWhiteSpace(run.DestinationServerUrl) ? run.DestinationServerUrl : run.SourceServerUrl;
+        if (string.IsNullOrWhiteSpace(destUrl))
+            return BadRequest(new { message = "Destination Bold Reports URL is not configured for this run." });
+
+        var policy = UploadLayer.ParseConflictPolicy(conflictPolicy ?? _settings.UploadConflictPolicy);
+        var token = _credStore.GetDestinationToken();
+        using var destClient = new DestinationClient(destUrl, token);
+        using var scope = _scopeFactory.CreateScope();
+        var upload = scope.ServiceProvider.GetRequiredService<UploadLayer>();
+
+        var plan = await upload.PreviewUploadPlanAsync(id, destClient, policy, ct);
+        return Ok(plan);
+    }
+
+    /// <summary>
+    /// Feature 3: Verifies all staged Subreport, Shared DataSet, and Shared DataSource links.
+    /// </summary>
+    [HttpGet("runs/{id:guid}/dependencies/verify")]
+    public async Task<IActionResult> VerifyDependencies(Guid id, CancellationToken ct)
+    {
+        if (await _store.GetRunAsync(id, ct) == null) return NotFound();
+        var items = await _store.GetCatalogItemsAsync(id, ct: ct);
+        var summary = DependencyVerifier.VerifyCatalog(id, items);
+        return Ok(summary);
+    }
+
+    /// <summary>
+    /// Feature 3: Rebinds a broken DataSourceReference, SharedDataSetReference, or Subreport ReportName in staged RDL XML.
+    /// </summary>
+    [HttpPost("runs/{id:guid}/reports/{reportId:guid}/rebind-reference")]
+    public async Task<IActionResult> RebindReference(Guid id, Guid reportId, [FromBody] RebindReferenceRequest req, CancellationToken ct)
+    {
+        var item = await _store.GetCatalogItemAsync(reportId, ct);
+        if (item == null || item.RunId != id || item.ItemType != ItemType.Report) return NotFound(new { message = "Report not found." });
+        if (string.IsNullOrEmpty(item.StagedFilePath) || !System.IO.File.Exists(item.StagedFilePath))
+            return BadRequest(new { message = "Staged RDL file not found." });
+        if (string.IsNullOrWhiteSpace(req.NewReference))
+            return BadRequest(new { message = "NewReference is required." });
+
+        var originalBytes = await System.IO.File.ReadAllBytesAsync(item.StagedFilePath, ct);
+        var (updated, updatedBytes) = DependencyVerifier.RebindReferenceInRdl(originalBytes, req.ReferenceType, req.OldReference ?? string.Empty, req.NewReference);
+        if (!updated)
+            return BadRequest(new { message = $"Matching {req.ReferenceType} reference '{req.OldReference}' was not found in '{item.Name}'." });
+
+        await System.IO.File.WriteAllBytesAsync(item.StagedFilePath, updatedBytes, ct);
+        var record = await _store.GetReportRecordAsync(reportId, ct);
+        if (record != null)
+        {
+            record.LocalEditUtc = DateTime.UtcNow;
+            if (!string.IsNullOrEmpty(item.DestinationItemId)) record.LocalEditPendingUpload = true;
+            await _store.UpdateReportRecordAsync(record, ct);
+        }
+
+        _logger.Log(LogLevel.Information, "DEP-REBIND", id, $"Rebound {req.ReferenceType} '{req.OldReference}' -> '{req.NewReference}' in '{item.Name}'.", itemPath: item.SourcePath);
+        return Ok(new { success = true, message = $"Rebound '{req.OldReference}' to '{req.NewReference}'." });
+    }
+
+    /// <summary>
+    /// Feature 4: Captures/serves an SSRS source render PNG for side-by-side slider & pixel-diff comparison.
+    /// </summary>
+    [HttpGet("runs/{id:guid}/screenshots/{reportId:guid}/source.png")]
+    public async Task<IActionResult> GetSourceScreenshot(Guid id, Guid reportId, [FromQuery] bool refresh = false, CancellationToken ct = default)
+    {
+        var run = await _store.GetRunAsync(id, ct);
+        if (run == null) return NotFound(new { available = false, reason = "Run not found." });
+
+        var report = await _store.GetCatalogItemAsync(reportId, ct);
+        if (report == null || report.RunId != id || report.ItemType != ItemType.Report)
+            return NotFound(new { available = false, reason = "Report not found." });
+
+        var dir = Path.Combine(_staging.GetRunStagingPath(id), "screenshots");
+        var sourcePngPath = Path.Combine(dir, $"{reportId}-source.png");
+        if (!refresh && System.IO.File.Exists(sourcePngPath))
+        {
+            return PhysicalFile(sourcePngPath, "image/png");
+        }
+
+        if (string.IsNullOrWhiteSpace(run.SourceServerUrl))
+            return NotFound(new { available = false, reason = "Source SSRS server URL is not configured (local-folder run)." });
+
+        try
+        {
+            var cred = _credStore.GetSourceCredential(id.ToString());
+            var source = SourceAdapterFactory.Create(run.SourceServerUrl, run.SourceApi, cred);
+            using var disp = source as IDisposable;
+
+            var renderParams = new Dictionary<string, string> { ["rc:OutputFormat"] = "PNG" };
+            var bytes = await source.RenderAsync(report.SourcePath, "IMAGE", renderParams, ct);
+
+            // Check PNG signature (89 50 4E 47)
+            if (bytes.Length >= 8 && bytes[0] == 0x89 && bytes[1] == 0x50 && bytes[2] == 0x4E && bytes[3] == 0x47)
+            {
+                Directory.CreateDirectory(dir);
+                await System.IO.File.WriteAllBytesAsync(sourcePngPath, bytes, ct);
+                return File(bytes, "image/png");
+            }
+
+            return StatusCode(502, new { available = false, reason = "SSRS IMAGE output was not PNG (may require parameters or non-PNG TIFF fallback)." });
+        }
+        catch (Exception ex)
+        {
+            return StatusCode(502, new { available = false, reason = $"SSRS source render unavailable: {ex.Message}" });
+        }
+    }
 }
 
 public record CreateRunRequest(string? Name, string? SourceUrl, bool ForceNew = false);
 public record CredentialModeRequest(string CredentialMode);
 public record ConnectRequest(string SourceUrl, string? Username = null, string? Password = null, string? AuthMode = "Integrated", string? CredentialMode = null);
 public record ConnectDestinationRequest(string DestinationUrl, string? Email = null, string? Password = null, string? BearerToken = null);
-public record DataSourceCredentialRequest(string? UserName = null, string? Password = null, string? CredentialRetrieval = null, string? ConnectString = null);
+public record DataSourceCredentialRequest(string? UserName = null, string? Password = null, string? CredentialRetrieval = null, string? ConnectString = null, bool? TrustServerCertificate = null);
 public record ApproveRequest(string? UserId, string? UserName, string? Comment);
 public record SelectReportsRequest(Guid[]? SelectedReportIds);
 public record DeleteDestinationReportsRequest(Guid[]? ReportIds = null, string[]? Sections = null, bool DeleteAll = false, bool DeleteCategories = false);
+public record BulkRemapDataSourcesRequest(
+    Guid[]? DataSourceIds = null,
+    string? FindServer = null,
+    string? ReplaceServer = null,
+    string? FindDatabase = null,
+    string? ReplaceDatabase = null,
+    string? RawFind = null,
+    string? RawReplace = null,
+    string? CredentialRetrieval = null,
+    string? UserName = null,
+    string? Password = null,
+    bool? TrustServerCertificate = null,
+    bool DryRun = false);
+public record RebindReferenceRequest(string ReferenceType, string? OldReference, string NewReference);

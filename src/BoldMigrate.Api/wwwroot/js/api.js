@@ -76,9 +76,12 @@ const Api = {
     return await res.json();
   },
 
-  async startUpload(runId, action) {
-    const url = action ? `${this.baseUrl}/runs/${runId}/upload?action=${encodeURIComponent(action)}` : `${this.baseUrl}/runs/${runId}/upload`;
-    const res = await this.request(url, { method: "POST" });
+  async startUpload(runId, action, conflictPolicy) {
+    const params = [];
+    if (action) params.push(`action=${encodeURIComponent(action)}`);
+    if (conflictPolicy) params.push(`conflictPolicy=${encodeURIComponent(conflictPolicy)}`);
+    const qs = params.length > 0 ? `?${params.join("&")}` : "";
+    const res = await this.request(`${this.baseUrl}/runs/${runId}/upload${qs}`, { method: "POST" });
     return await res.json();
   },
 
@@ -258,26 +261,27 @@ const Api = {
     return await res.json();
   },
 
-  async setDataSourceCredentials(runId, dataSourceId, userName, password, credentialRetrieval, connectString) {
+  async setDataSourceCredentials(runId, dataSourceId, userName, password, credentialRetrieval, connectString, trustServerCertificate = null) {
     const res = await this.request(`${this.baseUrl}/runs/${runId}/datasources/${dataSourceId}/credentials`, {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ userName, password, credentialRetrieval, connectString })
+      body: JSON.stringify({ userName, password, credentialRetrieval, connectString, trustServerCertificate })
     });
     if (!res.ok) throw new Error(`Failed to save credentials (HTTP ${res.status})`);
     return await res.json();
   },
 
-  async validateAndSaveDataSourceCredentials(runId, dataSourceId, userName, password, credentialRetrieval, connectString) {
+  async validateAndSaveDataSourceCredentials(runId, dataSourceId, userName, password, credentialRetrieval, connectString, trustServerCertificate = null) {
     const res = await this.request(`${this.baseUrl}/runs/${runId}/datasources/${dataSourceId}/validate-and-save`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ userName, password, credentialRetrieval, connectString })
+      body: JSON.stringify({ userName, password, credentialRetrieval, connectString, trustServerCertificate })
     });
     const data = await res.json().catch(() => null);
     if (!res.ok) {
       return {
         success: false,
+        certUntrusted: !!(data && data.certUntrusted),
         message: data?.message || `Validation failed (HTTP ${res.status})`,
         detail: data?.detail || ""
       };
@@ -314,25 +318,6 @@ const Api = {
     }
   },
 
-  async evaluateExpression(request) {
-    const res = await this.request(`${this.baseUrl}/expression/evaluate`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(request)
-    });
-    return await res.json();
-  },
-
-  async getExpressionSamples() {
-    try {
-      const res = await this.request(`${this.baseUrl}/expression/samples`);
-      if (res.ok) return await res.json();
-      return [];
-    } catch {
-      return [];
-    }
-  },
-
   async getSections(runId) {
     try {
       const res = await this.request(`${this.baseUrl}/runs/${runId}/destination/sections`);
@@ -353,6 +338,35 @@ const Api = {
         deleteAll: !!options.deleteAll,
         deleteCategories: !!options.deleteCategories
       })
+    });
+    return await res.json();
+  },
+
+  async bulkRemapDataSources(runId, request) {
+    const res = await this.request(`${this.baseUrl}/runs/${runId}/datasources/bulk-remap`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(request)
+    });
+    return await res.json();
+  },
+
+  async dryRunUpload(runId, conflictPolicy) {
+    const q = conflictPolicy ? `?conflictPolicy=${encodeURIComponent(conflictPolicy)}` : "";
+    const res = await this.request(`${this.baseUrl}/runs/${runId}/upload/dry-run${q}`, { method: "POST" });
+    return await res.json();
+  },
+
+  async verifyDependencies(runId) {
+    const res = await this.request(`${this.baseUrl}/runs/${runId}/dependencies/verify`);
+    return await res.json();
+  },
+
+  async rebindReference(runId, reportId, request) {
+    const res = await this.request(`${this.baseUrl}/runs/${runId}/reports/${reportId}/rebind-reference`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(request)
     });
     return await res.json();
   }

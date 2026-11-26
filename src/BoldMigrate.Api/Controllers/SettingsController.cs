@@ -53,6 +53,9 @@ public class SettingsController : ControllerBase
             TransformRulesRefreshHours = _settings.TransformRulesRefreshHours,
             UploadMaxParallel = newSettings.UploadMaxParallel,
             UploadMaxAttempts = _settings.UploadMaxAttempts,
+            UploadConflictPolicy = string.IsNullOrWhiteSpace(newSettings.UploadConflictPolicy)
+                ? _settings.UploadConflictPolicy
+                : newSettings.UploadConflictPolicy.Trim(),
             UploadRetryBackoffSeconds = _settings.UploadRetryBackoffSeconds,
             ValidationDataAccuracyThreshold = newSettings.ValidationDataAccuracyThreshold,
             ValidationVisualSimilarityThreshold = newSettings.ValidationVisualSimilarityThreshold,
@@ -119,6 +122,8 @@ public class SettingsController : ControllerBase
                 settings.ExtractionPreferredApi = persisted.ExtractionPreferredApi;
             if (persisted.UploadMaxParallel.HasValue)
                 settings.UploadMaxParallel = persisted.UploadMaxParallel.Value;
+            if (!string.IsNullOrWhiteSpace(persisted.UploadConflictPolicy))
+                settings.UploadConflictPolicy = persisted.UploadConflictPolicy;
             if (persisted.StagingDeleteOnClose.HasValue)
                 settings.StagingDeleteOnClose = persisted.StagingDeleteOnClose.Value;
             if (persisted.UrlShimEnabled.HasValue)
@@ -153,6 +158,7 @@ public class SettingsController : ControllerBase
                 ExtractionMaxParallel = settings.ExtractionMaxParallel,
                 ExtractionPreferredApi = settings.ExtractionPreferredApi,
                 UploadMaxParallel = settings.UploadMaxParallel,
+                UploadConflictPolicy = settings.UploadConflictPolicy,
                 StagingDeleteOnClose = settings.StagingDeleteOnClose,
                 UrlShimEnabled = settings.UrlShimEnabled,
                 UrlShimListenPath = settings.UrlShimListenPath,
@@ -176,6 +182,7 @@ public class SettingsController : ControllerBase
         dst.ExtractionMaxParallel = src.ExtractionMaxParallel;
         dst.ExtractionPreferredApi = src.ExtractionPreferredApi;
         dst.UploadMaxParallel = src.UploadMaxParallel;
+        dst.UploadConflictPolicy = src.UploadConflictPolicy;
         dst.StagingDeleteOnClose = src.StagingDeleteOnClose;
         dst.UrlShimEnabled = src.UrlShimEnabled;
         dst.UrlShimListenPath = src.UrlShimListenPath;
@@ -198,6 +205,8 @@ public class SettingsController : ControllerBase
         public string? ExtractionPreferredApi { get; set; }
         [JsonPropertyName("Upload.MaxParallel")]
         public int? UploadMaxParallel { get; set; }
+        [JsonPropertyName("Upload.ConflictPolicy")]
+        public string? UploadConflictPolicy { get; set; }
         [JsonPropertyName("Staging.DeleteOnClose")]
         public bool? StagingDeleteOnClose { get; set; }
         [JsonPropertyName("UrlShim.Enabled")]

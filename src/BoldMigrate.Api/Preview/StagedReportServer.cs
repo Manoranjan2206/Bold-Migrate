@@ -218,37 +218,8 @@ public sealed class StagedReportServer : ReportingServer
         };
     }
 
-    private static bool ShouldAppendTrustServerCertificate(string? connectString, string? extension, bool allowUntrusted)
-    {
-        if (string.IsNullOrWhiteSpace(connectString)) return false;
-        var isSql = string.Equals(extension, "SQL", StringComparison.OrdinalIgnoreCase) ||
-                    connectString.Contains("Server=", StringComparison.OrdinalIgnoreCase) ||
-                    connectString.Contains("Data Source=", StringComparison.OrdinalIgnoreCase);
-        if (!isSql || connectString.Contains("TrustServerCertificate=", StringComparison.OrdinalIgnoreCase))
-        {
-            return false;
-        }
-
-        return allowUntrusted || IsLocalOrInternalSqlHost(connectString);
-    }
-
-    private static bool IsLocalOrInternalSqlHost(string connectString)
-    {
-        try
-        {
-            var builder = new Microsoft.Data.SqlClient.SqlConnectionStringBuilder(connectString);
-            var server = (builder.DataSource ?? string.Empty).Split(',')[0].Split('\\')[0].Trim();
-            return server.Equals("localhost", StringComparison.OrdinalIgnoreCase) ||
-                   server.Equals("127.0.0.1", StringComparison.OrdinalIgnoreCase) ||
-                   server.Equals("(local)", StringComparison.OrdinalIgnoreCase) ||
-                   server.Equals(".", StringComparison.OrdinalIgnoreCase) ||
-                   server.Equals("host.docker.internal", StringComparison.OrdinalIgnoreCase);
-        }
-        catch
-        {
-            return false;
-        }
-    }
+    private static bool ShouldAppendTrustServerCertificate(string? connectString, string? extension, bool allowUntrusted) =>
+        BoldMigrate.Core.Common.SqlConnectionHelper.ShouldTrustSqlCertificate(connectString, extension, allowUntrusted);
 
     private static byte[] EnsureTrustServerCertificateInRdl(byte[] rdlBytes, bool allowUntrusted)
     {

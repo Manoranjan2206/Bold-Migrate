@@ -62,4 +62,59 @@ public class HostResolverAndSettingsTests
     {
         Assert.True(ReportStateMachine.CanTransition(ReportState.Uploaded, ReportState.Uploading));
     }
+
+    [Theory]
+    [InlineData("Server=localhost\\SQLEXPRESS;Database=Sales;", null, false, true)]
+    [InlineData("Server=.\\SQLEXPRESS;Database=Sales;", "SQL", false, true)]
+    [InlineData("Data Source=(local);Initial Catalog=Sales;", "SQL", false, true)]
+    [InlineData("Server=db.corp.local;Database=Sales;", "SQL", false, false)]
+    [InlineData("Server=db.corp.local;Database=Sales;", "SQL", true, true)]
+    [InlineData("Server=db.corp.local;Database=Sales;TrustServerCertificate=False;", "SQL", true, false)]
+    public void SqlConnectionHelper_TrustsLoopbackOrExplicitOptInOnly(
+        string connStr,
+        string? ext,
+        bool allowUntrusted,
+        bool expected)
+    {
+        Assert.Equal(expected, SqlConnectionHelper.ShouldTrustSqlCertificate(connStr, ext, allowUntrusted));
+    }
+
+    [Fact]
+    public void SqlConnectionHelper_DetectsCertificateChainError()
+    {
+        Assert.True(SqlConnectionHelper.IsUntrustedCertificateSqlError(-2146893019, "SSL Provider, error: 0 - Generic"));
+        Assert.True(SqlConnectionHelper.IsUntrustedCertificateSqlError(0, "The certificate chain was issued by an authority that is not trusted."));
+        Assert.False(SqlConnectionHelper.IsUntrustedCertificateSqlError(18456, "Login failed for user 'sa'."));
+    }
+
+    [Fact]
+    public void SqlConnectionHelper_RemapsHostDatabaseAndTrustCert()
+    {
+        var updated = SqlConnectionHelper.RemapConnectionString(
+            "Data Source=DEV-SQL01;Initial Catalog=Sales_Dev;Integrated Security=True",
+            findServer: "DEV-SQL01",
+            replaceServer: "PROD-SQL02.corp.local",
+            findDatabase: "Sales_Dev",
+            replaceDatabase: "Sales_Prod",
+            trustServerCertificate: true);
+
+        Assert.Contains("PROD-SQL02.corp.local", updated, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("Sales_Prod", updated, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("TrustServerCertificate=True", updated, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("DEV-SQL01", updated, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Theory]
+    [InlineData(null, "Skip")]
+    [InlineData("skip", "Skip")]
+    [InlineData("OVERWRITE", "Overwrite")]
+    [InlineData("Rename", "Rename")]
+    [InlineData("invalid", "Skip")]
+    public void MigrationSettings_NormalizesConflictPolicy(string? input, string expected)
+    {
+        var s = new MigrationSettings { UploadConflictPolicy = input ?? string.Empty };
+        var (ok, _) = s.ValidateAndNormalize();
+        Assert.True(ok);
+        Assert.Equal(expected, s.UploadConflictPolicy);
+    }
 }
