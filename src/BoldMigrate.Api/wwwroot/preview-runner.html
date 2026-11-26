@@ -50,6 +50,7 @@
         $("#viewer").boldReportViewer({
           reportServiceUrl: "/api/preview/runs/" + encodeURIComponent(runId) + "/viewer",
           reportPath: reportPath,
+          printMode: true,
           renderingComplete: function (args) {
             console.log("Bold Reports: Rendering complete", args);
             window.__renderStatus = 'complete';
@@ -93,6 +94,24 @@
         document.body.setAttribute('data-render-status', 'error');
       }
     }
+
+    // printMode:true does not raise renderingComplete, so treat the report as rendered once the
+    // page view container (id prefix varies, suffix is stable) has content that stops changing.
+    (function () {
+      var last = '', stable = 0;
+      setInterval(function () {
+        if (document.body.getAttribute('data-render-status') !== 'rendering') return;
+        var c = document.querySelector('[id$="_pageviewContainer"]');
+        var sig = c ? c.querySelectorAll('*').length + ':' + (c.innerText || '').trim().length : '';
+        var hasText = c && (c.innerText || '').trim().length > 20;
+        if (hasText && sig === last) { stable++; } else { stable = 0; }
+        last = sig;
+        if (stable >= 3) {
+          window.__renderStatus = 'complete';
+          document.body.setAttribute('data-render-status', 'complete');
+        }
+      }, 500);
+    })();
 
     window.addEventListener('error', function (event) {
       if (window.__renderStatus !== 'complete') {

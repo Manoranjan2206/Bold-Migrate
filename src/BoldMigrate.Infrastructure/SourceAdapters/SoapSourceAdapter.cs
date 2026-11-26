@@ -246,7 +246,7 @@ public class SoapSourceAdapter : ISourceCatalog, IDisposable
             : _endpointUrl.TrimEnd('/');
 
         var path = "/" + (reportId ?? string.Empty).TrimStart('/');
-        var query = string.Join("&", parameters.Select(kv => $"{Uri.EscapeDataString(kv.Key)}={Uri.EscapeDataString(kv.Value)}"));
+        var query = SsrsUrlAccess.BuildQuery(parameters);
         var url = $"{serverBase}?{Uri.EscapeDataString(path)}&rs:Format={Uri.EscapeDataString(format)}&rs:Command=Render";
         if (!string.IsNullOrEmpty(query)) url += "&" + query;
 

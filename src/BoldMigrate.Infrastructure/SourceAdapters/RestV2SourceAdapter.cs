@@ -359,7 +359,7 @@ public class RestV2SourceAdapter : ISourceCatalog, IDisposable
     /// </summary>
     public async Task<byte[]> RenderAsync(string reportPathOrId, string format, IDictionary<string, string> parameters, CancellationToken ct = default)
     {
-        var query = string.Join("&", parameters.Select(kv => $"{Uri.EscapeDataString(kv.Key)}={Uri.EscapeDataString(kv.Value)}"));
+        var query = SsrsUrlAccess.BuildQuery(parameters);
 
         // URL access lives on the /ReportServer endpoint, not the /Reports web portal.
         var trimmed = _baseUrl.TrimEnd('/');
