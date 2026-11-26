@@ -1798,7 +1798,7 @@ public class MigrationController : ControllerBase
             var source = SourceAdapterFactory.Create(run.SourceServerUrl, run.SourceApi, cred);
             using var disp = source as IDisposable;
 
-            var renderParams = new Dictionary<string, string> { ["rc:OutputFormat"] = "PNG" };
+            var renderParams = new Dictionary<string, string> { ["rc:OutputFormat"] = "PNG", ["rc:StartPage"] = "1" };
             var bytes = await source.RenderAsync(report.SourcePath, "IMAGE", renderParams, ct);
 
             // Check PNG signature (89 50 4E 47)

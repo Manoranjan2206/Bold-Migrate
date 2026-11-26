@@ -55,6 +55,23 @@ public class RenderValidationEngine
         _logger = logger;
     }
 
+    /// <summary>
+    /// Screenshots only the report page body. The viewer id prefix depends on the integration,
+    /// so match the stable "_pageviewContainer" suffix or the e-reportviewer-pageview class.
+    /// Falls back to the full viewport if the container is missing.
+    /// </summary>
+    private static async Task ScreenshotReportBodyAsync(IPage page, PageScreenshotOptions options)
+    {
+        await page.AddStyleTagAsync(new PageAddStyleTagOptions { Content = "[id$='_toolbarContainer'], .e-reportviewer-toolbar { display: none !important; }" });
+        var body = page.Locator("[id$='_pageviewContainer'], .e-reportviewer-pageview").First;
+        if (await body.CountAsync() > 0 && await body.IsVisibleAsync())
+        {
+            await body.ScreenshotAsync(new LocatorScreenshotOptions { Path = options.Path });
+            return;
+        }
+        await page.ScreenshotAsync(options);
+    }
+
     public static bool IsDataSourceConnectionIssue(string? message)
     {
         if (string.IsNullOrWhiteSpace(message)) return false;
@@ -371,7 +388,7 @@ public class RenderValidationEngine
                         var screenshotPath = Path.Combine(runDir, screenshotFileName);
                         try
                         {
-                            await page.ScreenshotAsync(new PageScreenshotOptions
+                            await ScreenshotReportBodyAsync(page, new PageScreenshotOptions
                             {
                                 Path = screenshotPath,
                                 FullPage = false

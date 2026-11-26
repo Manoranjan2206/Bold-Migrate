@@ -431,6 +431,7 @@ function openInteractiveViewer(reportId, reportPath, mode = "staged") {
   if (mode === "staged") {
     $(host).boldReportViewer({
       reportServiceUrl: "/api/preview/runs/" + currentRun.id + "/viewer",
+      printMode: true,
       reportPath: reportPath || reportId
     });
   } else {
@@ -444,6 +445,7 @@ function openInteractiveViewer(reportId, reportPath, mode = "staged") {
     $(host).boldReportViewer({
       reportServiceUrl: serviceUrl,
       reportServerUrl: destUrl,
+      printMode: true,
       reportPath: reportPath,
       serviceAuthorizationToken: destinationSessionCache.bearerToken ? `bearer ${destinationSessionCache.bearerToken}` : ""
     });
