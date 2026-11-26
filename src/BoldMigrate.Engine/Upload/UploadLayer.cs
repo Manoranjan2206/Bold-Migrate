@@ -370,92 +370,146 @@ public class DestinationClient : IDisposable
         bool impersonateUser = false,
         CancellationToken ct = default)
     {
+        var (success, id, _) = await CreateDataSourceWithPolicyAsync(
+            tenantId, name, connectString, serverType, username, password,
+            credentialRetrieval, windowsCredentials, impersonateUser,
+            ConflictResolutionPolicy.Skip, allowSkipFallback: false, ct);
+        return (success, id);
+    }
+
+    public async Task<(bool success, string id, string effectiveName)> CreateDataSourceWithPolicyAsync(
+        string tenantId,
+        string name,
+        string connectString,
+        string serverType,
+        string? username,
+        string? password,
+        string credentialRetrieval = "None",
+        bool windowsCredentials = false,
+        bool impersonateUser = false,
+        ConflictResolutionPolicy conflictPolicy = ConflictResolutionPolicy.Skip,
+        bool allowSkipFallback = true,
+        CancellationToken ct = default)
+    {
         var isWindows = windowsCredentials ||
                         string.Equals(credentialRetrieval, "Integrated", StringComparison.OrdinalIgnoreCase) ||
                         (!string.IsNullOrEmpty(username) && username.Contains('\\'));
 
-        var dsDef = new Dictionary<string, object>
+        Dictionary<string, object> BuildDef()
         {
-            { "ConnectString", connectString },
-            { "CredentialRetrieval", credentialRetrieval },
-            { "ImpersonateUser", impersonateUser },
-            { "WindowsCredentials", isWindows },
-            { "ServerType", serverType }
-        };
-
-        if (!string.IsNullOrWhiteSpace(username) && !string.Equals(credentialRetrieval, "Integrated", StringComparison.OrdinalIgnoreCase))
-        {
-            dsDef["UserName"] = username;
+            var def = new Dictionary<string, object>
+            {
+                { "ConnectString", connectString },
+                { "CredentialRetrieval", credentialRetrieval },
+                { "ImpersonateUser", impersonateUser },
+                { "WindowsCredentials", isWindows },
+                { "ServerType", serverType }
+            };
+            if (!string.IsNullOrWhiteSpace(username) && !string.Equals(credentialRetrieval, "Integrated", StringComparison.OrdinalIgnoreCase))
+                def["UserName"] = username;
+            if (!string.IsNullOrWhiteSpace(password) && !string.Equals(credentialRetrieval, "Integrated", StringComparison.OrdinalIgnoreCase))
+                def["Password"] = password;
+            return def;
         }
-        if (!string.IsNullOrWhiteSpace(password) && !string.Equals(credentialRetrieval, "Integrated", StringComparison.OrdinalIgnoreCase))
+
+        async Task<(HttpStatusCode Status, string? Id, string? Error)> TryPostAsync(string targetName)
         {
-            dsDef["Password"] = password;
+            var payload = new Dictionary<string, object>
+            {
+                { "Name", targetName },
+                { "Description", $"Auto-created from RSDS: {name}" },
+                { "DataSourceDefinition", BuildDef() }
+            };
+            var json = JsonSerializer.Serialize(payload);
+            var urls = new[]
+            {
+                $"{_serverUrl}/reporting/api/site/{tenantId}/v1.0/reports/data-sources",
+                $"{_serverUrl}/api/site/{tenantId}/v1.0/reports/data-sources"
+            };
+            HttpResponseMessage? lastRes = null;
+            string? lastError = null;
+            foreach (var url in urls)
+            {
+                try
+                {
+                    using var req = new HttpRequestMessage(HttpMethod.Post, url)
+                    {
+                        Content = new StringContent(json, Encoding.UTF8, "application/json")
+                    };
+                    if (!string.IsNullOrEmpty(_bearerToken))
+                        req.Headers.Authorization = new AuthenticationHeaderValue("Bearer", _bearerToken);
+
+                    var res = await _httpClient.SendAsync(req, ct);
+                    lastRes = res;
+                    if (res.StatusCode == HttpStatusCode.Conflict)
+                        return (HttpStatusCode.Conflict, null, null);
+                    if (res.IsSuccessStatusCode)
+                    {
+                        using var doc = await JsonDocument.ParseAsync(await res.Content.ReadAsStreamAsync(ct), cancellationToken: ct);
+                        var id = doc.RootElement.TryGetProperty("PublishedItemId", out var pProp) && !string.IsNullOrWhiteSpace(pProp.GetString())
+                            ? pProp.GetString()
+                            : (doc.RootElement.TryGetProperty("Id", out var idProp) ? idProp.GetString() : null);
+                        if (!string.IsNullOrWhiteSpace(id)) return (res.StatusCode, id, null);
+                        throw new HttpRequestException($"CreateDataSource '{targetName}' returned HTTP {(int)res.StatusCode} without an item Id.");
+                    }
+                    lastError = await res.Content.ReadAsStringAsync(ct);
+                }
+                catch (Exception ex) when (ex is not OperationCanceledException)
+                {
+                    lastError = ex.Message;
+                }
+            }
+            return (lastRes?.StatusCode ?? HttpStatusCode.ServiceUnavailable, null, lastError);
         }
 
+        var first = await TryPostAsync(name);
+        if (first.Id != null) return (true, first.Id, name);
+
+        if (first.Status == HttpStatusCode.Conflict)
+        {
+            var existingList = await GetItemsAsync(tenantId, "Datasource", ct);
+            var existing = existingList.FirstOrDefault(i => string.Equals(i.Name, name, StringComparison.OrdinalIgnoreCase));
+
+            if (conflictPolicy == ConflictResolutionPolicy.Overwrite && existing != null)
+            {
+                await UpdateDataSourceAsync(tenantId, existing.Id, name, BuildDef(), ct);
+                return (true, existing.Id, name);
+            }
+
+            if (conflictPolicy == ConflictResolutionPolicy.Rename)
+            {
+                var uniqueName = UploadLayer.PickUniqueDestinationName(name, existingList.Select(i => i.Name));
+                var renamed = await TryPostAsync(uniqueName);
+                if (renamed.Id != null) return (true, renamed.Id, uniqueName);
+                throw new HttpRequestException($"Failed to create renamed DataSource '{uniqueName}': {renamed.Error}");
+            }
+
+            return (allowSkipFallback && existing != null, existing?.Id ?? string.Empty, name);
+        }
+
+        throw new HttpRequestException($"Failed to create DataSource '{name}' on Bold Reports (HTTP {(int)first.Status}): {first.Error}");
+    }
+
+    public async Task UpdateDataSourceAsync(
+        string tenantId,
+        string itemId,
+        string name,
+        Dictionary<string, object> dataSourceDefinition,
+        CancellationToken ct = default)
+    {
         var payload = new Dictionary<string, object>
         {
+            { "ItemId", itemId },
             { "Name", name },
-            { "Description", $"Auto-created from RSDS: {name}" },
-            { "DataSourceDefinition", dsDef }
+            { "DataSourceDefinition", dataSourceDefinition }
         };
-
         var json = JsonSerializer.Serialize(payload);
         var urls = new[]
         {
             $"{_serverUrl}/reporting/api/site/{tenantId}/v1.0/reports/data-sources",
             $"{_serverUrl}/api/site/{tenantId}/v1.0/reports/data-sources"
         };
-
-        HttpResponseMessage? lastRes = null;
-        string? lastError = null;
-
-        foreach (var url in urls)
-        {
-            try
-            {
-                using var req = new HttpRequestMessage(HttpMethod.Post, url)
-                {
-                    Content = new StringContent(json, Encoding.UTF8, "application/json")
-                };
-                if (!string.IsNullOrEmpty(_bearerToken))
-                {
-                    req.Headers.Authorization = new AuthenticationHeaderValue("Bearer", _bearerToken);
-                }
-
-                var res = await _httpClient.SendAsync(req, ct);
-                lastRes = res;
-
-                if (res.StatusCode == HttpStatusCode.Conflict)
-                {
-                    var existing = (await GetItemsAsync(tenantId, "Datasource", ct))
-                        .FirstOrDefault(i => string.Equals(i.Name, name, StringComparison.OrdinalIgnoreCase));
-                    return (false, existing?.Id ?? string.Empty);
-                }
-
-                if (res.IsSuccessStatusCode)
-                {
-                    using var doc = await JsonDocument.ParseAsync(await res.Content.ReadAsStreamAsync(ct), cancellationToken: ct);
-                    if (doc.RootElement.TryGetProperty("PublishedItemId", out var pProp) && !string.IsNullOrWhiteSpace(pProp.GetString()))
-                    {
-                        return (true, pProp.GetString()!);
-                    }
-                    if (doc.RootElement.TryGetProperty("Id", out var idProp) && !string.IsNullOrWhiteSpace(idProp.GetString()))
-                    {
-                        return (true, idProp.GetString()!);
-                    }
-                    throw new HttpRequestException($"CreateDataSource '{name}' returned HTTP {(int)res.StatusCode} without an item Id.");
-                }
-
-                lastError = await res.Content.ReadAsStringAsync(ct);
-            }
-            catch (Exception ex) when (ex is not OperationCanceledException)
-            {
-                lastError = ex.Message;
-            }
-        }
-
-        var status = lastRes != null ? $"HTTP {(int)lastRes.StatusCode}" : "Unreachable";
-        throw new HttpRequestException($"Failed to create DataSource '{name}' on Bold Reports ({status}): {lastError}");
+        await SendPutUpdateAsync("DataSource", itemId, json, urls, ct);
     }
 
     public async Task<(bool success, string id)> CreateDataSetAsync(
@@ -465,70 +519,122 @@ public class DestinationClient : IDisposable
         string dataSourceName,
         CancellationToken ct = default)
     {
+        var (success, id, _) = await CreateDataSetWithPolicyAsync(
+            tenantId, name, base64Content, dataSourceName,
+            ConflictResolutionPolicy.Skip, allowSkipFallback: false, ct);
+        return (success, id);
+    }
+
+    public async Task<(bool success, string id, string effectiveName)> CreateDataSetWithPolicyAsync(
+        string tenantId,
+        string name,
+        string base64Content,
+        string dataSourceName,
+        ConflictResolutionPolicy conflictPolicy = ConflictResolutionPolicy.Skip,
+        bool allowSkipFallback = true,
+        CancellationToken ct = default)
+    {
+        async Task<(HttpStatusCode Status, string? Id, string? Error)> TryPostAsync(string targetName)
+        {
+            var payload = new Dictionary<string, object>
+            {
+                { "Name", targetName },
+                { "Description", $"Imported dataset: {name}" },
+                { "DataSourceMappingInfo", new[] { new { Name = dataSourceName, DataSourceName = dataSourceName } } },
+                { "ItemContent", base64Content }
+            };
+            var json = JsonSerializer.Serialize(payload, _relaxedJsonOptions);
+            var urls = new[]
+            {
+                $"{_serverUrl}/reporting/api/site/{tenantId}/v1.0/reports/datasets",
+                $"{_serverUrl}/api/site/{tenantId}/v1.0/reports/datasets"
+            };
+            HttpResponseMessage? lastRes = null;
+            string? lastError = null;
+            foreach (var url in urls)
+            {
+                try
+                {
+                    using var req = new HttpRequestMessage(HttpMethod.Post, url)
+                    {
+                        Content = new StringContent(json, Encoding.UTF8, "application/json")
+                    };
+                    if (!string.IsNullOrEmpty(_bearerToken))
+                        req.Headers.Authorization = new AuthenticationHeaderValue("Bearer", _bearerToken);
+
+                    var res = await _httpClient.SendAsync(req, ct);
+                    lastRes = res;
+                    if (res.StatusCode == HttpStatusCode.Conflict)
+                        return (HttpStatusCode.Conflict, null, null);
+                    if (res.IsSuccessStatusCode)
+                    {
+                        using var doc = await JsonDocument.ParseAsync(await res.Content.ReadAsStreamAsync(ct), cancellationToken: ct);
+                        var id = doc.RootElement.TryGetProperty("PublishedItemId", out var pProp) && !string.IsNullOrWhiteSpace(pProp.GetString())
+                            ? pProp.GetString()
+                            : (doc.RootElement.TryGetProperty("Id", out var idProp) ? idProp.GetString() : null);
+                        if (!string.IsNullOrWhiteSpace(id)) return (res.StatusCode, id, null);
+                        throw new HttpRequestException($"CreateDataSet '{targetName}' returned HTTP {(int)res.StatusCode} without an item Id.");
+                    }
+                    lastError = await res.Content.ReadAsStringAsync(ct);
+                }
+                catch (Exception ex) when (ex is not OperationCanceledException)
+                {
+                    lastError = ex.Message;
+                }
+            }
+            return (lastRes?.StatusCode ?? HttpStatusCode.ServiceUnavailable, null, lastError);
+        }
+
+        var first = await TryPostAsync(name);
+        if (first.Id != null) return (true, first.Id, name);
+
+        if (first.Status == HttpStatusCode.Conflict)
+        {
+            var existing = await GetDataSetsAsync(tenantId, ct);
+            existing.TryGetValue(name, out var existingId);
+
+            if (conflictPolicy == ConflictResolutionPolicy.Overwrite && !string.IsNullOrWhiteSpace(existingId))
+            {
+                await UpdateDataSetAsync(tenantId, existingId, name, base64Content, dataSourceName, ct);
+                return (true, existingId, name);
+            }
+
+            if (conflictPolicy == ConflictResolutionPolicy.Rename)
+            {
+                var uniqueName = UploadLayer.PickUniqueDestinationName(name, existing.Keys);
+                var renamed = await TryPostAsync(uniqueName);
+                if (renamed.Id != null) return (true, renamed.Id, uniqueName);
+                throw new HttpRequestException($"Failed to create renamed DataSet '{uniqueName}': {renamed.Error}");
+            }
+
+            return (allowSkipFallback && !string.IsNullOrWhiteSpace(existingId), existingId ?? string.Empty, name);
+        }
+
+        throw new HttpRequestException($"Failed to create DataSet '{name}' on Bold Reports (HTTP {(int)first.Status}): {first.Error}");
+    }
+
+    public async Task UpdateDataSetAsync(
+        string tenantId,
+        string itemId,
+        string name,
+        string base64Content,
+        string dataSourceName,
+        CancellationToken ct = default)
+    {
         var payload = new Dictionary<string, object>
         {
+            { "ItemId", itemId },
             { "Name", name },
-            { "Description", $"Imported dataset: {name}" },
             { "DataSourceMappingInfo", new[] { new { Name = dataSourceName, DataSourceName = dataSourceName } } },
             { "ItemContent", base64Content }
         };
-
         var json = JsonSerializer.Serialize(payload, _relaxedJsonOptions);
         var urls = new[]
         {
             $"{_serverUrl}/reporting/api/site/{tenantId}/v1.0/reports/datasets",
             $"{_serverUrl}/api/site/{tenantId}/v1.0/reports/datasets"
         };
-
-        HttpResponseMessage? lastRes = null;
-        string? lastError = null;
-
-        foreach (var url in urls)
-        {
-            try
-            {
-                using var req = new HttpRequestMessage(HttpMethod.Post, url)
-                {
-                    Content = new StringContent(json, Encoding.UTF8, "application/json")
-                };
-                if (!string.IsNullOrEmpty(_bearerToken))
-                {
-                    req.Headers.Authorization = new AuthenticationHeaderValue("Bearer", _bearerToken);
-                }
-
-                var res = await _httpClient.SendAsync(req, ct);
-                lastRes = res;
-
-                if (res.StatusCode == HttpStatusCode.Conflict)
-                {
-                    var existing = await GetDataSetsAsync(tenantId, ct);
-                    return (false, existing.TryGetValue(name, out var existingId) ? existingId : string.Empty);
-                }
-
-                if (res.IsSuccessStatusCode)
-                {
-                    using var doc = await JsonDocument.ParseAsync(await res.Content.ReadAsStreamAsync(ct), cancellationToken: ct);
-                    if (doc.RootElement.TryGetProperty("PublishedItemId", out var pProp) && !string.IsNullOrWhiteSpace(pProp.GetString()))
-                    {
-                        return (true, pProp.GetString()!);
-                    }
-                    if (doc.RootElement.TryGetProperty("Id", out var idProp) && !string.IsNullOrWhiteSpace(idProp.GetString()))
-                    {
-                        return (true, idProp.GetString()!);
-                    }
-                    throw new HttpRequestException($"CreateDataSet '{name}' returned HTTP {(int)res.StatusCode} without an item Id.");
-                }
-
-                lastError = await res.Content.ReadAsStringAsync(ct);
-            }
-            catch (Exception ex) when (ex is not OperationCanceledException)
-            {
-                lastError = ex.Message;
-            }
-        }
-
-        var status = lastRes != null ? $"HTTP {(int)lastRes.StatusCode}" : "Unreachable";
-        throw new HttpRequestException($"Failed to create DataSet '{name}' on Bold Reports ({status}): {lastError}");
+        await SendPutUpdateAsync("DataSet", itemId, json, urls, ct);
     }
 
     private static readonly JsonSerializerOptions _relaxedJsonOptions = new()
@@ -546,95 +652,152 @@ public class DestinationClient : IDisposable
         List<Dictionary<string, object>>? dataSetMappings,
         CancellationToken ct = default)
     {
-        var payload = new Dictionary<string, object>
-        {
-            { "Name", name },
-            { "ItemContent", base64Content },
-            { "IsPublic", false }
-        };
+        var (success, id, _) = await CreateReportWithPolicyAsync(
+            tenantId, name, base64Content, categoryId, dataSourceMappings, dataSetMappings,
+            ConflictResolutionPolicy.Skip, ct);
+        return (success, id);
+    }
 
-        if (!string.IsNullOrWhiteSpace(categoryId))
+    public async Task<(bool success, string id, string effectiveName)> CreateReportWithPolicyAsync(
+        string tenantId,
+        string name,
+        string base64Content,
+        string? categoryId,
+        List<Dictionary<string, object>>? dataSourceMappings,
+        List<Dictionary<string, object>>? dataSetMappings,
+        ConflictResolutionPolicy conflictPolicy = ConflictResolutionPolicy.Skip,
+        CancellationToken ct = default)
+    {
+        async Task<(HttpStatusCode Status, string? Id, string? Error)> TryPostAsync(string targetName)
         {
-            payload["CategoryId"] = categoryId;
+            var payload = new Dictionary<string, object>
+            {
+                { "Name", targetName },
+                { "ItemContent", base64Content },
+                { "IsPublic", false }
+            };
+            if (!string.IsNullOrWhiteSpace(categoryId)) payload["CategoryId"] = categoryId;
+            if (dataSourceMappings != null && dataSourceMappings.Count > 0) payload["DataSourceMappingInfo"] = dataSourceMappings;
+            if (dataSetMappings != null && dataSetMappings.Count > 0) payload["DataSetMappingInfo"] = dataSetMappings;
+
+            var json = JsonSerializer.Serialize(payload, _relaxedJsonOptions);
+            var urls = new[]
+            {
+                $"{_serverUrl}/reporting/api/site/{tenantId}/v1.0/reports",
+                $"{_serverUrl}/reporting/api/site/{tenantId}/v5.0/reports",
+                $"{_serverUrl}/api/site/{tenantId}/v1.0/reports",
+                $"{_serverUrl}/api/v1.0/reports"
+            };
+
+            HttpResponseMessage? lastRes = null;
+            string? lastError = null;
+            foreach (var url in urls)
+            {
+                try
+                {
+                    using var req = new HttpRequestMessage(HttpMethod.Post, url)
+                    {
+                        Content = new StringContent(json, Encoding.UTF8, "application/json")
+                    };
+                    if (!string.IsNullOrEmpty(_bearerToken))
+                        req.Headers.Authorization = new AuthenticationHeaderValue("Bearer", _bearerToken);
+
+                    var res = await _httpClient.SendAsync(req, ct);
+                    lastRes = res;
+                    if (res.StatusCode == HttpStatusCode.Conflict)
+                        return (HttpStatusCode.Conflict, null, null);
+                    if (res.IsSuccessStatusCode)
+                    {
+                        using var doc = await JsonDocument.ParseAsync(await res.Content.ReadAsStreamAsync(ct), cancellationToken: ct);
+                        var id = doc.RootElement.TryGetProperty("PublishedItemId", out var pProp) && !string.IsNullOrWhiteSpace(pProp.GetString())
+                            ? pProp.GetString()
+                            : (doc.RootElement.TryGetProperty("Id", out var idProp) ? idProp.GetString() : null);
+                        if (!string.IsNullOrWhiteSpace(id)) return (res.StatusCode, id, null);
+                        throw new HttpRequestException($"CreateReport '{targetName}' returned HTTP {(int)res.StatusCode} without an item Id.");
+                    }
+                    lastError = await res.Content.ReadAsStringAsync(ct);
+                }
+                catch (Exception ex) when (ex is not OperationCanceledException)
+                {
+                    lastError = ex.Message;
+                }
+            }
+            return (lastRes?.StatusCode ?? HttpStatusCode.ServiceUnavailable, null, lastError);
         }
 
-        if (dataSourceMappings != null && dataSourceMappings.Count > 0)
+        var first = await TryPostAsync(name);
+        if (first.Id != null) return (true, first.Id, name);
+
+        if (first.Status == HttpStatusCode.Conflict)
         {
-            payload["DataSourceMappingInfo"] = dataSourceMappings;
+            var live = await GetItemsAsync(tenantId, "Report", ct);
+            var existing = live.FirstOrDefault(r =>
+                string.Equals(r.Name, name, StringComparison.OrdinalIgnoreCase) &&
+                (string.IsNullOrEmpty(categoryId) || string.Equals(r.CategoryId, categoryId, StringComparison.OrdinalIgnoreCase)));
+            existing ??= live.FirstOrDefault(r => string.Equals(r.Name, name, StringComparison.OrdinalIgnoreCase));
+
+            if (conflictPolicy == ConflictResolutionPolicy.Overwrite && existing != null)
+            {
+                await UpdateReportAsync(tenantId, existing.Id, base64Content, categoryId, ct);
+                return (true, existing.Id, name);
+            }
+
+            if (conflictPolicy == ConflictResolutionPolicy.Rename)
+            {
+                var sameCatNames = live
+                    .Where(r => string.IsNullOrEmpty(categoryId) || string.Equals(r.CategoryId, categoryId, StringComparison.OrdinalIgnoreCase))
+                    .Select(r => r.Name);
+                var uniqueName = UploadLayer.PickUniqueDestinationName(name, sameCatNames);
+                var renamed = await TryPostAsync(uniqueName);
+                if (renamed.Id != null) return (true, renamed.Id, uniqueName);
+                throw new HttpRequestException($"Failed to create renamed Report '{uniqueName}': {renamed.Error}");
+            }
+
+            if (existing != null) return (true, existing.Id, name);
+            return (false, string.Empty, name);
         }
 
-        if (dataSetMappings != null && dataSetMappings.Count > 0)
-        {
-            payload["DataSetMappingInfo"] = dataSetMappings;
-        }
+        throw new HttpRequestException($"Upload of report '{name}' failed on Bold Reports (HTTP {(int)first.Status}): {first.Error}");
+    }
 
-        var json = JsonSerializer.Serialize(payload, _relaxedJsonOptions);
-
-        var urls = new[]
-        {
-            $"{_serverUrl}/reporting/api/site/{tenantId}/v1.0/reports",
-            $"{_serverUrl}/reporting/api/site/{tenantId}/v5.0/reports",
-            $"{_serverUrl}/api/site/{tenantId}/v1.0/reports",
-            $"{_serverUrl}/api/v1.0/reports"
-        };
-
+    private async Task SendPutUpdateAsync(string kind, string itemId, string json, string[] urls, CancellationToken ct)
+    {
         HttpResponseMessage? lastRes = null;
         string? lastError = null;
-
         foreach (var url in urls)
         {
             try
             {
-                using var req = new HttpRequestMessage(HttpMethod.Post, url)
+                using var req = new HttpRequestMessage(HttpMethod.Put, url)
                 {
                     Content = new StringContent(json, Encoding.UTF8, "application/json")
                 };
                 if (!string.IsNullOrEmpty(_bearerToken))
-                {
                     req.Headers.Authorization = new AuthenticationHeaderValue("Bearer", _bearerToken);
-                }
 
                 var res = await _httpClient.SendAsync(req, ct);
                 lastRes = res;
-
-                if (res.StatusCode == HttpStatusCode.Conflict)
-                {
-                    var live = await GetItemsAsync(tenantId, "Report", ct);
-                    var existing = live.FirstOrDefault(r =>
-                        string.Equals(r.Name, name, StringComparison.OrdinalIgnoreCase) &&
-                        (string.IsNullOrEmpty(categoryId) || string.Equals(r.CategoryId, categoryId, StringComparison.OrdinalIgnoreCase)));
-                    existing ??= live.FirstOrDefault(r => string.Equals(r.Name, name, StringComparison.OrdinalIgnoreCase));
-                    if (existing != null)
-                    {
-                        return (true, existing.Id);
-                    }
-                    return (false, string.Empty);
-                }
+                var body = await res.Content.ReadAsStringAsync(ct);
 
                 if (res.IsSuccessStatusCode)
                 {
-                    using var doc = await JsonDocument.ParseAsync(await res.Content.ReadAsStreamAsync(ct), cancellationToken: ct);
-                    if (doc.RootElement.TryGetProperty("PublishedItemId", out var pProp) && !string.IsNullOrWhiteSpace(pProp.GetString()))
+                    if (TryReadFailure(body, out var failure))
                     {
-                        return (true, pProp.GetString()!);
+                        lastError = failure;
+                        break;
                     }
-                    if (doc.RootElement.TryGetProperty("Id", out var idProp) && !string.IsNullOrWhiteSpace(idProp.GetString()))
-                    {
-                        return (true, idProp.GetString()!);
-                    }
-                    throw new HttpRequestException($"CreateReport '{name}' returned HTTP {(int)res.StatusCode} without an item Id.");
+                    return;
                 }
-
-                lastError = await res.Content.ReadAsStringAsync(ct);
+                lastError = body;
+                if (res.StatusCode is not (HttpStatusCode.NotFound or HttpStatusCode.MethodNotAllowed)) break;
             }
             catch (Exception ex) when (ex is not OperationCanceledException)
             {
                 lastError = ex.Message;
             }
         }
-
         var status = lastRes != null ? $"HTTP {(int)lastRes.StatusCode}" : "Unreachable";
-        throw new HttpRequestException($"Upload of report '{name}' failed on Bold Reports ({status}): {lastError}");
+        throw new HttpRequestException($"Update of {kind} '{itemId}' failed on Bold Reports ({status}): {lastError}");
     }
 
     /// <summary>
@@ -955,6 +1118,34 @@ public class DestinationClient : IDisposable
     }
 }
 
+public enum ConflictResolutionPolicy
+{
+    Skip,
+    Overwrite,
+    Rename
+}
+
+public sealed record UploadPlanItem(
+    int Stage,
+    string ItemType,
+    Guid CatalogItemId,
+    string SourceName,
+    string SourcePath,
+    string Action,
+    string TargetName,
+    string? ExistingId,
+    string? Note = null);
+
+public sealed record UploadDryRunPlan(
+    string ConflictPolicy,
+    int Total,
+    int CreateCount,
+    int SkipCount,
+    int OverwriteCount,
+    int RenameCount,
+    int BlockedCount,
+    List<UploadPlanItem> Items);
+
 public class DestinationItemInfo
 {
     public string Id { get; set; } = string.Empty;
@@ -990,6 +1181,27 @@ public class UploadLayer
     public static bool IsEligibleForUpload(ReportState state) =>
         state is ReportState.AutoPassed or ReportState.Approved or ReportState.Queued or ReportState.Uploaded;
 
+    public static ConflictResolutionPolicy ParseConflictPolicy(string? policy) =>
+        policy?.Trim().ToLowerInvariant() switch
+        {
+            "overwrite" => ConflictResolutionPolicy.Overwrite,
+            "rename" => ConflictResolutionPolicy.Rename,
+            _ => ConflictResolutionPolicy.Skip
+        };
+
+    public static string PickUniqueDestinationName(string baseName, IEnumerable<string> existingNames)
+    {
+        var used = new HashSet<string>(existingNames.Where(n => !string.IsNullOrWhiteSpace(n)), StringComparer.OrdinalIgnoreCase);
+        var candidate = $"{baseName}_migrated";
+        if (!used.Contains(candidate)) return candidate;
+        for (var i = 2; i < 1000; i++)
+        {
+            candidate = $"{baseName}_migrated_{i}";
+            if (!used.Contains(candidate)) return candidate;
+        }
+        return $"{baseName}_{Guid.NewGuid().ToString("N")[..6]}";
+    }
+
     public static string ComputeIdempotencyKey(Guid runId, ItemType itemType, string sourcePath)
     {
         var input = $"{runId}|{itemType}|{sourcePath}";
@@ -997,16 +1209,126 @@ public class UploadLayer
         return Convert.ToHexString(hash).ToLowerInvariant();
     }
 
+    public async Task<UploadDryRunPlan> PreviewUploadPlanAsync(
+        Guid runId,
+        DestinationClient client,
+        ConflictResolutionPolicy policy,
+        CancellationToken ct = default)
+    {
+        var tenantId = client.GetTenantId();
+        var remoteCategoriesTask = client.GetItemsAsync(tenantId, "Category", ct);
+        var remoteDataSourcesTask = client.GetItemsAsync(tenantId, "Datasource", ct);
+        var remoteDataSetsTask = client.GetItemsAsync(tenantId, "Dataset", ct);
+        var remoteReportsTask = client.GetItemsAsync(tenantId, "Report", ct);
+
+        await Task.WhenAll(remoteCategoriesTask, remoteDataSourcesTask, remoteDataSetsTask, remoteReportsTask);
+
+        var remoteCategories = remoteCategoriesTask.Result;
+        var remoteDataSources = remoteDataSourcesTask.Result;
+        var remoteDataSets = remoteDataSetsTask.Result;
+        var remoteReports = remoteReportsTask.Result;
+
+        var planItems = new List<UploadPlanItem>();
+
+        var folders = (await _store.GetCatalogItemsAsync(runId, ItemType.Folder, ct))
+            .OrderBy(f => StagedCatalog.NormalizePath(f.SourcePath).Count(c => c == '/'))
+            .ThenBy(f => f.SourcePath, StringComparer.OrdinalIgnoreCase);
+
+        foreach (var f in folders)
+        {
+            var existing = remoteCategories.FirstOrDefault(c => string.Equals(c.Name, f.Name, StringComparison.OrdinalIgnoreCase));
+            planItems.Add(new UploadPlanItem(
+                1, "Folder", f.Id, f.Name, f.SourcePath,
+                existing != null ? "Skip" : "Create",
+                f.Name, existing?.Id,
+                existing != null ? "Category already exists on destination" : null));
+        }
+
+        foreach (var ds in await _store.GetCatalogItemsAsync(runId, ItemType.DataSource, ct))
+        {
+            var existing = remoteDataSources.FirstOrDefault(d => string.Equals(d.Name, ds.Name, StringComparison.OrdinalIgnoreCase));
+            var (action, targetName, note) = ClassifyPlanItem(ds.Name, existing, remoteDataSources.Select(d => d.Name), policy);
+            planItems.Add(new UploadPlanItem(2, "Datasource", ds.Id, ds.Name, ds.SourcePath, action, targetName, existing?.Id, note));
+        }
+
+        foreach (var dset in await _store.GetCatalogItemsAsync(runId, ItemType.DataSet, ct))
+        {
+            var existing = remoteDataSets.FirstOrDefault(d => string.Equals(d.Name, dset.Name, StringComparison.OrdinalIgnoreCase));
+            var (action, targetName, note) = ClassifyPlanItem(dset.Name, existing, remoteDataSets.Select(d => d.Name), policy);
+            planItems.Add(new UploadPlanItem(3, "Dataset", dset.Id, dset.Name, dset.SourcePath, action, targetName, existing?.Id, note));
+        }
+
+        var reports = await _store.GetCatalogItemsAsync(runId, ItemType.Report, ct);
+        var records = (await _store.GetReportRecordsAsync(runId, ct: ct)).ToDictionary(r => r.CatalogItemId);
+
+        foreach (var r in reports.OrderBy(x => x.SourcePath, StringComparer.OrdinalIgnoreCase))
+        {
+            records.TryGetValue(r.Id, out var rec);
+            if (rec?.Bucket == ReportBucket.Blocked || rec?.State == ReportState.Excluded || (rec != null && !IsEligibleForUpload(rec.State)))
+            {
+                planItems.Add(new UploadPlanItem(
+                    4, "Report", r.Id, r.Name, r.SourcePath,
+                    "Blocked", r.Name, null,
+                    $"Not eligible in current state ({rec?.State.ToString() ?? "Discovered"})"));
+                continue;
+            }
+
+            var parentName = StagedCatalog.ParentOf(r.SourcePath).Trim('/').Split('/').LastOrDefault();
+            var existing = remoteReports.FirstOrDefault(x =>
+                string.Equals(x.Name, r.Name, StringComparison.OrdinalIgnoreCase) &&
+                (string.IsNullOrEmpty(parentName) || string.Equals(x.CategoryName, parentName, StringComparison.OrdinalIgnoreCase)));
+            existing ??= remoteReports.FirstOrDefault(x => string.Equals(x.Name, r.Name, StringComparison.OrdinalIgnoreCase));
+
+            var (action, targetName, note) = ClassifyPlanItem(r.Name, existing, remoteReports.Select(x => x.Name), policy);
+            planItems.Add(new UploadPlanItem(4, "Report", r.Id, r.Name, r.SourcePath, action, targetName, existing?.Id, note));
+        }
+
+        return new UploadDryRunPlan(
+            policy.ToString(),
+            planItems.Count,
+            planItems.Count(p => p.Action == "Create"),
+            planItems.Count(p => p.Action == "Skip"),
+            planItems.Count(p => p.Action == "Overwrite"),
+            planItems.Count(p => p.Action == "Rename"),
+            planItems.Count(p => p.Action == "Blocked"),
+            planItems);
+    }
+
+    private static (string Action, string TargetName, string? Note) ClassifyPlanItem(
+        string name,
+        DestinationItemInfo? existing,
+        IEnumerable<string> existingNames,
+        ConflictResolutionPolicy policy)
+    {
+        if (existing == null) return ("Create", name, null);
+        return policy switch
+        {
+            ConflictResolutionPolicy.Overwrite => ("Overwrite", name, "Existing item will be updated in place"),
+            ConflictResolutionPolicy.Rename => ("Rename", PickUniqueDestinationName(name, existingNames), "Name conflict resolved with unique suffix"),
+            _ => ("Skip", name, "Existing item will be reused")
+        };
+    }
+
+    public Task<int> UploadEstateAsync(
+        Guid runId,
+        DestinationClient client,
+        Func<bool> isPaused,
+        CancellationToken ct = default) =>
+        UploadEstateAsync(runId, client, isPaused, ConflictResolutionPolicy.Skip, ct);
+
     public async Task<int> UploadEstateAsync(
         Guid runId,
         DestinationClient client,
         Func<bool> isPaused,
+        ConflictResolutionPolicy conflictPolicy,
         CancellationToken ct = default)
     {
         var uploadedCount = 0;
         var tenantId = client.GetTenantId();
         var folderCategoryMap = new ConcurrentDictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         var datasetLookup = new ConcurrentDictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        var dataSourceNameMap = new ConcurrentDictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        var datasetNameMap = new ConcurrentDictionary<string, string>(StringComparer.OrdinalIgnoreCase);
 
         try
         {
@@ -1028,7 +1350,7 @@ public class UploadLayer
             var parentPath = StagedCatalog.ParentOf(normPath);
             folderCategoryMap.TryGetValue(parentPath, out var parentCatId);
 
-            if (await UploadItemWithRetryAsync(runId, folder, client, "Category", folderCategoryMap, datasetLookup, parentCatId, ct))
+            if (await UploadItemWithRetryAsync(runId, folder, client, "Category", folderCategoryMap, datasetLookup, parentCatId, conflictPolicy, dataSourceNameMap, datasetNameMap, ct))
             {
                 if (!string.IsNullOrEmpty(folder.DestinationItemId))
                     folderCategoryMap[normPath] = folder.DestinationItemId;
@@ -1042,7 +1364,7 @@ public class UploadLayer
         await Parallel.ForEachAsync(dataSources, new ParallelOptions { MaxDegreeOfParallelism = maxParallel, CancellationToken = ct }, async (ds, token) =>
         {
             if (isPaused()) return;
-            if (await UploadItemWithRetryAsync(runId, ds, client, "Datasource", folderCategoryMap, datasetLookup, null, token))
+            if (await UploadItemWithRetryAsync(runId, ds, client, "Datasource", folderCategoryMap, datasetLookup, null, conflictPolicy, dataSourceNameMap, datasetNameMap, token))
             {
                 Interlocked.Increment(ref uploadedCount);
             }
@@ -1053,7 +1375,7 @@ public class UploadLayer
         await Parallel.ForEachAsync(datasets, new ParallelOptions { MaxDegreeOfParallelism = maxParallel, CancellationToken = ct }, async (ds, token) =>
         {
             if (isPaused()) return;
-            if (await UploadItemWithRetryAsync(runId, ds, client, "Dataset", folderCategoryMap, datasetLookup, null, token))
+            if (await UploadItemWithRetryAsync(runId, ds, client, "Dataset", folderCategoryMap, datasetLookup, null, conflictPolicy, dataSourceNameMap, datasetNameMap, token))
             {
                 if (!string.IsNullOrEmpty(ds.DestinationItemId))
                 {
@@ -1107,7 +1429,7 @@ public class UploadLayer
             var normFolder = StagedCatalog.ParentOf(report.SourcePath);
             folderCategoryMap.TryGetValue(normFolder, out var categoryId);
 
-            var success = await UploadItemWithRetryAsync(runId, report, client, "Report", folderCategoryMap, datasetLookup, categoryId, token);
+            var success = await UploadItemWithRetryAsync(runId, report, client, "Report", folderCategoryMap, datasetLookup, categoryId, conflictPolicy, dataSourceNameMap, datasetNameMap, token);
 
             await _storeLock.WaitAsync(token);
             try
@@ -1149,12 +1471,17 @@ public class UploadLayer
         ConcurrentDictionary<string, string> folderCategoryMap,
         ConcurrentDictionary<string, string> datasetLookup,
         string? resolvedCategoryId,
+        ConflictResolutionPolicy conflictPolicy,
+        ConcurrentDictionary<string, string> dataSourceNameMap,
+        ConcurrentDictionary<string, string> datasetNameMap,
         CancellationToken ct)
     {
-        if (!string.IsNullOrEmpty(item.DestinationItemId) &&
-            !item.DestinationItemId.StartsWith("dest-") &&
-            !item.DestinationItemId.StartsWith("rep-") &&
-            !item.DestinationItemId.StartsWith("existing-"))
+        var hasGenuineDestId = !string.IsNullOrEmpty(item.DestinationItemId) &&
+                               !item.DestinationItemId.StartsWith("dest-") &&
+                               !item.DestinationItemId.StartsWith("rep-") &&
+                               !item.DestinationItemId.StartsWith("existing-");
+
+        if (hasGenuineDestId && (conflictPolicy == ConflictResolutionPolicy.Skip || item.ItemType == ItemType.Folder))
         {
             // Already uploaded with a genuine destination ID. A report edited in the local
             // designer since then is pushed again so Bold Reports gets the edited definition.
@@ -1230,7 +1557,7 @@ public class UploadLayer
                         }
                     }
 
-                    var (ok, dsId) = await client.CreateDataSourceAsync(
+                    var (ok, dsId, effectiveDsName) = await client.CreateDataSourceWithPolicyAsync(
                         tenantId,
                         item.Name,
                         connectString,
@@ -1240,11 +1567,17 @@ public class UploadLayer
                         retrieval,
                         windowsCredentials,
                         impersonateUser,
+                        conflictPolicy,
+                        allowSkipFallback: true,
                         ct);
 
                     if (!ok && string.IsNullOrWhiteSpace(dsId))
                     {
                         throw new HttpRequestException($"DataSource '{item.Name}' conflicted and could not be resolved on destination.");
+                    }
+                    if (!string.Equals(effectiveDsName, item.Name, StringComparison.OrdinalIgnoreCase))
+                    {
+                        dataSourceNameMap[item.Name] = effectiveDsName;
                     }
                     destId = dsId;
                 }
@@ -1257,15 +1590,23 @@ public class UploadLayer
                     }
 
                     var dsRef = ReportDependencies.ReadDataSetDataSourceReference(rsdBytes);
-                    var targetDsName = !string.IsNullOrWhiteSpace(dsRef)
+                    var rawDsName = !string.IsNullOrWhiteSpace(dsRef)
                         ? dsRef.Trim('/').Split('/').Last()
                         : item.Name;
+                    var targetDsName = dataSourceNameMap.TryGetValue(rawDsName, out var remappedDsName)
+                        ? remappedDsName
+                        : rawDsName;
 
                     var base64 = Convert.ToBase64String(rsdBytes);
-                    var (ok, dsetId) = await client.CreateDataSetAsync(tenantId, item.Name, base64, targetDsName, ct);
+                    var (ok, dsetId, effectiveDsetName) = await client.CreateDataSetWithPolicyAsync(
+                        tenantId, item.Name, base64, targetDsName, conflictPolicy, allowSkipFallback: true, ct);
                     if (!ok && string.IsNullOrWhiteSpace(dsetId))
                     {
                         throw new HttpRequestException($"DataSet '{item.Name}' conflicted and could not be resolved on destination.");
+                    }
+                    if (!string.Equals(effectiveDsetName, item.Name, StringComparison.OrdinalIgnoreCase))
+                    {
+                        datasetNameMap[item.Name] = effectiveDsetName;
                     }
                     destId = dsetId;
                 }
@@ -1286,23 +1627,29 @@ public class UploadLayer
                     var deps = ReportDependencies.Read(content);
                     var dsMappings = deps.DataSources
                         .Where(d => !string.IsNullOrWhiteSpace(d.SharedReference))
-                        .Select(d => new Dictionary<string, object>
+                        .Select(d =>
                         {
-                            ["Name"] = d.Name,
-                            ["DataSourceName"] = d.SharedReference!.Trim('/').Split('/').Last()
+                            var rawDsName = d.SharedReference!.Trim('/').Split('/').Last();
+                            var mappedName = dataSourceNameMap.TryGetValue(rawDsName, out var rn) ? rn : rawDsName;
+                            return new Dictionary<string, object>
+                            {
+                                ["Name"] = d.Name,
+                                ["DataSourceName"] = mappedName
+                            };
                         })
                         .ToList();
 
                     var dsetMappings = deps.SharedDataSets
                         .Select(d =>
                         {
-                            var refName = d.SharedReference.Trim('/').Split('/').Last();
+                            var rawRefName = d.SharedReference.Trim('/').Split('/').Last();
+                            var mappedRefName = datasetNameMap.TryGetValue(rawRefName, out var rn) ? rn : rawRefName;
                             var map = new Dictionary<string, object>
                             {
                                 ["Name"] = d.Name,
-                                ["DataSetName"] = refName
+                                ["DataSetName"] = mappedRefName
                             };
-                            if (datasetLookup.TryGetValue(refName, out var dsId) ||
+                            if (datasetLookup.TryGetValue(rawRefName, out var dsId) ||
                                 datasetLookup.TryGetValue(StagedCatalog.NormalizePath(d.SharedReference), out dsId))
                             {
                                 map["DataSetId"] = dsId;
@@ -1312,13 +1659,14 @@ public class UploadLayer
                         .ToList();
 
                     var base64 = Convert.ToBase64String(content);
-                    var (success, repId) = await client.CreateReportAsync(
+                    var (success, repId, _) = await client.CreateReportWithPolicyAsync(
                         tenantId,
                         item.Name,
                         base64,
                         categoryId,
                         dsMappings.Count > 0 ? dsMappings : null,
                         dsetMappings.Count > 0 ? dsetMappings : null,
+                        conflictPolicy,
                         ct);
 
                     if (!success || string.IsNullOrWhiteSpace(repId))

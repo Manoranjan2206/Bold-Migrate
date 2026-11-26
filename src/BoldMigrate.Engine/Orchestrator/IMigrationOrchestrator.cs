@@ -12,6 +12,7 @@ public interface IMigrationOrchestrator
     Task StartFetchAsync(Guid runId, CancellationToken ct = default);
     Task StartCheckAsync(Guid runId, CancellationToken ct = default);
     Task StartUploadAsync(Guid runId, CancellationToken ct = default);
+    Task StartUploadAsync(Guid runId, string? conflictPolicy, CancellationToken ct = default);
     void PauseRun(Guid runId);
     void ResumeRun(Guid runId);
     Task StartValidationAsync(Guid runId, CancellationToken ct = default);

@@ -413,7 +413,10 @@ public class MigrationOrchestrator : BackgroundService, IMigrationOrchestrator
         }
     }
 
-    public async Task StartUploadAsync(Guid runId, CancellationToken ct = default)
+    public Task StartUploadAsync(Guid runId, CancellationToken ct = default) =>
+        StartUploadAsync(runId, conflictPolicy: null, ct);
+
+    public async Task StartUploadAsync(Guid runId, string? conflictPolicy, CancellationToken ct = default)
     {
         var execLock = GetExecutionLock(runId);
         if (!await execLock.WaitAsync(0, ct))
@@ -435,7 +438,8 @@ public class MigrationOrchestrator : BackgroundService, IMigrationOrchestrator
             run.CurrentStep = 5;
             await store.UpdateRunAsync(run, ct);
 
-            logger.Log(LogLevel.Information, "UPLD-STAGE", runId, "Starting 4-stage upload to Bold Reports Server.", step: 5);
+            var policy = Upload.UploadLayer.ParseConflictPolicy(conflictPolicy ?? _settings.UploadConflictPolicy);
+            logger.Log(LogLevel.Information, "UPLD-STAGE", runId, $"Starting 4-stage upload to Bold Reports Server (conflict policy: {policy}).", step: 5);
 
             var destUrl = !string.IsNullOrEmpty(run.DestinationServerUrl) ? run.DestinationServerUrl : run.SourceServerUrl;
             var token = _credStore.GetDestinationToken();
@@ -443,7 +447,7 @@ public class MigrationOrchestrator : BackgroundService, IMigrationOrchestrator
 
             try
             {
-                await upload.UploadEstateAsync(runId, destClient, () => _pausedRuns.TryGetValue(runId, out var p) && p, ct);
+                await upload.UploadEstateAsync(runId, destClient, () => _pausedRuns.TryGetValue(runId, out var p) && p, policy, ct);
                 run.Status = RunStatus.Uploaded;
                 await store.UpdateRunAsync(run, ct);
             }

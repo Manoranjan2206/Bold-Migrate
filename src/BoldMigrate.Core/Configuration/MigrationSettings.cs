@@ -88,6 +88,13 @@ public class MigrationSettings
     public int UploadMaxAttempts { get; set; } = 3;
 
     /// <summary>
+    /// Upload.ConflictPolicy: How destination conflicts are handled during upload: Skip, Overwrite, or Rename.
+    /// Default: "Skip"
+    /// </summary>
+    [JsonPropertyName("Upload.ConflictPolicy")]
+    public string UploadConflictPolicy { get; set; } = "Skip";
+
+    /// <summary>
     /// Upload.RetryBackoffSeconds: Fixed schedule, not exponential, so a run's duration is predictable.
     /// Default: [2, 8, 30]
     /// </summary>
@@ -224,6 +231,8 @@ public class MigrationSettings
         if (UploadRetryBackoffSeconds == null || UploadRetryBackoffSeconds.Length == 0)
             UploadRetryBackoffSeconds = [2, 8, 30];
 
+        UploadConflictPolicy = NormalizeConflictPolicy(UploadConflictPolicy);
+
         var listen = string.IsNullOrWhiteSpace(UrlShimListenPath) ? "/ReportServer" : UrlShimListenPath.Trim();
         if (!listen.StartsWith('/')) listen = "/" + listen;
         listen = listen.TrimEnd('/');
@@ -237,5 +246,15 @@ public class MigrationSettings
 
         UrlShimListenPath = listen;
         return (true, null);
+    }
+
+    public static string NormalizeConflictPolicy(string? policy)
+    {
+        return policy?.Trim().ToLowerInvariant() switch
+        {
+            "overwrite" => "Overwrite",
+            "rename" => "Rename",
+            _ => "Skip"
+        };
     }
 }
