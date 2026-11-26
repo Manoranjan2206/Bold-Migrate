@@ -48,14 +48,15 @@ Before running the migration script, ensure the following:
 
 ## Configuration
 
-The script reads settings from [Configuration.json](Configuration.json). Typical settings include:
+The script reads settings from [Configuration.json](Configuration.json). Currently loaded settings:
 
-- Source SSRS URI
-- Output folder path
-- Bold Reports base URL
-- Tenant name
-- Bearer token
-- SSRS username and password
+- `SourceRsUri`: Source SSRS SOAP endpoint URI (e.g. `http://localhost/ReportServer/ReportService2010.asmx?wsdl`; connects using your current Windows session credentials)
+- `FolderPath`: Local root output/export folder path (e.g. `C:\SSRS_Export`)
+- `BaseUrl`: Bold Reports Server base URL (e.g. `http://localhost:8090`)
+- `Tenant`: Bold Reports tenant/site name (e.g. `site1`)
+- `BearerToken`: Pre-issued Bold Reports Bearer JWT token (**required** by the script)
+
+> **Tip:** To run local-folder migrations with a web UI, username/password login, or live log streaming, use **Standalone Tools → Local Folder Import** in the Bold Migrate web application (`POST /api/migration/local-folder`).
 
 ## Output Structure
 
@@ -166,7 +167,7 @@ function New-OutputLayout {
 - **Auditable**: All migrations are logged with timestamps. Inventory and results are exported to both CSV and JSON formats.
 - **Error Handling**: Failed items are logged with detailed error messages for troubleshooting.
 - **Credentials**: Passwords are prompted interactively during execution if datasources use stored credentials. Sensitive values should not be hardcoded in configuration files.
-- **Reporting Services Tools**: The script requires the `ReportingServices` PowerShell module to be installed (`New-RsWebServiceProxy` cmdlet).
+- **Reporting Services Tools**: The script requires the `ReportingServicesTools` PowerShell module to be installed (`New-RsWebServiceProxy` cmdlet).
 - **API Authentication**: Migration to Bold Reports requires a valid Bearer token for API authentication.
 
 ## Migration Output Files

@@ -1,51 +1,25 @@
 # Bold Migrate — SSRS to Bold Reports Enterprise Migration
 
-Enterprise migration suite for moving Microsoft SQL Server Reporting Services (SSRS) and Power BI Report Server (PBIRS) estates to Bold Reports Server with automated extraction, transformation, upload, and side-by-side verification.
+Enterprise migration suite for moving Microsoft SQL Server Reporting Services (SSRS 2012–2022) and Power BI Report Server (PBIRS) estates—or offline local report directories—to Bold Reports Server with automated extraction, RDL transformation, local Playwright & visual validation, dependency-ordered upload, and gated production cutover.
 
 ---
 
-## What's New & Adopted Features
+## Key Capabilities
 
-### 1. Adopted from `SSRSToBoldReportsMigration`
-- **Local Folder Migration Service**: Direct ingestion and upload of `.rdl` reports, `.rsds` shared data sources, and `.rsd` shared datasets from local directories.
-- **Recursive Directory & Category Tree Creation**: Automatically analyzes directory hierarchies and provisions corresponding nested categories in Bold Reports Server via `/api/site/{tenant}/v5.0/categories`.
-- **DataSource Definition Mapping**: Parses XML `<DataSourceDefinition>` from `.rsds` files, mapping connection strings, credential retrieval modes, and server types (SQL, Oracle, MySQL, PostgreSQL, OLEDB, ODBC, etc.).
-- **Shared DataSet Remapping**: Parses `<SharedDataSetDefinition>`, rebinds `DataSourceReference`, and registers published dataset lookups.
-- **BOM Stripping & UnsafeRelaxedJsonEscaping**: Preserves base64 `+` characters in `ItemContent` during serialization to prevent 400 Bad Request errors on Bold Reports endpoints.
-- **Automatic Backups & Summaries**: Creates backups of original `.rdl` files and outputs `MigrationLog.txt` and `MigrationResult.csv`.
+### 1. Guided 6-Step Migration Journey
+1. **Connect & Discover:** Auto-probes SSRS/PBIRS via REST API v2.0 with SOAP `ReportingService2010` fallback (`Windows Integrated`, `WindowsExplicit`, or HTTPS `Basic`), authenticates to Bold Reports Server (admin credentials or direct Bearer JWT token), discovers and stages `.rdl`/`.rsds`/`.rds`/`.rsd` items locally, and provides **Bulk Host / Database Remapping** plus live SQL Server credential validation (with `TrustServerCertificate` support).
+2. **Report Library:** Searchable, filterable catalog (`All`, `Compatible`, `Needs Review`) with multi-select scoping, compatibility findings, and run-scoped destination cleanup.
+3. **Assessment Dashboard:** Readiness score, compatibility breakdown against `data/compatibility-rules.json`, and **Subreport / Shared DataSet / Shared Data Source Link Verification** with cycle detection and one-click XML reference rebinding.
+4. **Validation & Preview:** Automated headless **Playwright Chromium** render validation (5 concurrent tabs), local **Bold Reports Viewer & Web Designer (`15.1.17`)** backed by `StagedReportServer` (edits save back to staging before upload), side-by-side **RDL XML Diff**, and **Visual Comparison** (Swipe Slider, Side-by-Side, and Canvas Pixel-Diff).
+5. **Migration Pipeline:** Strict 4-stage dependency upload (`Folders -> DataSources -> DataSets -> Reports`) with configurable conflict policies (`Skip`, `Overwrite`, `Rename`), **Pre-Flight Dry-Run**, idempotency keys, live execution logs, pause/resume, retry failed, and server-integrated report launch.
+6. **Cutover & Audit:** 5 blocking readiness gates + advisory URL shim gate, incremental **Delta Sync**, transparent **URL Compatibility Shim** (`/ReportServer` & `/Reports/Pages/Report.aspx`), **Audit Run Report**, and **Diagnostic Support Bundle (ZIP)**.
 
-### 2. Additional Details from `Migration Scripts`
-- **PowerShell & Batch Launcher Parity**: Standalone batch launcher (`SSRSToBoldReportsMigration.bat`) and PowerShell migration script (`SSRSToBoldReportsMigration.ps1`) powered by `Configuration.json`.
-- **Direct JWT Bearer Token Support**: Full authorization support for pre-issued Bold Reports JWT bearer tokens alongside administrator credentials.
-- **Structured Export Layout**:
-  - `Export/Reports`
-  - `Export/Datasets`
-  - `Export/Datasources`
-  - `logs/` containing 6 dedicated phase logs: `preflight.log`, `export.log`, `datasources.log`, `datasets.log`, `reports.log`, and `reconciliation.log`.
-- **Reconciliation & Inventory Artifacts**:
-  - `inventory.csv`: Complete estate disposition ledger and summary counts.
-  - `item-results.json`: Machine-readable results with timestamps, published item IDs, and stage traces.
-  - `migration-summary.md`: Markdown summary report with execution statistics.
-- **409 Conflict Handling**: Seamlessly skips existing data sources, datasets, and reports without failing incremental runs.
-
-### 3. Layout Inspired by `Bold Migrate – UI Screens.html`
-- **Enterprise Dark Slate Sidebar Navigation (`#0F172A`)**:
-  - **D** **Dashboard**: Estate health at a glance, metric tiles, compatibility bars, live connection status, recent activity.
-  - **L** **Report Library**: Searchable catalog table with filter chips (`All`, `Validated`, `Uploaded`, `Needs review`, `Blocked`), status pills, similarity scores, and inline `Compare` actions.
-  - **C** **Connections**: 3-part credentials setup (SSRS login, Bold Reports login with Bearer Token or credentials, Data source credential vault).
-  - **M** **Migration**: 4-stage upload tracker (Folders, DataSources, DataSets, Reports), overall progress bar, live log console, Pause/Resume controls.
-  - **V** **Validation**: Interactive side-by-side comparison (SSRS vs Bold Reports Web Report Viewer), segmented view (`Side by side`, `Pixel diff`, `Data diff`), layout shift highlights, approve and flag actions.
-  - **F** **Local Folder Import**: Direct GUI tool for local directory migrations.
-  - **E** **AI Expression Tester**: Built-in expression builder & tester inspired by official Bold Reports tools.
-  - **S** **Settings & Cutover**: Threshold controls, URL shim settings, production cutover gates, diagnostic support bundle export.
-- **Landing Overview View**: Full-width architectural flow diagram (`SSRS -> Bold Migrate -> Bold Reports`), browser RDL dropzone scanner, and developer feature highlights.
-
-### 4. AI SSRS Expression Tester (Inspired by Official Tool)
-- **Inspired by:** [Bold Reports AI SSRS Expression Builder & Tester](https://www.boldreports.com/free-tools/ai-ssrs-expression-builder-tester/)
-- **Syntax Compatibility Analysis**: Classifies expressions as `Compatible` (Green), `Needs Review` (Amber), or `Blocked` (Red).
-- **Custom Assembly & Framework Detection**: Detects `CodeModule` or custom DLL calls that cannot execute in web environments.
-- **Scoped Aggregate Insights**: Detects `Lookup`, `LookupSet`, `RunningValue`, and `Previous` with Bold Reports scoping advice.
-- **Live Simulated Evaluation**: Evaluates expressions (`IIf`, `Sum`, `Format`, string manipulation, comparisons) against custom or mock Fields and Parameters JSON data.
+### 2. Standalone Tools
+- **Local Folder Import:** Direct ingestion of local `.rdl`, `.rsds`/`.rds`, and `.rsd` directories with recursive nested Bold Reports category creation, BOM stripping, `UnsafeRelaxedJsonEscaping`, RDL backups, phase logs, `MigrationResult.csv`, `inventory.csv`, `item-results.json`, and `migration-summary.md`.
+- **Bulk Delete Items:** Credential-less-storage standalone cleanup tool for **Reports, Datasets, Data Sources, and Folders** on any Bold Reports Server, deleting in safe dependency order (`Report -> Dataset -> Datasource -> Folder`).
+- **Offline Compatibility Scanner (`/scanner.html`):** 100% client-side in-browser RDL compatibility scanner (plus `/api/scanner/analyse` endpoint for server-side `TransformEngine` scanning).
+- **Settings & Rules:** Runtime configuration persisted to `settings.json` and active compatibility rule inspection.
+- **PowerShell Script Parity (`SSRSToBoldReportsMigration.ps1` / `.bat`):** Standalone PowerShell migration runner configured via `Configuration.json`.
 
 ---
 
@@ -53,37 +27,34 @@ Enterprise migration suite for moving Microsoft SQL Server Reporting Services (S
 
 ### 1. Run with .NET 10 SDK
 ```powershell
-dotnet run --project src/BoldMigrate.Api/BoldMigrate.Api.csproj
+dotnet run --project src/BoldMigrate.Api/BoldMigrate.Api.csproj --urls http://localhost:5000
 ```
-Open **`http://localhost:5000`** in your browser.
+Open **`http://localhost:5000`** in your browser (Workflow Guide: `/workflow-guide.html`, Offline Scanner: `/scanner.html`, Health: `/health`).
 
-### 2. Run PowerShell Migration Script
+### 2. Run with Docker Compose
 ```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -File .\SSRSToBoldReportsMigration.ps1
+docker compose up --build -d
 ```
-Or launch via the batch wrapper:
-```cmd
-SSRSToBoldReportsMigration.bat
-```
+Open **`http://localhost:8085`** in your browser.
 
 ### 3. Run Automated Tests
 ```powershell
 dotnet test
 ```
 
+### 4. Run PowerShell Migration Script
+See [SSRSToBoldReportsMigration.md](SSRSToBoldReportsMigration.md) for prerequisites and [Configuration.json](Configuration.json) setup:
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\SSRSToBoldReportsMigration.ps1
+```
+
 ---
 
-## REST API Endpoints
+## Documentation & Engineering Guides
 
-- `POST /api/migration/runs`: Create or get active migration session.
-- `POST /api/migration/runs/{id}/connect`: Test connection to SSRS server.
-- `POST /api/migration/runs/{id}/connect-destination`: Test Bold Reports login (via credentials or Bearer token).
-- `POST /api/migration/runs/{id}/fetch`: Discover source estate and stage definitions.
-- `POST /api/migration/runs/{id}/check`: Run transformation and compatibility classification.
-- `POST /api/migration/runs/{id}/upload`: Execute 4-stage dependency upload.
-- `POST /api/migration/runs/{id}/validate`: Run font calibration and visual/data comparison.
-- `POST /api/migration/local-folder`: Execute local folder migration (RDL, RSDS, RSD).
-- `GET /api/migration/local-folder/logs`: Fetch live streaming logs for local folder migration.
-- `POST /api/migration/expression/evaluate`: Analyze and test an SSRS expression.
-- `GET /api/migration/expression/samples`: Retrieve sample SSRS expressions.
-- `GET /api/diagnostics/runs/{id}/support-bundle`: Download diagnostic support bundle ZIP.
+- **[Application & System Specification](docs/application-spec.md)** — Authoritative specification of the implemented system, architecture, state machines, and features.
+- **[REST API Reference](docs/api-reference.md)** — Complete endpoint, payload, CSRF, and authentication reference.
+- **[Deployment, Configuration & Operations](docs/deployment-and-operations.md)** — Configuration bounds, Docker, Playwright setup, security hardening, health checks, and error catalogue.
+- **[Developer Onboarding Guide](docs/developer-guide.md)** — Solution DAG, coding invariants, schema upgrades, and extension workflows.
+- **[Architecture Decision Records](docs/decisions/)** — Key technical decisions (`ADR-001` through `ADR-003`).
+- **[Agent & Engineer Workspace Instructions](AGENTS.md)** — Repository rules and `.agents/skills/` for engineers and AI agents.

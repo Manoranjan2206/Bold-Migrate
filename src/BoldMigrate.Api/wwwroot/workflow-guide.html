@@ -487,12 +487,12 @@
           <div class="stat-label">End-to-End Migration Flow</div>
         </div>
         <div class="stat-card">
-          <div class="stat-val" style="color:#34D399;">100% Automated</div>
-          <div class="stat-label">Topological Dependency Sort</div>
+          <div class="stat-val" style="color:#34D399;">4-Stage DAG</div>
+          <div class="stat-label">Dependency-Ordered Upload</div>
         </div>
         <div class="stat-card">
-          <div class="stat-val" style="color:#FBBF24;">RDL 2005–2016</div>
-          <div class="stat-label">Auto Schema & XML Rewriting</div>
+          <div class="stat-val" style="color:#FBBF24;">RDL 2008–2016</div>
+          <div class="stat-label">Auto Schema &amp; XML Rewriting</div>
         </div>
         <div class="stat-card">
           <div class="stat-val" style="color:#A78BFA;">Zero Downtime</div>
@@ -503,8 +503,8 @@
 
     <!-- Architecture Visual Flow -->
     <div style="margin-bottom: 24px;">
-      <h2 class="section-title">System Architecture & Pipeline Flow</h2>
-      <p class="section-desc">How Bold Migrate connects source servers, stages artifacts, transforms RDL schemas, and loads to Bold Reports.</p>
+      <h2 class="section-title">System Architecture &amp; Pipeline Flow</h2>
+      <p class="section-desc">How Bold Migrate connects source servers, stages artifacts, validates locally with Playwright, and uploads to Bold Reports.</p>
     </div>
 
     <div class="arch-diagram-wrapper">
@@ -518,16 +518,16 @@
           </div>
           <ul class="diag-items">
             <li class="diag-item">
-              <strong>SSRS / PBIRS (Live API)</strong><br>
-              SOAP <code>ReportingService2010</code> &amp; REST v2.0
+              <strong>SSRS / PBIRS (Read-Only)</strong><br>
+              REST API v2.0 &amp; SOAP <code>ReportingService2010</code>
             </li>
             <li class="diag-item">
               <strong>Offline Local Folder</strong><br>
-              Recursive <code>.rdl</code>, <code>.rds</code>, <code>.rsd</code> scan
+              Recursive <code>.rdl</code>, <code>.rsds</code>, <code>.rds</code>, <code>.rsd</code>
             </li>
             <li class="diag-item">
-              <strong>Auth Adapters</strong><br>
-              NTLM, Windows Integrated, Basic
+              <strong>Auth &amp; Remapping</strong><br>
+              Windows Integrated, Explicit, Basic (HTTPS), Bulk Host/DB Remap
             </li>
           </ul>
         </div>
@@ -542,20 +542,20 @@
           </div>
           <ul class="diag-items">
             <li class="diag-item">
-              <strong>Topological Sort (DAG)</strong><br>
-              Folder ➔ DataSource ➔ DataSet ➔ Report
+              <strong>Transform &amp; Rules Engine</strong><br>
+              RDL 2008/2010 ➔ 2016, BOM strip, <code>compatibility-rules.json</code>
             </li>
             <li class="diag-item">
-              <strong>XML Schema Upgrader</strong><br>
-              2005 / 2008 / 2010 / 2016 ➔ Bold RDL
+              <strong>Local Staged Preview</strong><br>
+              Playwright Chromium + Staged Viewer/Designer (15.1.17)
             </li>
             <li class="diag-item">
-              <strong>Re-binding &amp; Redactor</strong><br>
-              Shared DS re-linking, secret masking
+              <strong>Dependency &amp; Link Audit</strong><br>
+              Broken DS/DataSet/Subreport checks &amp; XML rebinding
             </li>
             <li class="diag-item">
-              <strong>Local Staging DB</strong><br>
-              SQLite catalog cache &amp; state tracking
+              <strong>SQLite WAL &amp; Vault</strong><br>
+              Run state cache + In-Memory / DPAPI / AES-GCM secrets
             </li>
           </ul>
         </div>
@@ -570,20 +570,20 @@
           </div>
           <ul class="diag-items">
             <li class="diag-item">
-              <strong>OAuth2 Authentication</strong><br>
-              <code>/token</code> with Bearer tokens
+              <strong>OAuth2 / Bearer Token</strong><br>
+              <code>/token</code> or direct Bearer JWT
             </li>
             <li class="diag-item">
-              <strong>Bold Reports REST API</strong><br>
-              Multi-tenant <code>/reporting/api/site/{tenant}</code>
+              <strong>4-Stage Upload + Policy</strong><br>
+              <code>Skip</code>, <code>Overwrite</code>, <code>Rename</code> + Dry-Run plan
             </li>
             <li class="diag-item">
               <strong>Server Integration</strong><br>
-              Embedded Web Designer &amp; Viewer
+              Launch &amp; edit uploaded reports on Bold Reports
             </li>
             <li class="diag-item">
-              <strong>Bulk Cleanup Service</strong><br>
-              Remote scan, section &amp; report deletion
+              <strong>Bulk Cleanup Tool</strong><br>
+              Delete Reports, Datasets, Data Sources &amp; Folders
             </li>
           </ul>
         </div>
@@ -599,15 +599,15 @@
           <ul class="diag-items">
             <li class="diag-item">
               <strong>Transparent URL Shim</strong><br>
-              Reverse proxy for <code>/ReportServer</code>
+              Redirects <code>/ReportServer</code> &amp; <code>/Reports/Pages/Report.aspx</code>
             </li>
             <li class="diag-item">
-              <strong>Zero App Downtime</strong><br>
-              Existing bookmarks &amp; apps continue working
+              <strong>Incremental Delta Sync</strong><br>
+              SHA-256 change detection &amp; local-edit preservation
             </li>
             <li class="diag-item">
               <strong>Audit &amp; Compliance</strong><br>
-              PDF, CSV &amp; JSON sign-off package
+              Run report &amp; ZIP support bundle
             </li>
           </ul>
         </div>
@@ -619,7 +619,7 @@
     <!-- 6-Stage Workflow Deep Dive -->
     <div style="margin-bottom: 24px;" id="workflow">
       <h2 class="section-title">The 6-Step Migration Workflow</h2>
-      <p class="section-desc">Step-by-step walkthrough of each stage in the migration console.</p>
+      <p class="section-desc">Step-by-step walkthrough of each stage in the Bold Migrate console.</p>
     </div>
 
     <div class="steps-container">
@@ -631,37 +631,35 @@
             <div class="step-badge">1</div>
             <div>
               <div class="step-title-text">Connect &amp; Discover</div>
-              <div class="step-sub-text">Source and Destination Environment Configuration</div>
+              <div class="step-sub-text">Servers, Catalog Discovery, Data Source Credentials &amp; Bulk Remapping</div>
             </div>
           </div>
           <div class="step-chips">
-            <span class="step-chip">SOAP / REST API</span>
-            <span class="step-chip">NTLM / Windows Auth</span>
-            <span class="step-chip">OAuth2 Token</span>
-            <span class="step-chip">Local Folder Mode</span>
+            <span class="step-chip">REST v2.0 / SOAP 2010</span>
+            <span class="step-chip">Integrated / Basic HTTPS</span>
+            <span class="step-chip">OAuth2 / Bearer JWT</span>
+            <span class="step-chip">Bulk Host/DB Remap</span>
           </div>
         </div>
         <div class="step-content-grid">
           <div class="step-desc">
             <p>
-              Establishes secure connectivity to both the legacy SSRS/PBIRS server and the target Bold Reports Enterprise instance. For offline or air-gapped setups, the <strong>Local Folder Import</strong> mode allows picking a local folder containing <code>.rdl</code> files and automatically extracting shared data sources and data sets without live network access.
+              Establishes read-only connectivity to SSRS/PBIRS and authenticates to Bold Reports Server, then discovers and stages the entire catalog (folders, shared data sources, shared datasets, and reports) and automatically evaluates compatibility rules.
             </p>
             <ul class="feature-list">
-              <li><strong>Source Live Connection:</strong> Supports SSRS 2008 R2, 2012, 2014, 2016, 2017, 2019, and Power BI Report Server via SOAP Web Services and modern REST APIs.</li>
-              <li><strong>Destination Live Connection:</strong> Connects to Bold Reports Enterprise Server (Docker container, on-premises Windows/Linux, or Bold Reports Cloud) via OAuth2 Bearer token authentication.</li>
-              <li><strong>Health Probing:</strong> Live ping with roundtrip latency measurement before proceeding.</li>
+              <li><strong>Source Auto-Detection:</strong> Probes SSRS 2017–2022 / PBIRS via REST API v2.0 and falls back to SOAP <code>ReportingService2010</code> for SSRS 2012–2016.</li>
+              <li><strong>Data Source Vault &amp; TLS Trust:</strong> Live SQL Server connection testing (`validate-and-save`) with optional self-signed certificate trust (`TrustServerCertificate`) and In-Memory or DPAPI/AES-GCM vault storage.</li>
+              <li><strong>Bulk Host / Database Remapping:</strong> Preview and rewrite server hosts, database names, auth modes, and credentials across all staged <code>.rsds</code> files before validation or upload.</li>
             </ul>
           </div>
           <div class="step-side-card">
             <h4>Technical Flow</h4>
             <div class="code-box">
-POST /api/migration/runs
-{
-  "sourceUrl": "http://ssrs-server/ReportServer",
-  "sourceAuthType": "Ntlm",
-  "destinationUrl": "http://boldreports:8090",
-  "destinationTenantId": "site1"
-}
+POST /api/migration/runs/{id}/connect
+POST /api/migration/runs/{id}/connect-destination
+POST /api/migration/runs/{id}/fetch
+POST /api/migration/runs/{id}/check
+POST /api/migration/runs/{id}/datasources/bulk-remap
             </div>
           </div>
         </div>
@@ -673,32 +671,34 @@ POST /api/migration/runs
           <div class="step-num-title">
             <div class="step-badge">2</div>
             <div>
-              <div class="step-title-text">Inventory &amp; Automated Compatibility Assessment</div>
-              <div class="step-sub-text">Catalog Discovery, Complexity Scoring &amp; Classification</div>
+              <div class="step-title-text">Discovered Report Library</div>
+              <div class="step-sub-text">Search, Compatibility Filtering, Selection &amp; Destination Cleanup</div>
             </div>
           </div>
           <div class="step-chips">
-            <span class="step-chip">Catalog Crawl</span>
-            <span class="step-chip">Rules Engine</span>
-            <span class="step-chip">CSV / JSON Export</span>
+            <span class="step-chip">Catalog Filter Chips</span>
+            <span class="step-chip">Multi-Select Scoping</span>
+            <span class="step-chip">Direct Preview</span>
           </div>
         </div>
         <div class="step-content-grid">
           <div class="step-desc">
             <p>
-              Crawls the entire catalog hierarchy (Folders, Data Sources, Data Sets, Reports). The static analyzer evaluates each RDL element against the Bold Reports engine specification and places reports into four actionable buckets:
+              Browse the discovered report catalog, filter by compatibility (<code>All</code>, <code>Compatible</code>, <code>Needs Review</code>), search by report or folder name, and choose which reports participate in validation and upload.
             </p>
             <ul class="feature-list">
-              <li><strong style="color:#34D399;">Clean:</strong> 100% compatible standard controls (Tablix, Charts, Gauges, Textboxes, Subreports) requiring no manual intervention.</li>
-              <li><strong style="color:#60A5FA;">Auto-Fixed:</strong> Transformed automatically (namespace migration, connection string redaction, expression adjustments).</li>
-              <li><strong style="color:#FBBF24;">Needs Review:</strong> Custom assemblies (e.g. <code>System.Web</code>), complex VB.NET script blocks, or custom security extensions.</li>
-              <li><strong style="color:#F87171;">Blocked:</strong> Missing shared data source references, broken circular dependencies, or corrupt XML.</li>
+              <li><strong>Selective Migration:</strong> Excluded reports are persisted via <code>select-reports</code> so unrequested reports are skipped cleanly during Step 5 upload.</li>
+              <li><strong>Feature Tags &amp; Findings:</strong> Surfaces parameter counts, detected feature tags (<code>Subreport</code>, <code>Chart</code>, <code>Gauge</code>, <code>Map</code>, <code>Lookup</code>, <code>CustomAssembly</code>), and compatibility status.</li>
+              <li><strong>Run-Scoped Destination Delete:</strong> Clean up all, selected, or section-grouped reports on Bold Reports and reset their local state back to <code>Analysed</code>.</li>
             </ul>
           </div>
           <div class="step-side-card">
-            <h4>Report Estate Export</h4>
-            <p style="color:#CBD5E1;margin-bottom:8px;">Export the complete assessed catalog with category tags, compatibility scores, and dependency trees to CSV or JSON for stakeholder review.</p>
-            <div class="code-box">GET /api/migration/estate/export?format=csv</div>
+            <h4>Library Endpoints</h4>
+            <div class="code-box">
+GET  /api/migration/runs/{id}/reports
+GET  /api/migration/runs/{id}/estate?skip=0&amp;take=100
+POST /api/migration/runs/{id}/select-reports
+            </div>
           </div>
         </div>
       </div>
@@ -709,36 +709,33 @@ POST /api/migration/runs
           <div class="step-num-title">
             <div class="step-badge">3</div>
             <div>
-              <div class="step-title-text">Dependency Resolution &amp; RDL Transformation</div>
-              <div class="step-sub-text">Topological Sort DAG &amp; Semantic XML Rewriting</div>
+              <div class="step-title-text">Migration Readiness Assessment</div>
+              <div class="step-sub-text">Compatibility Rules, RDL Rewriting &amp; Link Verification</div>
             </div>
           </div>
           <div class="step-chips">
-            <span class="step-chip">Topological Sort DAG</span>
-            <span class="step-chip">XML Namespace Rewrite</span>
-            <span class="step-chip">Shared DS Rebinding</span>
-            <span class="step-chip">Expression Tester</span>
+            <span class="step-chip">RDL 2008/2010 ➔ 2016</span>
+            <span class="step-chip">Compatibility Rules JSON</span>
+            <span class="step-chip">Link &amp; Cycle Audit</span>
           </div>
         </div>
         <div class="step-content-grid">
           <div class="step-desc">
             <p>
-              Prevents upload failures by executing a Directed Acyclic Graph (DAG) topological sort. Items are strictly sequenced so prerequisites exist before dependents are created.
+              Summarizes estate readiness against runtime-loaded rules in <code>data/compatibility-rules.json</code> and audits every report's external dependencies before preview or upload.
             </p>
             <ul class="feature-list">
-              <li><strong>Dependency Order:</strong> Folders ➔ Shared Data Sources ➔ Shared Data Sets ➔ Dependent Reports &amp; Subreports.</li>
-              <li><strong>Schema Rewriting:</strong> Migrates Microsoft RDL schemas (<code>2005/01</code>, <code>2008/01</code>, <code>2010/01</code>, <code>2016/01</code>) to the Bold Reports specification.</li>
-              <li><strong>Data Source Re-binding:</strong> Re-maps legacy connection strings and binds shared data sources to their new Bold Reports IDs.</li>
-              <li><strong>Expression Sandbox:</strong> In-browser VB.NET expression tester to evaluate conditional formulas and string formatting expressions against sample data.</li>
+              <li><strong>Semantic XML Rewriting:</strong> Strips UTF-8 BOMs, upgrades RDL <code>2008/01</code> and <code>2010/01</code> namespaces to <code>2016/01</code>, and normalizes subreport/drillthrough paths via <code>System.Xml.Linq</code>.</li>
+              <li><strong>Dependency &amp; Cycle Verification:</strong> Audits <code>DataSourceReference</code>, <code>SharedDataSetReference</code> (including chained dataset data sources), and <code>Subreport</code> targets, detecting broken links and circular subreport chains.</li>
+              <li><strong>In-Place Reference Rebinding:</strong> Fix missing data source, dataset, or subreport links directly in staged RDL XML.</li>
             </ul>
           </div>
           <div class="step-side-card">
-            <h4>DAG Pipeline Sequence</h4>
-            <div style="font-family:var(--font-mono);font-size:12px;color:#93C5FD;line-height:1.7;">
-              Stage 1: Folder Hierarchy<br>
-              Stage 2: Shared DataSources (RDS)<br>
-              Stage 3: Shared DataSets (RSD)<br>
-              Stage 4: Transformed RDL Reports
+            <h4>Assessment &amp; Link APIs</h4>
+            <div class="code-box">
+GET  /api/migration/runs/{id}/poll
+GET  /api/migration/runs/{id}/dependencies/verify
+POST /api/migration/runs/{id}/reports/{reportId}/rebind-reference
             </div>
           </div>
         </div>
@@ -750,38 +747,36 @@ POST /api/migration/runs
           <div class="step-num-title">
             <div class="step-badge">4</div>
             <div>
-              <div class="step-title-text">Automated Validation &amp; Official Web Report Designer</div>
-              <div class="step-sub-text">Data Parity, Pixel Diff &amp; Live In-Browser Report Designer</div>
+              <div class="step-title-text">Automated Render Validation &amp; Preview</div>
+              <div class="step-sub-text">Headless Playwright, Local Staged Viewer/Designer &amp; Visual Comparison</div>
             </div>
           </div>
           <div class="step-chips">
-            <span class="step-chip">Data Parity Check</span>
-            <span class="step-chip">XML Diff Viewer</span>
-            <span class="step-chip">Embedded Designer</span>
-            <span class="step-chip">Sign-off Workflow</span>
+            <span class="step-chip">Playwright Chromium (5x)</span>
+            <span class="step-chip">Local Staged Designer</span>
+            <span class="step-chip">XML Diff</span>
+            <span class="step-chip">Swipe &amp; Pixel Diff</span>
           </div>
         </div>
         <div class="step-content-grid">
           <div class="step-desc">
             <p>
-              Validates migrated reports using multi-tier comparative analysis and provides four specialized review tools:
+              Validates staged reports locally <strong>before</strong> uploading anything to Bold Reports Server, catching parameter prompts, SQL connectivity gaps, and layout issues early:
             </p>
             <ul class="feature-list">
-              <li><strong>Automated Data Parity:</strong> Compares row counts, column structures, and cell value fingerprints between SSRS and Bold Reports.</li>
-              <li><strong>XML Diff Viewer:</strong> Side-by-side view showing original SSRS RDL vs transformed Bold Reports RDL with line-by-line additions and modifications highlighted.</li>
-              <li><strong>Visual Comparison:</strong> Pixel-by-pixel rendering diff detecting layout shifts, margin inconsistencies, and font discrepancies.</li>
-              <li><strong>Official Bold Reports Web Report Designer (Server-Integrated):</strong>
-                Full visual report designer embedded directly in the application using official Syncfusion CDN scripts. Connects via live OAuth2 token to open, preview, edit, and save reports directly back to Bold Reports Server!
-              </li>
+              <li><strong>Headless Playwright Validation:</strong> Renders staged reports concurrently via <code>preview-runner.html</code>, classifying <code>Passed</code>, <code>DataSourceOffline</code> (valid RDL, DB offline), <code>NeedsManualCheck</code> (prompt parameters), and <code>Failed</code> (with server render logs).</li>
+              <li><strong>Local Staged Viewer &amp; Web Report Designer (15.1.17):</strong> Preview and edit staged reports in-browser via <code>StagedReportServer</code>. Saving writes edits back to staging and marks <code>LocalEditPendingUpload</code> for Step 5.</li>
+              <li><strong>RDL XML Diff &amp; Visual Comparison:</strong> Inspect original vs. transformed RDL XML, or compare the local Playwright snapshot against live SSRS PNG output (or a Reference PNG) using Swipe Slider, Side-by-Side, and Canvas Pixel-Diff.</li>
             </ul>
           </div>
           <div class="step-side-card">
-            <h4>Designer Integration Config</h4>
+            <h4>Local Preview &amp; Validation APIs</h4>
             <div class="code-box">
-serviceUrl: "/reporting/reportservice/api/Designer"
-reportServerUrl: "/reporting/api/site/{tenant}"
-serviceAuthorizationToken: "bearer &lt;token&gt;"
-reportPath: "/Finance/QuarterlyRevenue"
+POST /api/migration/runs/{id}/validate-render?concurrency=5
+GET  /api/migration/runs/{id}/validation-summary
+GET  /api/migration/runs/{id}/reports/{reportId}/rdl
+POST /api/preview/runs/{id}/viewer/PostReportAction
+POST /api/preview/runs/{id}/designer/PostDesignerAction
             </div>
           </div>
         </div>
@@ -793,44 +788,35 @@ reportPath: "/Finance/QuarterlyRevenue"
           <div class="step-num-title">
             <div class="step-badge">5</div>
             <div>
-              <div class="step-title-text">Batch Upload &amp; Live Execution Engine</div>
-              <div class="step-sub-text">Streaming Progress, Live Logging &amp; Bulk Destination Cleanup</div>
+              <div class="step-title-text">Batch Migration Pipeline</div>
+              <div class="step-sub-text">4-Stage Dependency Upload, Conflict Policies, Dry-Run &amp; Server Launch</div>
             </div>
           </div>
           <div class="step-chips">
-            <span class="step-chip">Pause / Resume</span>
-            <span class="step-chip">Retry Mechanism</span>
+            <span class="step-chip">Skip / Overwrite / Rename</span>
+            <span class="step-chip">Dry-Run Plan</span>
+            <span class="step-chip">Pause / Resume / Retry</span>
             <span class="step-chip">Live Console Log</span>
-            <span class="step-chip">Bulk Delete Option</span>
           </div>
         </div>
         <div class="step-content-grid">
           <div class="step-desc">
             <p>
-              Executes the multi-stage upload into Bold Reports with idempotency guarantees, progress streaming, and administrative server cleanup tools:
+              Executes the strict 4-stage upload into Bold Reports Server (<code>Folders ➔ DataSources ➔ DataSets ➔ Reports</code>) with upload gating, per-item idempotency keys, and live execution logging:
             </p>
             <ul class="feature-list">
-              <li><strong>Real-Time Execution Log:</strong> Live formatted logs with timestamp, event code (e.g. <code>[UP-001]</code>), and color-coded level badges (<span style="color:#34D399;">[INFO]</span>, <span style="color:#FBBF24;">[WARN]</span>, <span style="color:#F87171;">[ERROR]</span>).</li>
-              <li><strong>Pipeline Controls:</strong> Start, Pause, Resume, or Retry Failed items without starting from scratch.</li>
-              <li><strong>Bulk Delete &amp; Destination Reset:</strong> Clean up test runs directly from the UI:
-                <ul style="margin-left:20px;margin-top:4px;">
-                  <li><strong>Delete All:</strong> Direct live scan of all reports on Bold Reports Server with complete reset.</li>
-                  <li><strong>Delete by Section / Category:</strong> Select specific category folders to wipe and rebuild.</li>
-                  <li><strong>Delete Selected:</strong> Delete specific reports by item ID or name.</li>
-                </ul>
-              </li>
+              <li><strong>Conflict Resolution &amp; Dry-Run:</strong> Choose <code>Skip</code>, <code>Overwrite</code>, or <code>Rename</code> (<code>_migrated</code> suffix) and preview planned actions with <code>Dry-Run Plan</code> before writing to Bold Reports.</li>
+              <li><strong>Upload Gating &amp; Local Edits:</strong> Only validated/approved reports are uploaded; reports edited locally in Step 4 are pushed to Bold Reports automatically via <code>PUT /v1.0/reports</code>.</li>
+              <li><strong>Destination Cleanup &amp; Server Integration:</strong> Launch uploaded reports in Bold Reports Server Viewer/Designer, or delete all, selected, or section-grouped reports from the destination.</li>
             </ul>
           </div>
           <div class="step-side-card">
-            <h4>Live Log &amp; API Controls</h4>
+            <h4>Pipeline &amp; Cleanup Controls</h4>
             <div class="code-box">
-POST /api/migration/runs/{id}/upload
+POST /api/migration/runs/{id}/upload/dry-run?conflictPolicy=Skip
+POST /api/migration/runs/{id}/upload?conflictPolicy=Skip
 GET  /api/migration/runs/{id}/log
-POST /api/migration/runs/{id}/delete-destination
-{
-  "deleteAll": true,
-  "deleteCategories": true
-}
+POST /api/migration/runs/{id}/destination/delete-reports
             </div>
           </div>
         </div>
@@ -843,39 +829,41 @@ POST /api/migration/runs/{id}/delete-destination
             <div class="step-badge">6</div>
             <div>
               <div class="step-title-text">Production Cutover &amp; Transparent URL Shim Proxy</div>
-              <div class="step-sub-text">Zero Downtime, Pre-Flight Gates &amp; URL Redirection Shim</div>
+              <div class="step-sub-text">Pre-Flight Gates, Delta Sync, URL Redirection &amp; Audit Package</div>
             </div>
           </div>
           <div class="step-chips">
-            <span class="step-chip">Reverse Proxy Shim</span>
-            <span class="step-chip">Pre-Flight Gates</span>
-            <span class="step-chip">Zero App Downtime</span>
-            <span class="step-chip">Sign-Off Audit Package</span>
+            <span class="step-chip">5 Blocking Gates</span>
+            <span class="step-chip">Delta Sync</span>
+            <span class="step-chip">URL Shim Middleware</span>
+            <span class="step-chip">Support Bundle ZIP</span>
           </div>
         </div>
         <div class="step-content-grid">
           <div class="step-desc">
             <p>
-              Activates the cutover without requiring immediate changes to downstream applications, ERP systems, scheduled bookmarks, or emails:
+              Validates cutover readiness, synchronizes late source changes, activates legacy SSRS URL redirection, and produces compliance artifacts:
             </p>
             <ul class="feature-list">
-              <li><strong>Pre-Flight Gate Validation:</strong> Verifies that all reports are approved, shared data sources are online, and no orphan references exist before authorizing cutover.</li>
-              <li><strong>Transparent URL Shim (Reverse Proxy):</strong> Intercepts requests sent to legacy SSRS URL formats:
+              <li><strong>Pre-Flight Cutover Gates:</strong> Verifies uploaded reports, measured validations, zero pending manual reviews, zero failed items, and zero unprocessed selected reports (plus advisory URL shim check).</li>
+              <li><strong>Incremental Delta Sync:</strong> Re-scans SSRS <code>ModifiedUtc</code> and SHA-256 hashes, preserving Step 4 local designer edits while re-validating changed source reports.</li>
+              <li><strong>Transparent URL Shim:</strong> Intercepts legacy SSRS URLs and redirects safely to Bold Reports:
                 <div class="code-box" style="margin-top:6px;margin-bottom:6px;">
-                  Legacy: http://ssrs-host/ReportServer?/Finance/MonthlySales&amp;rs:Format=PDF<br>
-                  Shim Proxy ➔ http://bold-host/reporting/site/site1/reports/view/Finance/MonthlySales
+                  Legacy: /ReportServer?/Finance/MonthlySales&amp;rs:Format=PDF<br>
+                  Shim ➔ /reports/{id}/MonthlySales?exportFormat=PDF
                 </div>
               </li>
-              <li><strong>Sign-Off Package:</strong> Automatically exports a signed audit package containing diff summaries, validation scores, and execution timestamps for compliance.</li>
+              <li><strong>Audit Artifacts:</strong> Download the Migration Run Report (<code>report-pdf</code>) and Support Bundle ZIP (<code>run.json</code>, <code>reports.json</code>, <code>audit-events.json</code>).</li>
             </ul>
           </div>
           <div class="step-side-card">
-            <h4>Cutover Pre-Flight Status</h4>
-            <div style="font-family:var(--font-mono);font-size:12px;color:#34D399;line-height:1.7;">
-              [PASS] 100% Reports Uploaded<br>
-              [PASS] Shared DataSources Bound<br>
-              [PASS] Validation Threshold Met (&gt;95%)<br>
-              [READY] Shim Proxy Route Activated
+            <h4>Cutover &amp; Diagnostics APIs</h4>
+            <div class="code-box">
+GET  /api/migration/runs/{id}/cutover
+POST /api/migration/runs/{id}/delta-sync
+POST /api/migration/runs/{id}/cutover
+GET  /api/diagnostics/runs/{id}/report-pdf
+GET  /api/diagnostics/runs/{id}/support-bundle
             </div>
           </div>
         </div>
@@ -887,7 +875,7 @@ POST /api/migration/runs/{id}/delete-destination
     <!-- Supported Features & Capabilities Matrix -->
     <div style="margin-bottom: 24px;" id="matrix">
       <h2 class="section-title">Supported Features &amp; Compatibility Matrix</h2>
-      <p class="section-desc">Comprehensive reference of supported systems, protocols, RDL elements, and migration capabilities.</p>
+      <p class="section-desc">Comprehensive reference of supported systems, protocols, RDL elements, and standalone tools.</p>
     </div>
 
     <div class="table-wrapper">
@@ -897,127 +885,86 @@ POST /api/migration/runs/{id}/delete-destination
             <th style="width:24%;">Feature Category</th>
             <th style="width:36%;">Supported Capabilities</th>
             <th style="width:20%;">Compatibility Level</th>
-            <th style="width:20%;">Transformation Behavior</th>
+            <th style="width:20%;">Behavior</th>
           </tr>
         </thead>
         <tbody>
           <tr>
             <td><strong>Source Platforms</strong></td>
             <td>
-              • Microsoft SQL Server Reporting Services (SSRS) 2008 R2, 2012, 2014, 2016, 2017, 2019, 2022<br>
-              • Power BI Report Server (PBIRS)<br>
-              • Offline Local Folder directory of <code>.rdl</code>, <code>.rds</code>, <code>.rsd</code> files
+              • SSRS 2017, 2019, 2022 &amp; Power BI Report Server (PBIRS)<br>
+              • SSRS 2012, 2014, 2016 (via SOAP <code>ReportingService2010</code>)<br>
+              • Offline Local Folder directory of <code>.rdl</code>, <code>.rsds</code>, <code>.rds</code>, <code>.rsd</code>
             </td>
             <td><span class="badge-ok">Full Support</span></td>
-            <td>Auto-detects SOAP vs REST API v2 endpoints or crawls disk directory recursively.</td>
+            <td>Auto-detects REST v2.0 vs SOAP 2010 read-only, or ingests local export folders recursively.</td>
           </tr>
           <tr>
             <td><strong>Destination Platforms</strong></td>
             <td>
-              • Syncfusion Bold Reports Enterprise Server (Docker / Linux)<br>
-              • Bold Reports Server for Windows (IIS)<br>
-              • Bold Reports Cloud / Multi-Tenant Deployments
+              • Bold Reports Enterprise Server (Docker / Linux / Windows IIS)<br>
+              • Multi-tenant sites (<code>/reporting/api/site/{tenant}</code>)
             </td>
             <td><span class="badge-ok">Full Support</span></td>
-            <td>OAuth2 Bearer token authentication via <code>/token</code> with tenant site routing.</td>
+            <td>OAuth2 Bearer token via <code>/token</code> or direct Bearer JWT with multi-version route probing.</td>
           </tr>
           <tr>
-            <td><strong>Authentication Protocols</strong></td>
+            <td><strong>Authentication &amp; Security</strong></td>
             <td>
-              • Windows Integrated Authentication (Kerberos)<br>
-              • NTLM Authentication<br>
-              • HTTP Basic Authentication<br>
-              • Bold Reports OAuth2 Token Authentication
+              • Windows Integrated (SSPI/NTLM/Kerberos), Explicit Windows, HTTPS Basic<br>
+              • In-Memory or DPAPI / AES-GCM encrypted credential vault<br>
+              • <code>SecurityMiddleware</code> (CSRF double-submit &amp; optional <code>ApiAccessToken</code>)
             </td>
             <td><span class="badge-ok">Full Support</span></td>
-            <td>Negotiates handshake and securely holds credentials in-memory during migration.</td>
-          </tr>
-          <tr>
-            <td><strong>Catalog Items</strong></td>
-            <td>
-              • Folder hierarchies &amp; nested category paths<br>
-              • Shared Data Sources (<code>.rds</code>, <code>.rsds</code>)<br>
-              • Shared Data Sets (<code>.rsd</code>)<br>
-              • Standard RDL Reports &amp; Subreports
-            </td>
-            <td><span class="badge-ok">Full Support</span></td>
-            <td>Topological DAG sort creates folders and data sources first, then links data sets and reports.</td>
+            <td>Secrets never persisted to SQLite or logs (<code>Redactor</code> scrubbing).</td>
           </tr>
           <tr>
             <td><strong>RDL Schema Formats</strong></td>
             <td>
-              • Microsoft RDL 2005 (<code>http://schemas.microsoft.com/sqlserver/reporting/2005/01/reportdefinition</code>)<br>
-              • Microsoft RDL 2008 (<code>.../2008/01/...</code>)<br>
-              • Microsoft RDL 2010 (<code>.../2010/01/...</code>)<br>
-              • Microsoft RDL 2016 (<code>.../2016/01/...</code>)
+              • Microsoft RDL 2008 (<code>.../2008/01/reportdefinition</code>)<br>
+              • Microsoft RDL 2010 (<code>.../2010/01/reportdefinition</code>)<br>
+              • Microsoft RDL 2016 (<code>.../2016/01/reportdefinition</code>)
             </td>
-            <td><span class="badge-auto">Auto-Converted</span></td>
-            <td>XML parser transforms namespace references and aligns schema nodes to Bold Reports standard.</td>
+            <td><span class="badge-auto">Auto-Upgraded</span></td>
+            <td><code>System.Xml.Linq</code> XML parser strips BOMs and upgrades RDL 2008/2010 namespaces to 2016.</td>
           </tr>
           <tr>
-            <td><strong>Data Sources &amp; Connectors</strong></td>
+            <td><strong>Data Sources &amp; Remapping</strong></td>
             <td>
-              • Microsoft SQL Server / Azure SQL<br>
-              • Oracle Database<br>
-              • PostgreSQL, MySQL<br>
-              • ODBC, OLE DB<br>
-              • XML / Web API Data Sources
+              • SQL Server / Azure SQL, Oracle, PostgreSQL, MySQL, SSAS, ODBC, OLE DB, XML, WebData<br>
+              • Bulk Host / Database / Credential Remapping &amp; SQL TLS trust toggle
             </td>
             <td><span class="badge-ok">Full Support</span></td>
-            <td>Connection strings sanitized and shared data source references rebound to target IDs.</td>
+            <td>Live SQL connectivity check in Step 1 and dependency-bound upload in Step 5.</td>
           </tr>
           <tr>
-            <td><strong>Report Controls</strong></td>
+            <td><strong>Web Report Viewer &amp; Designer</strong></td>
             <td>
-              • Tablix, Tables, Matrices, Lists<br>
-              • Charts (Bar, Column, Line, Pie, Area, Scatter)<br>
-              • Gauges, Indicators &amp; Sparklines<br>
-              • Textboxes, Images, Subreports<br>
-              • Cascading &amp; Multi-Value Parameters
+              • Bold Reports <code>15.1.17</code> Viewer &amp; Designer (Local Staged &amp; Server Modes)<br>
+              • 12 data extensions registered in <code>Program.cs</code>
             </td>
             <td><span class="badge-ok">Full Support</span></td>
-            <td>Preserves formatting, group hierarchies, parameters, and drill-through links.</td>
+            <td>Local edits save back to staging and are pushed cleanly during Step 5 upload.</td>
           </tr>
           <tr>
-            <td><strong>Expressions &amp; Scripts</strong></td>
+            <td><strong>Standalone Tools</strong></td>
             <td>
-              • Standard VB.NET functions (<code>IIf</code>, <code>Format</code>, <code>Sum</code>, <code>Avg</code>, etc.)<br>
-              • Parameter expressions (<code>Parameters!X.Value</code>)<br>
-              • Custom Assemblies / 3rd-party code blocks
-            </td>
-            <td><span class="badge-auto">Auto / Flagged</span></td>
-            <td>Built-in Expression Sandbox evaluates syntax; custom code blocks flagged for review.</td>
-          </tr>
-          <tr>
-            <td><strong>Web Report Designer</strong></td>
-            <td>
-              • Syncfusion Bold Reports Web Report Designer<br>
-              • In-browser report editing, property inspection<br>
-              • Live Server Integration (load, preview, save back)
+              • Local Folder Import (with phase logs, CSVs, JSON, Markdown summary)<br>
+              • Bulk Delete Items (Reports, Datasets, Data Sources, Folders)<br>
+              • Offline Compatibility Scanner (<code>/scanner.html</code>) &amp; Settings/Rules
             </td>
             <td><span class="badge-ok">Full Support</span></td>
-            <td>Loaded via official Syncfusion CDN scripts; automatically wired to server token &amp; designer API.</td>
-          </tr>
-          <tr>
-            <td><strong>Destination Management</strong></td>
-            <td>
-              • Bulk Delete All reports with direct server scan<br>
-              • Multi-section / category folder cleanup<br>
-              • Multi-selected report deletion<br>
-              • Reset SQLite catalog state to Analysed
-            </td>
-            <td><span class="badge-ok">Full Support</span></td>
-            <td>Direct REST API deletion with automatic reconciliation of local SQLite staging records.</td>
+            <td>Operates independently without creating a full migration run.</td>
           </tr>
           <tr>
             <td><strong>Cutover &amp; Redirection</strong></td>
             <td>
-              • Transparent URL Shim reverse proxy<br>
-              • Intercepts <code>/ReportServer</code> and <code>/Reports</code><br>
-              • Zero app downtime cutover
+              • Transparent URL Shim reverse redirector<br>
+              • Intercepts <code>/ReportServer</code> and <code>/Reports/Pages/Report.aspx</code><br>
+              • Incremental Delta Sync &amp; Diagnostic Support Bundle ZIP
             </td>
             <td><span class="badge-ok">Full Support</span></td>
-            <td>Directs incoming requests to destination Bold Reports viewer paths without code changes.</td>
+            <td>Enforces safe redirect origins and surfaces friendly diagnostic 404s for unmapped paths.</td>
           </tr>
         </tbody>
       </table>

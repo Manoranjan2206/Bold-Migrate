@@ -121,7 +121,7 @@
         </div>
         <div class="card">
           <h2>Secure credentials</h2>
-          <p class="sub">Data source passwords are encrypted and held only in memory, DPAPI, or Key Vault.</p>
+          <p class="sub">Data source passwords are never written to SQLite or logs—held only in memory or an optional encrypted local vault (DPAPI / AES-GCM).</p>
         </div>
       </div>
     </section>
@@ -1073,7 +1073,7 @@
             </label>
             <div class="row2">
               <label class="f">
-                DataSource Folder (*.rsds - optional)
+                DataSource Folder (*.rsds / *.rds - optional)
                 <input type="text" id="lf-ds-folder" placeholder="C:\SSRS_Export\Datasources">
               </label>
               <label class="f">

@@ -2,6 +2,15 @@
 
 Nov 21, 2026 · @Manoranjan
 
+> [!NOTE]
+> **Historical Pre-Implementation Build Guide (Superseded):** This document captures the initial pre-implementation design before the standalone `.NET 10` service was built. For the **authoritative specification of the implemented application**, read [`docs/application-spec.md`](../docs/application-spec.md) and [`docs/api-reference.md`](../docs/api-reference.md).
+>
+> **Key Architecture & UX Evolutions Implemented:**
+> - **Deployment ([ADR-001](../docs/decisions/001-standalone-service-and-sqlite.md)):** Built as a standalone ASP.NET Core (`.NET 10`) service (`BoldMigrate.Api`) with SQLite (WAL) and Docker support rather than an internal module inside Bold Reports Server.
+> - **6-Step Journey Order ([ADR-002](../docs/decisions/002-staged-local-preview-and-playwright-validation.md)):** Step 1 Connect & Discover (with Bulk Host/DB Remapping) → Step 2 Report Library → Step 3 Assessment Dashboard (with Link Verification & Rebinding) → Step 4 Validation & Preview (headless Playwright + Local Staged Viewer/Designer + XML/Visual Diff) → Step 5 Migration Pipeline (4-stage upload with `Skip`/`Overwrite`/`Rename` Conflict Policies & Dry-Run) → Step 6 Cutover & Audit (Delta Sync, URL Shim, Audit Report & Support Bundle).
+> - **Design Tokens:** Uses `Geist` / `Geist Mono`, `#FF4800` brand accent, `#020202` primary ink, and `#0D1420` dark sidebar in [`tokens.css`](../src/BoldMigrate.Api/wwwroot/css/tokens.css).
+> - **Standalone Tools:** Includes Local Folder Import, Multi-Type Bulk Delete (Reports, Datasets, Data Sources, Folders), Offline Compatibility Scanner (`/scanner.html`), Settings & Rules, and Expression Tester API.
+
 ## How to use this document
 
 This is the build specification for Bold Migrate, the SSRS to Bold Reports migration module. It is written to be implemented without further clarification, section by section, by an engineer or an autonomous coding agent working independently.

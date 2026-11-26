@@ -1,145 +1,182 @@
-# Bold Migrate — Application Specification
+# Bold Migrate — Application & System Specification
 
-Bold Migrate moves a SQL Server Reporting Services (SSRS) or Power BI Report Server estate to Bold Reports Server. It discovers the source estate, checks each report for compatibility, uploads items in dependency order, validates the result side by side, and supports a gated cutover. It also ships standalone tools for local-folder import, SSRS expression testing and bulk report deletion.
+**Status:** Implemented (Authoritative System Specification)  
+**Target Runtime:** .NET 10 (`net10.0`), ASP.NET Core, SQLite (EF Core), Playwright Chromium, Bold Reports `15.1.17`
 
-This document covers the whole application. The delete tool has its own detail spec: [bulk-delete-reports.md](bulk-delete-reports.md).
+Bold Migrate is a standalone enterprise migration service that moves SQL Server Reporting Services (SSRS 2012–2022) and Power BI Report Server (PBIRS) estates—or offline local report folders—to Bold Reports Server. It discovers and stages the source estate read-only, transforms and classifies `.rdl` definitions against runtime-loaded compatibility rules, validates reports locally via headless Playwright and embedded Bold Reports Viewer/Designer before upload, executes a dependency-ordered 4-stage upload pipeline with conflict policies and dry-run planning, and supports gated production cutover with delta sync and a transparent SSRS URL compatibility shim.
 
-## 1. Goals and non-goals
+---
 
-**Goals**
-- Migrate folders, data sources, datasets and reports from SSRS/PBIRS to Bold Reports with minimal manual work.
-- Classify every report (clean, auto-fixed, needs review, blocked) before anything is uploaded.
-- Prove the result with validation (visual, structural and data comparison) and a human approval step.
-- Keep an audit trail: structured logs, event codes, a support bundle.
+## 1. Goals and Non-Goals
 
-**Non-goals**
-- Migrating report content that Bold Reports cannot run (custom assemblies and similar). These are flagged as blocked.
-- Persisting passwords. Credentials are held in memory only (`InMemoryCredentialStore`).
-- Multi-user concurrent operation. The app is a single-operator tool with one active run.
+### Goals
+- **Read-only source extraction:** Connect to SSRS/PBIRS via REST API v2.0 or SOAP `ReportingService2010` (`ISourceCatalog`) without issuing write operations to the source server.
+- **Pre-upload transformation & classification:** Strip BOMs, upgrade RDL schemas (`2008`/`2010` -> `2016`), rebind references, extract feature tags, and classify reports into `Clean`, `AutoFixed`, `NeedsReview`, `Blocked`, or `Excluded` using `data/compatibility-rules.json`.
+- **Pre-upload local preview, editing & validation:** Render staged reports locally using `StagedReportServer` (`BoldReports.AspNet.Core` / `BoldReports.Net.Core` `15.1.17`) and headless Playwright Chromium (`RenderValidationEngine`), allow visual swipe/side-by-side/pixel-diff and XML diff inspection, and support in-browser editing via the embedded Web Report Designer saving back to staging.
+- **Deterministic 4-stage upload:** Provision Categories (nested folder tree), Data Sources, Shared Data Sets, and Reports in strict dependency order with per-item idempotency keys, configurable conflict policies (`Skip`, `Overwrite`, `Rename`), pre-flight dry-run preview, pause/resume, and retry.
+- **Gated cutover & backward-compatible URLs:** Enforce readiness gates, support incremental delta sync, generate audit reports and diagnostic support bundles, and redirect legacy `/ReportServer` and `/Reports/Pages/Report.aspx` URLs via `UrlShimMiddleware`.
+- **Standalone operational tools:** Provide Local Folder Import (`.rdl`, `.rsds`/`.rds`, `.rsd`), Multi-Type Bulk Delete (Reports, Datasets, Data Sources, Folders), Offline Compatibility Scanner (`scanner.html` + `/api/scanner/analyse`), Settings & Rules management, and an SSRS Expression Tester API.
 
-## 2. Architecture
+### Non-Goals
+- **Unsupported SSRS artifacts:** Mobile reports (`.rsmobile`), Power BI `.pbix` reports, semantic models (`.smdl`), report snapshots/execution history, and custom SSRS security extensions are not migrated.
+- **Unencrypted credential persistence:** Database passwords, SSRS passwords, and Bold Reports Bearer tokens are never written to SQLite or log files.
+- **Multi-user concurrent sessions:** Designed as a single-operator console managing one active migration run at a time (previous active runs are abandoned when starting a fresh run).
+
+---
+
+## 2. System Architecture
+
+Bold Migrate is structured as a four-project .NET 10 solution (`BoldMigrate.slnx`) plus three automated test projects:
 
 ```mermaid
 flowchart LR
-    subgraph Browser
-        UI[index.html + app.js / api.js / bolddelete.js]
-    end
-    subgraph "BoldMigrate.Api (ASP.NET Core, net10.0)"
-        CTRL[Controllers: Migration, Diagnostics, Scanner, Settings, BoldDeleteTool]
-        MW[UrlShimMiddleware]
-        HC[Health checks /health]
-        FL[FileLoggerProvider -> logs/*.log]
-    end
-    subgraph "BoldMigrate.Engine"
-        ORCH[MigrationOrchestrator - hosted service]
-        TR[TransformEngine + compatibility rules]
-        UP[UploadLayer + DestinationClient]
-        VAL[ValidationEngine: Pixel / Pdf / Data comparers]
-        DS[DeltaSyncEngine]
-        LF[LocalFolderMigrationService]
-        EX[ExpressionTesterEngine]
-        LOG[MigrationLogger + Redactor]
-    end
-    subgraph "BoldMigrate.Infrastructure"
-        SA[Source adapters: RestV2, SOAP 2010]
-        DB[(SQLite via EF Core)]
-        STG[FileSystemStagingStore]
-        CRED[InMemoryCredentialStore]
-    end
-    subgraph "BoldMigrate.Core"
-        CORE[Models, enums, DTOs, interfaces, ReportStateMachine]
+    subgraph Browser["Browser SPA (wwwroot/)"]
+        UI["index.html + js/*.js + css/tokens.css"]
+        SCAN["scanner.html + js/scanner.js"]
+        GUIDE["workflow-guide.html"]
     end
 
-    UI -->|REST /api/*| CTRL
+    subgraph Api["BoldMigrate.Api (ASP.NET Core, net10.0)"]
+        MW["SecurityMiddleware (Headers, ApiAccessToken, CSRF)"]
+        SHIM["UrlShimMiddleware (/ReportServer, /Reports/Pages/Report.aspx)"]
+        CTRL["Controllers: Migration, BoldDeleteTool, Diagnostics, Scanner, Settings, LocalReportViewer, LocalReportDesigner"]
+        PREV["Preview: StagedReportServer, StagedReportSession, StagedReportRenderer"]
+        HC["Health Checks (/health) & FileLoggerProvider (logs/)"]
+    end
+
+    subgraph Engine["BoldMigrate.Engine"]
+        ORCH["MigrationOrchestrator (BackgroundService)"]
+        XFRM["TransformEngine + CompatibilityRulesLoader"]
+        DEP["DependencyVerifier + StagedCatalog"]
+        UP["UploadLayer + DestinationClient"]
+        VAL["RenderValidationEngine (Playwright) + ValidationEngine"]
+        DSYNC["DeltaSyncEngine"]
+        LF["LocalFolderMigrationService"]
+        EXPR["ExpressionTesterEngine"]
+        LOG["MigrationLogger + Redactor + MigrationMetrics"]
+    end
+
+    subgraph Infra["BoldMigrate.Infrastructure"]
+        SA["RestV2SourceAdapter / SoapSourceAdapter / SourceAdapterFactory"]
+        DB[("SQLite + WAL (MigrationDbContext)")]
+        STG["FileSystemStagingStore"]
+        CRED["InMemoryCredentialStore (InMemory / DPAPI / AES-GCM)"]
+    end
+
+    subgraph Core["BoldMigrate.Core"]
+        DOMAIN["Models, Enums, DTOs, Interfaces, ReportStateMachine, EventCodes, ErrorCatalogue, MigrationSettings"]
+    end
+
+    UI -->|REST /api/* + X-BoldMigrate-Csrf| MW --> CTRL
+    MW --> SHIM
     CTRL --> ORCH
+    CTRL --> PREV
     CTRL --> LF
-    CTRL --> EX
-    ORCH --> TR
+    CTRL --> EXPR
+    PREV -->|"preview-runner.html"| VAL
+    ORCH --> SA
+    ORCH --> XFRM
     ORCH --> UP
     ORCH --> VAL
-    ORCH --> DS
-    ORCH --> SA
-    ORCH --> DB
-    TR --> STG
-    UP -->|HTTPS + Bearer token| BR[(Bold Reports Server)]
-    SA -->|REST v2 / SOAP| SSRS[(SSRS / PBIRS)]
-    VAL --> SSRS
-    VAL --> BR
-    CTRL --> CRED
-    CTRL --> DB
+    UP -->|"HTTPS + Bearer JWT"| BR[("Bold Reports Server")]
+    SA -->|"REST v2.0 / SOAP 2010 (Read-Only)"| SSRS[("SSRS / PBIRS")]
+    Engine --> Infra --> Core
 ```
 
-| Project | Responsibility |
-|---|---|
-| `BoldMigrate.Api` | HTTP API, static UI (`wwwroot`), DI setup, URL shim middleware, health checks, file logging |
-| `BoldMigrate.Engine` | Orchestration, transform/classification, upload, validation, delta sync, local folder import, expression tester, logging |
-| `BoldMigrate.Infrastructure` | Source adapters (REST v2, SOAP), SQLite persistence, file staging, credential store |
-| `BoldMigrate.Core` | Domain models, enums, DTOs, interfaces, report state machine, event codes and error catalogue |
+### Project Responsibilities
 
-Tests live in `tests/` (Core and Engine test projects).
+| Project | Path | Responsibility |
+|---|---|---|
+| `BoldMigrate.Core` | `src/BoldMigrate.Core/` | Domain models, enums, DTOs, repository/adapter interfaces, `ReportStateMachine`, `MigrationSettings`, `EventCodes`, `ErrorCatalogue`, `HostResolver`, `SqlConnectionHelper`. Zero external NuGet dependencies. |
+| `BoldMigrate.Infrastructure` | `src/BoldMigrate.Infrastructure/` | EF Core SQLite persistence (`MigrationDbContext`, `MigrationStoreRepository`), SSRS adapters (`RestV2SourceAdapter`, `SoapSourceAdapter`, `SourceAdapterFactory`), local staging (`FileSystemStagingStore`), credential vault (`InMemoryCredentialStore`). |
+| `BoldMigrate.Engine` | `src/BoldMigrate.Engine/` | `MigrationOrchestrator` (`BackgroundService`), `TransformEngine`, `CompatibilityRulesLoader`, `DependencyVerifier`, `StagedCatalog`, `UploadLayer`, `DestinationClient`, `RenderValidationEngine` (Playwright), `ValidationEngine`, `DeltaSyncEngine`, `LocalFolderMigrationService`, `ExpressionTesterEngine`, `MigrationLogger`, `Redactor`, `MigrationMetrics`. |
+| `BoldMigrate.Api` | `src/BoldMigrate.Api/` | ASP.NET Core host (`Program.cs`), REST controllers, `SecurityMiddleware`, `UrlShimMiddleware`, `StagedReportServer` / `StagedReportSession` / `StagedReportRenderer`, `MigrationHealthChecks`, `FileLoggerProvider`, and static SPA in `wwwroot/`. |
+| Tests | `tests/BoldMigrate.*.Tests/` | xUnit unit tests (`Core.Tests`, `Engine.Tests`) and `WebApplicationFactory<Program>` integration tests (`Api.Tests`). |
 
-## 3. End-to-end migration workflow
+---
+
+## 3. End-to-End 6-Step Migration Journey
+
+The primary console (`src/BoldMigrate.Api/wwwroot/index.html`) guides operators through a 6-step sequential journey alongside a persistent sidebar and global activity progress bar:
 
 ```mermaid
 flowchart TD
-    S([Start]) --> C1[1. Connections: SSRS + Bold Reports login]
-    C1 -->|connect / connect-destination| C2{Both connected?}
-    C2 -->|no| C1
-    C2 -->|yes| D[2. Fetch: discover estate, stage definitions]
-    D --> A[3. Check: transform + classify each report]
-    A --> L[4. Report Library: review buckets, select reports]
-    L --> U[5. Upload: folders, data sources, datasets, reports]
-    U --> V[6. Validate: pixel / PDF / data comparison]
-    V --> R{Result}
-    R -->|auto passed| AP[Approved or auto-passed]
-    R -->|needs review| Q[Review queue: approve or flag]
-    R -->|failed| F[Flagged / retry]
-    Q --> AP
-    F -->|retry| U
-    AP --> G[7. Cutover gates + URL shim]
-    G --> X([Cut over])
-    X -.->|later changes| DS[Delta sync]
-    DS --> U
+    S([Step 1: Connect & Discover]) -->|Test SSRS + Bold Reports + Save & Discover| D[Fetch Catalog & Stage RDL/RSDS/RSD]
+    D --> C[Auto-run Compatibility Check]
+    C -->|Enter DS Creds / Bulk Host-DB Remap| L[Step 2: Report Library]
+    L -->|Select Reports| A[Step 3: Assessment Dashboard]
+    A -->|Verify Links & Rebind Broken Refs| V[Step 4: Validation & Preview]
+    V -->|Playwright 5-Tab Render / Local Viewer & Designer / XML & Visual Diff| U[Step 5: Migration Pipeline]
+    U -->|Dry-Run Plan + Conflict Policy: Skip / Overwrite / Rename| UP[4-Stage Upload: Folders -> DataSources -> DataSets -> Reports]
+    UP --> G[Step 6: Cutover & Audit]
+    G -->|Evaluate Gates + Delta Sync + URL Shim + Audit PDF/Bundle| X([CutOver])
 ```
 
-Stages in detail:
+### Step 1 — Connect & Discover (`connections.js`)
+1. **Run Initialization:** On load, `initApp()` calls `GET /api/migration/active-run` (resuming an existing non-abandoned run if present, or creating one via `POST /api/migration/runs`). **New Migration Run** (`ForceNew = true`) abandons the active run and creates a fresh run.
+2. **Source SSRS Server:** Supports `Integrated` (current Windows session SSPI/NTLM), `WindowsExplicit` (`Domain\User` or `user@domain`), and `Basic` (HTTPS-only; plain HTTP non-loopback is rejected with `SRC-007`). `SourceAdapterFactory` probes REST v2.0 (`/api/v2.0/$metadata`) and falls back to SOAP 2010 (`/ReportService2010.asmx?wsdl`), or honors `Extraction.PreferredApi`. If explicit credentials return 401, the API probes Windows Integrated auth and returns an actionable hint if Integrated succeeds.
+3. **Destination Bold Reports Server:** Authenticates via admin email/password (`POST .../token` across candidate Bold Reports tenant paths) or direct Bearer JWT token (`POST /api/migration/runs/{id}/connect-destination`).
+4. **Catalog Discovery & Staging:** **Save & Discover Catalog** triggers `POST .../fetch` (parallel download up to `Extraction.MaxParallel`, storing unmodified copies in `__originals/` and BOM-stripped working copies in staging) followed by `POST .../check` (`TransformEngine`). Re-scanning an already-populated run opens a confirmation modal, abandons the old run, and starts fresh.
+5. **Discovered Data Source Credentials & Bulk Remapping:**
+   - Displays all staged `.rsds`/`.rds` data sources with redacted connection strings (`Redactor.RedactConnectionString`).
+   - Supports credential modes `Integrated`, `Store`, `Prompt`, and `None`, live SQL Server connectivity testing (`POST .../datasources/{dataSourceId}/validate-and-save`), and optional `TrustServerCertificate` override (`Preview.AllowUntrustedSqlCert`, detecting SQL Error `-2146893019`).
+   - **Bulk Host / Database Remapping** (`POST .../datasources/bulk-remap`) supports `DryRun` preview and batch updates across staged `.rsds` files for server host, database/initial catalog, credential mode, username/password, and TLS trust.
+   - **Credential Storage Mode** (`PUT .../credential-mode`) toggles between `InMemory` (default volatile) and `DpapiLocal` (DPAPI on Windows / AES-GCM key file on Linux). `ExternalVault` is rejected as unconfigured.
 
-1. **Connect** — `POST /runs`, `/connect` (SSRS, REST v2 or SOAP 2010 adapter chosen via `SourceAdapterFactory`), `/connect-destination` (Bold Reports by credentials or pre-issued Bearer token). Credentials go to `InMemoryCredentialStore`.
-2. **Fetch (discover)** — `/fetch` lists folders, data sources, datasets and reports into `CatalogItems` and stages RDL/RSDS/RSD files in the staging store.
-3. **Check (transform)** — `/check` runs `TransformEngine` with rules loaded by `CompatibilityRulesLoader`. Each report gets a bucket (Clean, AutoFixed, NeedsReview, Blocked, Excluded) and a list of transform actions.
-4. **Library** — the user filters the catalog and selects reports (`/select-reports`). Blocked and excluded reports are not uploaded.
-5. **Validate** — `/validate` runs `ValidationEngine`: validates staged reports locally using `IStagedReportRenderer` compared against SSRS source render (and destination if already uploaded). Results show side by side in the Validation tab. Reviewers preview, edit in local designer, and approve or flag (`/approve`, `/flag`, `/bulk-approve`).
-6. **Upload** — `/upload` runs `UploadLayer` in four stages: Folders (categories), DataSources, DataSets, Reports. In Stage 4, report uploads are gated so only validated and approved reports proceed to Bold Reports Server. Uploads use an idempotency key per item, retry with attempts recorded, and treat a 409 as "already exists". The run can be paused/resumed in the UI and failed items retried (`/retry`).
-7. **Cutover** — `GET /cutover` evaluates the gates; `POST /cutover` completes it. `UrlShimMiddleware` maps old SSRS URLs to the Bold Reports URLs recorded in `UrlMapping`. A PDF report and a support bundle are downloadable from `DiagnosticsController`.
+### Step 2 — Report Library (`library.js`)
+- Displays discovered reports (`GET .../reports`) with search, compatibility filter chips (`All`, `Compatible`, `Needs Review`), parameter counts, feature tags, and block/review findings.
+- Operators select/deselect reports (`POST .../select-reports`, which toggles non-blocked reports between `Analysed` and `Excluded`), launch **Inspect & Validate** directly into the local Staged Report Viewer, or delete reports from Bold Reports (`POST .../destination/delete-reports`).
 
-`/delta-sync` re-scans the source and uploads only items that changed. `/abandon` closes a run.
+### Step 3 — Assessment Dashboard (`library.js`)
+- Summarizes estate readiness (`(Clean + AutoFixed) / Total`), compatibility breakdown bars, connection pills, and items tagged for review.
+- **Link Verification (`DependencyVerifier`):** `GET .../dependencies/verify` audits every staged report's `DataSourceReference`, `SharedDataSetReference` (including chained dataset-to-datasource links), and `Subreport/ReportName` references, detecting missing targets and circular subreport cycles. Broken links can be rebound directly in staged RDL XML via `POST .../reports/{reportId}/rebind-reference`.
 
-## 4. State models
+### Step 4 — Automated Render Validation & Preview (`validation.js`, `modals.js`)
+- **Headless Playwright Render Validation (`RenderValidationEngine`):** `POST .../validate-render?concurrency=5` launches headless Chromium against `preview-runner.html` (backed by `LocalReportViewerController` and `StagedReportServer`) for all or selected reports.
+  - Reports with prompt parameters lacking defaults/valid values and non-nullable are classified `NeedsManualCheck` (`AwaitingReview`).
+  - Successful renders capture a `1280x900` PNG screenshot (`GET .../screenshots/{reportId}.png`) and mark reports `Passed` (`Approved`).
+  - SQL connection/login/TLS errors during local preview are classified `DataSourceOffline` (`Approved` — RDL structure valid, ready for server upload).
+  - Other render/timeout failures are classified `Failed` (`ValidationFailed`) with captured `IRenderLogStore` diagnostics (`GET /api/preview/runs/{runId}/viewer/render-logs`).
+- **Interactive Inspection Tools:**
+  - **Local Staged Viewer & Designer:** Opens staged reports in Bold Reports Viewer/Designer (`15.1.17`) without touching the destination server. Saving in the designer writes back to staging via `StagedReportSession.SaveReportAsync` and sets `LocalEditUtc` and `LocalEditPendingUpload = true`.
+  - **XML Diff Modal (`GET .../rdl`):** Side-by-side comparison of `__originals/` source RDL vs. transformed/staged RDL, with **Approve** (`POST .../approve`) and **Flag for Designer** (`POST .../flag`) actions.
+  - **Visual Comparison Modal:** Swipe slider, side-by-side, and client-side Canvas Pixel-Diff (configurable channel tolerance `0–50`) comparing the local Playwright screenshot against either the live SSRS PNG render (`GET .../screenshots/{reportId}/source.png`) or a user-uploaded Reference PNG.
+  - **Bulk Approve Queue (`POST .../reports/bulk-approve`):** Approves `AwaitingReview` reports sequentially and stops at the first report below `minAccuracy` (default `99.0%`).
+  - **Skip Validation (`POST .../skip-validation`):** Marks non-blocked reports `AutoPassed` with `Skipped` status so operators can proceed directly to upload.
 
-### Run status (`RunStatus`)
+### Step 5 — Batch Migration Pipeline (`migration.js`)
+- **Conflict Resolution & Dry-Run:** Operators choose `Skip` (default), `Overwrite`, or `Rename` (`_migrated` suffix) and can run `POST .../upload/dry-run` (`UploadLayer.PreviewUploadPlanAsync`) to preview planned `Create`, `Skip`, `Overwrite`, `Rename`, and `Blocked` actions against the live destination server before uploading.
+- **4-Stage Dependency Upload (`UploadLayer.UploadEstateAsync`):**
+  1. **Folders (`Category`):** Sequential, shallowest-to-deepest parent-before-child creation via `/v5.0/categories` (or `/v1.0/categories`).
+  2. **Data Sources (`Datasource`):** Parallel (`Upload.MaxParallel`) creation/update via `/v1.0/reports/data-sources`, applying credentials from `ICredentialStore` or `.rsds` XML.
+  3. **Shared Datasets (`Dataset`):** Parallel upload of `.rsd` base64 payloads via `/v1.0/reports/datasets`, remapped to target data source names.
+  4. **Reports (`Report`):** Parallel upload via `/v1.0/reports` (or `/v5.0/reports`). **Upload gating:** only reports in `AutoPassed`, `Approved`, `Queued`, or `Uploaded` (with `LocalEditPendingUpload == true`) are uploaded; `Blocked`, `Excluded`, or unvalidated reports are skipped (`UPLD-GATE-SKIP`).
+- **Pause, Resume & Retry:** Pause checks `_pausedRuns` between items (`POST .../upload?action=pause|resume`). `POST .../retry` transitions `UploadFailed` reports back to `Queued` and re-runs upload.
+- **Server-Integrated Actions:** Uploaded reports can be viewed or edited directly on the destination Bold Reports Server from the Step 5 table.
 
-```mermaid
-stateDiagram-v2
-    [*] --> Draft
-    Draft --> Connected
-    Connected --> Discovered
-    Discovered --> Analysed
-    Analysed --> Validating
-    Validating --> Validated
-    Validated --> Uploading
-    Uploading --> Uploaded
-    Validated --> CutOver
-    Draft --> Abandoned
-    Connected --> Abandoned
-    Discovered --> Abandoned
-    Analysed --> Abandoned
-    Uploaded --> Abandoned
-    Validated --> Abandoned
-```
+### Step 6 — Production Cutover & Audit (`migration.js`, `DiagnosticsController`)
+- **Readiness Gates (`GET .../cutover`):** Evaluates five blocking gates and one advisory gate (`URL compatibility shim configured`):
+  1. Reports uploaded to destination (`actuallyUploaded > 0`).
+  2. Every uploaded report validated against destination (measured `ValidationResult` exists).
+  3. No reports awaiting manual review (`AwaitingReview == 0`).
+  4. No failed uploads or validations (`UploadFailed == 0 && ValidationFailed == 0`).
+  5. No selected reports left unprocessed (`Discovered`/`Analysed`/`Queued == 0`).
+  6. *(Advisory)* URL compatibility shim configured (`UrlShim.Enabled`).
+- **Delta Sync (`POST .../delta-sync`):** Re-enumerates SSRS items, compares `ModifiedUtc` and SHA-256 hashes, preserves locally edited Step 4 reports (`CUT-DELTA-EDIT`), re-stages/re-transforms/re-validates changed reports, and counts source deletions.
+- **URL Compatibility Shim (`UrlShimMiddleware`):** When `UrlShim.Enabled` is `true`, intercepts `/ReportServer` (or configured `UrlShim.ListenPath`) and `/Reports/Pages/Report.aspx?ItemPath=...` requests, looks up `UrlMapping` across non-abandoned runs, validates redirect safety (`IsSafeRedirectDestination`), forwards `rs:Format` as `exportFormat` and report parameters, and returns a styled HTML 404 diagnostic page for unmapped paths.
+- **Confirm Cutover (`POST .../cutover`):** Requires at least one uploaded report, sets `RunStatus.CutOver`, deletes staging and `_designer-cache` if `Staging.DeleteOnClose` is `true`, clears `ICredentialStore`, and logs `RUN-COMPLETE`.
+- **Audit & Diagnostics:** Exports plain-text Migration Run Report (`GET /api/diagnostics/runs/{id}/report-pdf` -> `migration-report-{id}.txt`) and ZIP Support Bundle (`GET /api/diagnostics/runs/{id}/support-bundle` containing `run.json`, `reports.json`, `audit-events.json`).
 
-### Report state (`ReportState`, enforced by `ReportStateMachine`)
+---
 
-States: Discovered, Staged, Analysed, Blocked, Queued, Uploading, Uploaded, UploadFailed, Validating, AutoPassed, AwaitingReview, ValidationFailed, Approved, Flagged, Excluded.
+## 4. State Models
+
+### `RunStatus`
+`Draft` → `Connected` → `Discovered` → `Analysed` → (`Validating` ↔ `Validated`) → `Uploading` → `Uploaded` → `CutOver` (or `Abandoned` from any active state).  
+On process startup, `MigrationOrchestrator.ExecuteAsync` recovers active runs stuck in transient `Uploading` (resets to `Validated`) or `Validating` (resets to `Analysed`) and logs `RUN-RESUME`.
+
+### `ReportState` (`ReportStateMachine`)
+Legal transitions enforced by `BoldMigrate.Core.StateMachine.ReportStateMachine`:
 
 ```mermaid
 stateDiagram-v2
@@ -147,117 +184,77 @@ stateDiagram-v2
     Discovered --> Staged
     Staged --> Analysed
     Analysed --> Blocked
-    Analysed --> Excluded
     Analysed --> Queued
     Analysed --> Validating
+    Analysed --> Excluded
     Queued --> Validating
+    Queued --> Uploading
     Validating --> AutoPassed
     Validating --> AwaitingReview
     Validating --> ValidationFailed
+    ValidationFailed --> Validating
+    ValidationFailed --> AwaitingReview
     AwaitingReview --> Approved
     AwaitingReview --> Flagged
+    AwaitingReview --> Validating
+    Flagged --> Validating
+    Flagged --> AwaitingReview
     AutoPassed --> Approved
+    AutoPassed --> Queued
     AutoPassed --> Uploading
+    AutoPassed --> Validating
+    Approved --> Queued
     Approved --> Uploading
+    Approved --> Validating
     Uploading --> Uploaded
     Uploading --> UploadFailed
-    UploadFailed --> Queued: retry
+    UploadFailed --> Queued
+    UploadFailed --> Uploading
+    Uploaded --> Validating
+    Uploaded --> Uploading
 ```
 
-This diagram shows the intended main path. The authoritative transition table is in `ReportStateMachine.cs`.
+*(Any state other than `Excluded` may also transition to `Excluded` with an optional `ExcludedReason`.)*
 
-## 5. Standalone tools
+---
 
-| Tool | UI | Backend | Purpose |
+## 5. Transform, Compatibility & Data Model
+
+### RDL Rewrite Actions (`TransformEngine`)
+All XML processing uses `System.Xml.Linq` and `XmlReader` with `DtdProcessing.Prohibit` (never regex):
+- `TR-STRIP-BOM`: Strips leading UTF-8 BOM (`0xEF 0xBB 0xBF`).
+- `TR-REBIND-DS`: Rebinds `DataSourceReference` using discovered data source map.
+- `TR-MAP-DSET`: Maps `DataSetReference` using discovered dataset map.
+- `TR-PATH-SUB`: Strips leading `/` on `Subreport/ReportName` paths.
+- `TR-PATH-DRILL`: Strips leading `/` on `Drillthrough/ReportName` paths.
+- `TR-SCHEMA-UP`: Upgrades RDL `2008/01` or `2010/01` root/descendant namespaces to `2016/01/reportdefinition`.
+
+### Compatibility Rules (`data/compatibility-rules.json`)
+Loaded and cached by `CompatibilityRulesLoader` (refresh interval `Transform.RulesRefreshHours`). Every rule **must** specify a non-empty `article` KB URL or loading throws `InvalidOperationException`. Current bundled rules (`version: "2026.11.1"`):
+- `NeedsReview`: `CF-ASSEMBLY` (`CodeModule`), `CF-UNSUPPORTED-TYPE`
+- `Clean` (tagged as informational `FeatureTags`): `CF-CODE-NET`, `CF-CODE-SIMPLE`, `CF-SUBREPORT`, `CF-LOOKUP`, `CF-MAP`, `CF-GAUGE`, `CF-INTERACTIVE-SORT`, `CF-RICHTEXT`, `CF-SHARED-DSET`, `CF-SHARED-DS`, `CF-DOCMAP` (plus `Chart` detection).
+
+### Persistence (`MigrationDbContext` — SQLite WAL)
+Tables: `MigrationRuns`, `CatalogItems`, `ReportRecords`, `TransformActions`, `UploadAttempts`, `ValidationResults`, `Approvals`, `PermissionMappings`, `SubscriptionRecords`, `UrlMappings`, `AuditEvents`.  
+`Program.cs` executes `EnsureCreated()`, enables `PRAGMA journal_mode=WAL; PRAGMA busy_timeout=5000;`, deduplicates legacy `CatalogItems`, and applies idempotent `ALTER TABLE` / table rebuild migrations at startup.
+
+---
+
+## 6. Standalone Tools
+
+| Tool | UI Entry | Backend | Behavior |
 |---|---|---|---|
-| Local Folder Import | sidebar "Local Folder Import" | `POST /api/migration/local-folder`, `GET .../local-folder/logs`, `LocalFolderMigrationService` | Upload `.rdl`, `.rsds`, `.rsd` from a local directory tree, creating nested categories, with backups and a log |
-| AI Expression Tester | sidebar "AI Expression Tester" | `POST /api/migration/expression/evaluate`, `GET .../expression/samples`, `ExpressionTesterEngine` | Classify an SSRS expression as compatible / needs review / blocked and simulate it against sample fields and parameters |
-| Bulk Delete Reports | sidebar "Bulk Delete Reports" | `POST /api/tools/bold-delete/list`, `POST .../delete`, `BoldDeleteToolController` | List and permanently delete reports on a Bold Reports server, no run needed. See [bulk-delete-reports.md](bulk-delete-reports.md) |
-| RDL scanner | landing page drop zone | `POST /api/scanner/analyse` | Scan dropped RDL files in the browser flow for compatibility |
-| Settings & Rules | sidebar "Settings & Rules" | `GET/PUT /api/settings` | Thresholds, URL shim and other options |
+| **Local Folder Import** | Sidebar: `Local Folder Import` | `POST /api/migration/local-folder`, `GET .../local-folder/logs` | Backs up `.rdl` files, uploads `.rsds`/`.rds` data sources, `.rsd` datasets, and `.rdl` reports with nested category creation, BOM stripping, `UnsafeRelaxedJsonEscaping`, and generates `MigrationLog.txt`, phase logs, `MigrationResult.csv`, `inventory.csv`, `item-results.json`, and `migration-summary.md`. |
+| **Bulk Delete Items** | Sidebar: `Bulk Delete Reports` | `POST /api/tools/bold-delete/list`, `POST .../delete` | Connects per-request (no run or stored creds), lists and filters `Report`, `Dataset`, `Datasource`, and `Folder` (`Category`) items, and deletes selected items in safe dependency order (`Report -> Dataset -> Datasource -> Folder`). |
+| **Offline RDL Scanner** | `/scanner.html` + Landing dropzone | Client-side `scanner.js` + `POST /api/scanner/analyse` | `scanner.html` parses `.rdl` files purely in-browser via `DOMParser`; landing dropzone submits `.rdl`/`.rdlc`/`.xml` (max 25 MB) to `ScannerController`. |
+| **Settings & Rules** | Sidebar: `Settings & Rules` | `GET/PUT /api/settings`, `GET /api/settings/rules` | Edits validated `MigrationSettings` persisted to `settings.json` in the data directory and inspects loaded compatibility rules. |
+| **Expression Tester API** | API only | `POST /api/migration/expression/evaluate`, `GET .../samples` | Evaluates SSRS expressions (`IIf`, `Switch`, `Format`, `Sum`, `UCase`/`LCase`, `Lookup`, `System.*`, `Code.*`) with compatibility status and mock evaluation. |
 
-The Report Library also has a run-based delete (`POST /runs/{id}/destination/delete-reports`) that only removes reports of the current run and resets their local state.
+---
 
-## 6. API reference
+## 7. Security, Observability & Configuration
 
-Base path `/api`. All bodies are JSON.
-
-**Migration** (`/api/migration`)
-
-| Method | Route | Purpose |
-|---|---|---|
-| POST | `/runs` | Create or get the active run |
-| GET | `/runs/{id}`, `/active-run` | Run details |
-| POST | `/runs/{id}/connect` | Test and save SSRS connection |
-| POST | `/runs/{id}/connect-destination` | Test and save Bold Reports connection |
-| POST | `/runs/{id}/fetch` | Discover the source estate |
-| POST | `/runs/{id}/check` | Transform and classify |
-| POST | `/runs/{id}/upload` | Four-stage upload |
-| POST | `/runs/{id}/validate` | Validation pass |
-| POST | `/runs/{id}/retry`, `/abandon` | Retry failures, close the run |
-| GET | `/runs/{id}/estate`, `/datasources`, `/reports` | Catalog views |
-| POST | `/runs/{id}/select-reports` | Choose reports to migrate |
-| GET | `/runs/{id}/reports/{reportId}/rdl`, `/validation` | RDL diff, validation result |
-| GET | `/runs/{id}/review-queue` | Reports awaiting review |
-| POST | `/runs/{id}/reports/{reportId}/approve`, `/flag`; `/runs/{id}/reports/bulk-approve` | Review actions |
-| POST | `/runs/{id}/delta-sync` | Incremental sync |
-| GET / POST | `/runs/{id}/cutover` | Gate status / perform cutover |
-| GET | `/runs/{id}/log`, `/runs/{id}/poll` | Log lines, progress polling |
-| GET | `/runs/{id}/designer-config` | Config for the embedded Bold Report Designer |
-| GET | `/runs/{id}/destination/sections` | Destination folders/categories |
-| POST | `/runs/{id}/destination/delete-reports` | Run-based delete |
-| POST / GET | `/local-folder`, `/local-folder/logs` | Local folder import |
-| POST / GET | `/expression/evaluate`, `/expression/samples` | Expression tester |
-
-**Other controllers**: `GET /api/diagnostics/runs/{id}/support-bundle`, `GET /api/diagnostics/runs/{id}/report-pdf`, `POST /api/scanner/analyse`, `GET|PUT /api/settings`, `POST /api/tools/bold-delete/list|delete`, and `GET /health`.
-
-## 7. Data model
-
-Stored in SQLite (`MigrationDbContext`, EF Core). Main entities:
-
-- `MigrationRun` — one migration session: source and destination URLs, status, settings.
-- `CatalogItem` — a discovered folder, data source, dataset or report (source path, hash, staged file path, destination item id).
-- `ReportRecord` — per-report state, bucket, parameter count, data source and dataset references, idempotency key, upload attempts.
-- `TransformAction`, `UploadAttempt`, `ValidationResult`, `Approval`, `AuditEvent` — what was changed, what was tried, what was compared, who approved, what happened.
-- `UrlMapping`, `PermissionMapping`, `SubscriptionRecord` — URL redirects, mapped permissions, discovered subscriptions.
-
-Staged source files live on disk under the staging root. Credentials are never written to the database.
-
-## 8. Configuration
-
-- `MigrationSettings` (bound at startup in `Program.cs`) holds the database path, staging root path, thresholds and URL shim options. The Settings tab edits them through `/api/settings`.
-- Compatibility rules are loaded by `CompatibilityRulesLoader`.
-- `Configuration.json` drives the separate PowerShell/batch migration script (`SSRSToBoldReportsMigration.ps1/.bat`), which is independent of the web app.
-- Default dev URL: `http://localhost:5000`. Override with `--urls`.
-
-## 9. Security
-
-- Passwords and tokens are held in memory only and are redacted from logs by `Redactor`.
-- The Bold Reports token is sent as a Bearer header over the configured URL. Use https outside local testing.
-- Destructive operations (delete tools) require explicit selection and a confirmation dialog in the UI. The delete tool re-authenticates on each request and stores nothing.
-- The app has no login of its own. Run it on a trusted machine or behind network controls; do not expose it publicly.
-
-## 10. Logging and diagnostics
-
-- **File logs**: `FileLoggerProvider` writes text logs under `logs/` (ignored by git).
-- **Run logs**: `MigrationLogger` records per-run events with codes from `EventCodes` and messages from `ErrorCatalogue`; shown in the Migration tab and `GET /runs/{id}/log`.
-- **Support bundle**: ZIP of logs, state and results for a run (`/api/diagnostics/runs/{id}/support-bundle`).
-- **Health**: `GET /health` (`MigrationHealthChecks`).
-- **Metrics**: `MigrationMetrics`.
-
-## 11. Running and testing
-
-```powershell
-dotnet run --project src/BoldMigrate.Api/BoldMigrate.Api.csproj --urls http://localhost:5268
-dotnet test
-```
-
-Docker files (`Dockerfile`, `docker-compose.yml`) exist for containerised runs. Use them only after the local run works.
-
-## 12. Known limitations
-
-- Single operator, one active run at a time.
-- Credentials are lost when the app restarts and must be re-entered.
-- Bold Reports API paths vary by version, so `DestinationClient` tries several URL patterns per call. This is robust but can hide the real failure reason.
-- The delete tools give no per-item failure reason.
-- Docs describe the code as built; validation thresholds and the full state transition table should be read from `ValidationEngine` and `ReportStateMachine` when they matter.
+- **SecurityMiddleware:** Sets `X-Content-Type-Options: nosniff`, `X-Frame-Options: SAMEORIGIN`, `Referrer-Policy: no-referrer`, `Permissions-Policy`. Enforces optional `BoldMigrate:ApiAccessToken` (`Bearer`, `X-Api-Key`, or `access_token` query) via constant-time comparison, and enforces double-submit CSRF (`bm_csrf` cookie + `X-BoldMigrate-Csrf` header) on browser mutating `/api/*` requests (exempting Bold Reports viewer/designer internal callbacks while validating same-origin `Origin`/`Sec-Fetch-Site`).
+- **Path & Redirect Safety:** `FileSystemStagingStore` and `LocalReportDesignerController` reject `..` traversal and enforce prefix boundaries; `LocalFolderMigrationService` enforces `AllowedLocalFolderRoots` when configured; `UrlShimMiddleware` restricts redirects to safe relative paths or the configured `DestinationServerUrl` origin.
+- **Secret Redaction:** `Redactor.RedactSecrets` scrubs connection string passwords/UIDs/keys, Bearer tokens, `Authorization` headers, JSON secret fields, and `<PassWord>` XML nodes before writing to `FileLoggerProvider` (`logs/boldmigrate-yyyyMMdd.log`) or `MigrationLogger`.
+- **Health & Metrics:** `GET /health` reports `Healthy` or `Degraded` across orchestrator heartbeat, SQLite store, staging disk space, and rules loader (never `Unhealthy`). OpenTelemetry-compatible `System.Diagnostics.Metrics` counters/histograms are emitted under meter `BoldMigrate`.
