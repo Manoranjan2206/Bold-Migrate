@@ -8,6 +8,73 @@ function toggleLfAuth() {
 
 // Fills the folder fields with the conventional SSRS export layout so the shape of the
 // expected input is obvious. These are examples, not paths that exist on this machine.
+// =============================================================================
+// Settings & Power Utilities Modal (4-Tab Consolidation)
+// =============================================================================
+function openSettingsModal(tab = "tuning") {
+  const overlay = document.getElementById("modal-settings-utilities");
+  if (!overlay) return;
+  overlay.style.display = "flex";
+  setSettingsTab(tab);
+}
+
+function closeSettingsModal() {
+  const overlay = document.getElementById("modal-settings-utilities");
+  if (overlay) overlay.style.display = "none";
+}
+
+function setSettingsTab(tab = "tuning", btnEl = null) {
+  const validTabs = ["tuning", "remap", "rules", "cleanup"];
+  const activeTab = validTabs.includes(tab) ? tab : "tuning";
+
+  validTabs.forEach(t => {
+    const pane = document.getElementById(`stab-${t}`);
+    if (pane) pane.style.display = t === activeTab ? "block" : "none";
+  });
+
+  const tabBar = document.getElementById("settings-modal-tabs");
+  if (tabBar) {
+    tabBar.querySelectorAll("button[data-stab]").forEach(btn => {
+      btn.classList.toggle("active", btn === btnEl || btn.dataset.stab === activeTab);
+    });
+  }
+
+  if (activeTab === "tuning" || activeTab === "rules") {
+    if (typeof loadSettingsView === "function") loadSettingsView();
+  } else if (activeTab === "cleanup") {
+    if (typeof syncBulkDeleteFromActiveRun === "function") syncBulkDeleteFromActiveRun();
+  }
+}
+
+document.addEventListener("keydown", (event) => {
+  if (event.key !== "Escape") return;
+  const topModalIds = [
+    "modal-app-dialog",
+    "modal-visual-compare",
+    "modal-interactive-viewer",
+    "modal-interactive-designer",
+    "modal-rdl-diff",
+    "modal-render-logs",
+    "modal-snapshot-zoom",
+    "modal-confirm-rescan",
+    "modal-delete-reports",
+  ];
+  const hasTopOverlay = topModalIds.some(id => {
+    const el = document.getElementById(id);
+    return el && el.style.display && el.style.display !== "none";
+  });
+  if (hasTopOverlay) return;
+
+  const settingsModal = document.getElementById("modal-settings-utilities");
+  if (settingsModal && settingsModal.style.display && settingsModal.style.display !== "none") {
+    closeSettingsModal();
+    return;
+  }
+  if (typeof closeDataSourcesDrawer === "function") {
+    closeDataSourcesDrawer();
+  }
+});
+
 function prefillLocalFolderDemo() {
   const root = (document.getElementById("lf-report-folder").value || "").trim();
   const base = root ? root.replace(/[\\/]+(Reports)?[\\/]*$/i, "") : "C:\\SSRS_Export";

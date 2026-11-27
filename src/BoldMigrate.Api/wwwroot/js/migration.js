@@ -34,6 +34,20 @@ async function refreshMigrationState(knownPoll) {
       setStagePill("stage-folders-pill", folders, poll.status);
       setStagePill("stage-ds-pill", datasources, poll.status);
       setStagePill("stage-dset-pill", datasets, poll.status);
+      queueMicrotask(() => {
+        [
+          ["stage-folders-pill", "stage-box-folders"],
+          ["stage-ds-pill", "stage-box-ds"],
+          ["stage-dset-pill", "stage-box-dset"],
+          ["stage-rep-pill", "stage-box-rep"],
+        ].forEach(([pillId, boxId]) => {
+          const pill = document.getElementById(pillId);
+          const box = document.getElementById(boxId);
+          if (!pill || !box) return;
+          box.classList.toggle("done", pill.classList.contains("ok"));
+          box.classList.toggle("running", pill.classList.contains("run"));
+        });
+      });
 
       const bar = document.getElementById("migration-progress-bar");
       const pctSpan = document.getElementById("migration-progress-pct");
@@ -57,11 +71,15 @@ async function refreshMigrationState(knownPoll) {
         }
       }
       const startBtn = document.getElementById("btn-start-migration-tab");
+      const pauseBtn = document.getElementById("btn-pause-migration");
+      const retryBtn = document.getElementById("btn-retry-failed");
+      if (pauseBtn) pauseBtn.style.display = poll.status === "Uploading" ? "inline-flex" : "none";
+      if (retryBtn) retryBtn.style.display = (poll.reportsFailed || 0) > 0 ? "inline-flex" : "none";
       if (poll.status === "Uploading") {
         setButtonLoading(startBtn, true, `Uploading (${repsUploaded}/${repsTotal})...`);
       } else {
         setButtonLoading(startBtn, false);
-        if (startBtn) startBtn.innerText = repsTotal > 0 && repsUploaded === repsTotal ? "Re-run Upload Pipeline" : "Start Upload Pipeline";
+        if (startBtn) startBtn.innerText = repsTotal > 0 && repsUploaded === repsTotal ? "↻ Re-run Upload" : "▶ Start Upload";
       }
     }
 
@@ -88,11 +106,19 @@ async function refreshMigrationState(knownPoll) {
       logBox.scrollTop = logBox.scrollHeight;
     }
     await loadServerUploadedReports();
+    if (poll && window.__lastCutoverPollStatus !== poll.status) {
+      window.__lastCutoverPollStatus = poll.status;
+      if (["Uploaded", "CutOver", "Failed"].includes(poll.status)) {
+        await refreshCutoverState();
+      }
+    }
   } catch { }
 }
 
 async function startBatchUpload() {
   if (!currentRun) return;
+  const execDrawer = document.getElementById("publish-exec-details");
+  if (execDrawer) execDrawer.style.display = "block";
   const btn = document.getElementById("btn-start-migration-tab");
   const conflictPolicy = document.getElementById("upload-conflict-policy")?.value || "Skip";
   setButtonLoading(btn, true, "Starting Upload...");
@@ -232,24 +258,38 @@ function clearLiveLogViewer() {
 // Step 4: Automated Render Validation & Interactive Inspection
 // -----------------------------------------------------------------------------
 
+function togglePublishPanel(panelId, btnEl) {
+  const el = document.getElementById(panelId);
+  if (!el) return;
+  const open = el.style.display === "none" || !el.style.display;
+  el.style.display = open ? "block" : "none";
+  if (btnEl) btnEl.setAttribute("aria-expanded", String(open));
+}
+
 async function refreshCutoverState() {
   if (!currentRun) return;
   try {
     const gatesRes = await Api.getCutoverGates(currentRun.id);
     const container = document.getElementById("cutover-gates-list");
     const advisory = new Set(gatesRes?.advisoryGates || []);
+    const allGates = gatesRes?.gates || [];
+    const gatesPassedCount = allGates.filter(g => g.passed).length;
+
+    const toggleGatesBtn = document.getElementById("btn-toggle-gates");
+    if (toggleGatesBtn && allGates.length > 0) {
+      toggleGatesBtn.innerText = `Pre-Flight Checks (${gatesPassedCount}/${allGates.length}) ▾`;
+    }
+
     if (gatesRes && gatesRes.gates && container) {
       container.innerHTML = gatesRes.gates.map(g => {
-        // An advisory gate is reported but does not block cutover, so it must not be
-        // styled as a blocker.
         const isAdvisory = advisory.has(g.name);
         const label = g.passed ? "Passed" : (isAdvisory ? "Optional" : "Action Required");
         const cls = g.passed ? "ok" : (isAdvisory ? "" : "warn");
         return `
-        <div style="display:flex;align-items:center;justify-content:space-between;padding:10px 14px;background:var(--br-surface-alt);border:1px solid var(--br-border);border-radius:8px;">
+        <div style="display:flex;align-items:center;justify-content:space-between;padding:9px 12px;background:var(--br-surface);border:1px solid var(--br-border);border-radius:8px;">
           <div>
-            <strong style="color:var(--br-text);font-size:13.5px;">${escapeHtml(g.name)}</strong>
-            <div style="color:var(--br-text-muted);font-size:12px;margin-top:2px;">${escapeHtml(g.detail)}</div>
+            <strong style="color:var(--br-text);font-size:13px;">${escapeHtml(g.name)}</strong>
+            <div style="color:var(--br-text-muted);font-size:11.5px;margin-top:2px;">${escapeHtml(g.detail)}</div>
           </div>
           <span class="pill ${cls}">${label}</span>
         </div>
@@ -260,17 +300,18 @@ async function refreshCutoverState() {
     // Footer must agree with the gates above it.
     const footer = document.getElementById("cutover-footer-status");
     if (footer) {
-      const blocking = (gatesRes?.gates || []).filter(g => !g.passed && !advisory.has(g.name));
+      const blocking = allGates.filter(g => !g.passed && !advisory.has(g.name));
       if (gatesRes?.ready) {
-        footer.innerHTML = '<span style="color:var(--br-success);font-weight:600;">✓ All blocking gates passed — ready for cutover sign-off.</span>';
+        footer.innerHTML = '<span style="color:var(--br-success);font-weight:600;">✓ All blocking checks passed — ready for production cutover.</span>';
       } else {
-        footer.innerHTML = `<span style="color:var(--br-warning-text);font-weight:600;">${blocking.length} gate(s) still need attention before cutover.</span>`;
+        footer.innerHTML = `<span style="color:var(--br-text-secondary);">${blocking.length} check(s) remaining before cutover sign-off.</span>`;
       }
     }
 
     const banner = document.getElementById("cutover-blocked-banner");
+    const hasUploadRun = ["Uploading", "Uploaded", "CutOver"].includes(currentRun.status);
     if (banner) {
-      banner.style.display = gatesRes && gatesRes.ready ? "none" : "block";
+      banner.style.display = (hasUploadRun && gatesRes && !gatesRes.ready) ? "block" : "none";
     }
 
     const ready = !!(gatesRes && gatesRes.ready);
@@ -331,9 +372,11 @@ async function handleConfirmCutover() {
     endActivity("cutover-check");
 
     if (!gatesRes || !gatesRes.ready) {
+      const drawer = document.getElementById("publish-gates-drawer");
+      if (drawer) drawer.style.display = "block";
       await showAlertDialog({
-        title: "Cutover Blocked",
-        message: "No reports have been uploaded to Bold Reports Server yet.\n\nPlease connect to Bold Reports in Step 1 and execute Step 5: Upload Pipeline first.",
+        title: "Cutover Checks Incomplete",
+        message: "Some pre-flight checks are still pending.\n\nReview the expanded Pre-Flight Checks list and ensure Step 4: Start Upload has completed for selected reports.",
         danger: true
       });
       return;

@@ -28,9 +28,9 @@ function renderReportLibrary() {
   if (!reportsCache || reportsCache.length === 0) {
     tbody.innerHTML = `
       <tr>
-        <td colspan="8" style="text-align:center;color:var(--br-text-muted);padding:32px;">
+        <td colspan="6" style="text-align:center;color:var(--br-text-muted);padding:32px;">
           <div>No reports found. Connect your SSRS server in Step 1 to discover catalog items.</div>
-          <button type="button" class="btn2 btn-sm empty-state-cta" onclick="switchTab('connections')">Go to Step 1: Connect &amp; Discover →</button>
+          <button type="button" class="btn2 btn-sm empty-state-cta" onclick="switchTab('connections')">Go to Step 1: Source &amp; Target →</button>
         </td>
       </tr>
     `;
@@ -62,10 +62,6 @@ function renderReportLibrary() {
   const btnSelectReady = document.getElementById("btn-select-clean-text");
   if (btnSelectReady) btnSelectReady.innerText = `Select Compatible (${cleanCount})`;
 
-  // Update sidebar count
-  const sideCount = document.getElementById("side-count-reports");
-  if (sideCount) sideCount.innerText = reportsCache.length;
-
   const footerStatus = document.getElementById("lib-footer-status");
   if (footerStatus) {
     const folderCount = new Set(reportsCache.map(r => r.folder || "/")).size;
@@ -81,7 +77,7 @@ function renderReportLibrary() {
 
     const isSelected = selectedReportIds.has(r.id);
     const sizeFormatted = r.sizeBytes > 1024 ? `${(r.sizeBytes / 1024).toFixed(1)} KB` : `${r.sizeBytes} B`;
-    
+
     let tagsHtml = "";
     if (r.featureTags) {
       const tags = (typeof r.featureTags === "string" ? r.featureTags.split(",") : r.featureTags).map(t => t.trim()).filter(Boolean);
@@ -99,15 +95,16 @@ function renderReportLibrary() {
         <td class="check-cell">
           <input type="checkbox" class="report-checkbox" data-id="${r.id}" ${isSelected ? "checked" : ""} onchange="handleReportCheckboxChange('${r.id}', this.checked)">
         </td>
-        <td><strong>${escapeHtml(r.name)}</strong></td>
-        <td><code>${escapeHtml(r.folder)}</code></td>
-        <td style="color:var(--br-text-muted);">${sizeFormatted}</td>
+        <td>
+          <strong>${escapeHtml(r.name)}</strong>
+          <div class="mono" style="font-size:11.5px;color:var(--br-text-muted);">${escapeHtml(r.folder)} · ${sizeFormatted}</div>
+        </td>
         <td>${r.parameterCount || 0}</td>
         <td><span class="${bucketClass}">${bucketLabel}</span></td>
         <td style="font-size:12px;color:var(--br-text-secondary);">${blockReasonText}</td>
         <td style="text-align:right;white-space:nowrap;">
-          <button class="btn2 btn-sm" data-lib-action="validate" data-report-id="${r.id}">Inspect &amp; Validate</button>
-          <button class="btn2 btn-danger btn-sm" data-lib-action="delete" data-report-id="${r.id}" title="Delete this report from Bold Reports destination" style="margin-left:4px;padding:4px 8px;">
+          <button type="button" class="btn2 btn-sm" data-lib-action="validate" data-report-id="${r.id}">👁 Preview</button>
+          <button type="button" class="btn2 btn-danger btn-sm" data-lib-action="delete" data-report-id="${r.id}" title="Delete this report from Bold Reports destination" style="margin-left:4px;padding:4px 8px;">
             <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="vertical-align:-1px;"><path d="M3 6h18M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg>
           </button>
         </td>
@@ -167,20 +164,8 @@ function updateSelectedCountUI() {
   const masterCb = document.getElementById("lib-select-all");
   if (masterCb) masterCb.checked = count === total && total > 0;
 
-  const btnHeader = document.getElementById("btn-header-migrate-text");
-  if (btnHeader) btnHeader.innerText = `Migrate Selected (${count}) →`;
-
-  const btnBar = document.getElementById("btn-bar-migrate-text");
-  if (btnBar) btnBar.innerText = `Start Migration (${count}) →`;
-
   const btnFooter = document.getElementById("btn-footer-migrate-text");
-  if (btnFooter) btnFooter.innerText = `Start Migration (${count}) →`;
-
-  const btnDash = document.getElementById("btn-dash-migrate-text");
-  if (btnDash) btnDash.innerText = `Start Migration (${count}) →`;
-
-  const btnDashFooter = document.getElementById("btn-dash-footer-migrate");
-  if (btnDashFooter) btnDashFooter.innerText = `Start Migration Pipeline (${count}) →`;
+  if (btnFooter) btnFooter.innerText = `Visual Verify (${count}) →`;
 
   const delBarCount = document.getElementById("del-bar-count");
   if (delBarCount) delBarCount.innerText = count;
@@ -250,7 +235,7 @@ async function runAssessmentAndGoToDashboard() {
         updateActivity(opId, "Evaluating RDL schemas & compatibility rules...", Math.min(90, 20 + i * 5));
       }
       await refreshDashboardState();
-      switchTab("dashboard");
+      switchTab("assess");
     },
     "Analyzing RDL schemas, expressions, datasources, and assemblies..."
   );
@@ -272,50 +257,19 @@ async function refreshDashboardState(knownPoll) {
     const blocked = poll.reportsBlocked || 0;
 
     // Real metric tiles
-    document.getElementById("dash-tile-found").innerText = total;
+    const foundEl = document.getElementById("dash-tile-found");
+    if (foundEl) foundEl.innerText = total;
 
     // Readiness score calculation: (Clean + AutoFixed) / Total
     const compatibleCount = clean + autofix;
     const reviewTotal = review + blocked;
     const readinessPct = total > 0 ? Math.round((compatibleCount / total) * 100) : 0;
-    document.getElementById("dash-tile-readiness").innerText = `${readinessPct}%`;
-    document.getElementById("dash-tile-review").innerText = reviewTotal;
-    document.getElementById("dash-tile-blocked").innerText = compatibleCount;
-
-    // Real compatibility breakdown percentages
-    const cleanPct = total > 0 ? Math.round((compatibleCount / total) * 100) : 0;
-    const reviewPct = total > 0 ? Math.round((reviewTotal / total) * 100) : 0;
-
-    setBarAndPct("comp-clean", cleanPct);
-    setBarAndPct("comp-review", reviewPct);
-
-    // Footer must agree with the tile above it.
-    const footerReadiness = document.getElementById("dash-footer-readiness");
-    if (footerReadiness) {
-      footerReadiness.innerHTML = total > 0
-        ? `Readiness score: <strong>${readinessPct}%</strong> — ${compatibleCount} of ${total} report(s) compatible for direct migration.`
-        : "No reports discovered yet. Run Step 1: Connect & Discover first.";
-    }
-
-    // Connection pills reflect the run, not an assumption.
-    const srcOk = !!(currentRun && currentRun.sourceServerUrl);
-    const dstOk = !!(currentRun && currentRun.destinationServerUrl);
-    const srcPill = document.getElementById("dash-ssrs-pill");
-    if (srcPill) {
-      srcPill.className = srcOk ? "pill ok" : "pill";
-      srcPill.innerText = srcOk ? "Connected" : "Not connected";
-    }
-    const dstPill = document.getElementById("dash-dest-pill");
-    if (dstPill) {
-      dstPill.className = dstOk ? "pill ok" : "pill";
-      dstPill.innerText = dstOk ? "Connected" : "Not connected";
-    }
-    const srcDetail = document.getElementById("dash-ssrs-detail");
-    if (srcDetail) {
-      srcDetail.innerText = srcOk
-        ? `${currentRun.sourceVersion || "SSRS"} · ${poll.itemsTotal || 0} items`
-        : "Source server";
-    }
+    const readyEl = document.getElementById("dash-tile-readiness");
+    if (readyEl) readyEl.innerText = total > 0 ? `${readinessPct}%` : "—";
+    const revEl = document.getElementById("dash-tile-review");
+    if (revEl) revEl.innerText = reviewTotal;
+    const compEl = document.getElementById("dash-tile-blocked");
+    if (compEl) compEl.innerText = compatibleCount;
 
     // Populate Flagged Reports Attention List
     renderFlaggedReportsList();
@@ -327,16 +281,15 @@ async function refreshDashboardState(knownPoll) {
 function renderFlaggedReportsList() {
   const container = document.getElementById("dash-flagged-list");
   if (!container) return;
+  const flaggedCard = document.getElementById("dash-flagged-card");
 
   const flagged = reportsCache.filter(r => r.bucket === "NeedsReview" || r.bucket === "Blocked");
   if (flagged.length === 0) {
-    container.innerHTML = `
-      <div style="padding:16px;text-align:center;color:var(--br-success);font-weight:600;">
-        ✓ All reports are 100% compatible and ready for migration!
-      </div>
-    `;
+    if (flaggedCard) flaggedCard.style.display = "none";
+    container.innerHTML = "";
     return;
   }
+  if (flaggedCard) flaggedCard.style.display = "block";
 
   container.innerHTML = flagged.map(r => {
     let desc = (r.blockReason === "CF-ASSEMBLY" || (r.featureTags && String(r.featureTags).includes("CustomAssembly")))
@@ -401,7 +354,10 @@ async function runDependencyVerification() {
           ? `Link verification found ${res.reportsWithIssues} report(s) with broken links or cycles.`
           : `All ${res.totalReports} report link(s) verified cleanly!`);
       } catch (err) {
-        if (host) host.innerHTML = `<span style="color:var(--br-danger-text);font-size:12.5px;">Verification error: ${escapeHtml(err.message)}</span>`;
+        if (host) {
+          host.style.display = "block";
+          host.innerHTML = `<span style="color:var(--br-danger-text);font-size:12.5px;">Verification error: ${escapeHtml(err.message)}</span>`;
+        }
         showToast("Dependency verification failed: " + err.message);
       }
     },
@@ -412,6 +368,7 @@ async function runDependencyVerification() {
 function renderDependencyVerificationResults(summary) {
   const host = document.getElementById("dep-verify-results");
   if (!host || !summary) return;
+  host.style.display = "block";
 
   const reports = summary.reports || [];
   const brokenRows = [];
@@ -429,12 +386,15 @@ function renderDependencyVerificationResults(summary) {
   }
 
   host.innerHTML = `
-    <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:10px;">
-      <span class="pill ok">Healthy Reports: ${summary.healthyReports}/${summary.totalReports}</span>
-      <span class="pill ${summary.brokenDataSources > 0 ? "fail" : ""}">Broken DataSources: ${summary.brokenDataSources}</span>
-      <span class="pill ${summary.brokenDataSets > 0 ? "fail" : ""}">Broken Datasets: ${summary.brokenDataSets}</span>
-      <span class="pill ${summary.brokenSubreports > 0 ? "fail" : ""}">Broken Subreports: ${summary.brokenSubreports}</span>
-      ${summary.cyclesDetected > 0 ? `<span class="pill fail">Subreport Cycles: ${summary.cyclesDetected}</span>` : ""}
+    <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:8px;">
+      <div style="display:flex;gap:8px;flex-wrap:wrap;">
+        <span class="pill ok">Healthy Reports: ${summary.healthyReports}/${summary.totalReports}</span>
+        <span class="pill ${summary.brokenDataSources > 0 ? "fail" : ""}">Broken DataSources: ${summary.brokenDataSources}</span>
+        <span class="pill ${summary.brokenDataSets > 0 ? "fail" : ""}">Broken Datasets: ${summary.brokenDataSets}</span>
+        <span class="pill ${summary.brokenSubreports > 0 ? "fail" : ""}">Broken Subreports: ${summary.brokenSubreports}</span>
+        ${summary.cyclesDetected > 0 ? `<span class="pill fail">Subreport Cycles: ${summary.cyclesDetected}</span>` : ""}
+      </div>
+      <button type="button" class="btn-ghost btn-sm" onclick="document.getElementById('dep-verify-results').style.display='none'">✕ Hide</button>
     </div>
     ${brokenRows.length === 0
       ? `<div style="font-size:12.5px;color:var(--br-success-text);">All shared data sources, shared datasets, and subreport references resolve cleanly across staged items.</div>`
@@ -443,11 +403,11 @@ function renderDependencyVerificationResults(summary) {
             <thead><tr><th>Report</th><th>Link Type</th><th>Missing / Broken Reference</th><th>Issue</th><th>Rebind Target</th></tr></thead>
             <tbody>
               ${brokenRows.map((row, idx) => {
-                const selectId = `rebind-sel-${idx}`;
-                const optionsHtml = row.candidates.length > 0
-                  ? row.candidates.map(c => `<option value="${escapeHtml(c)}">${escapeHtml(c)}</option>`).join("")
-                  : `<option value="">No candidates in catalog</option>`;
-                return `
+        const selectId = `rebind-sel-${idx}`;
+        const optionsHtml = row.candidates.length > 0
+          ? row.candidates.map(c => `<option value="${escapeHtml(c)}">${escapeHtml(c)}</option>`).join("")
+          : `<option value="">No candidates in catalog</option>`;
+        return `
                   <tr>
                     <td><strong>${escapeHtml(row.rep.name)}</strong><br><small style="color:var(--br-text-muted);">${escapeHtml(row.rep.path)}</small></td>
                     <td><span class="pill warn" style="font-size:11px;">${escapeHtml(row.link.linkType)}</span></td>
@@ -455,12 +415,12 @@ function renderDependencyVerificationResults(summary) {
                     <td style="font-size:12px;color:var(--br-danger-text);">${escapeHtml(row.link.issue || "Unresolved reference")}</td>
                     <td style="white-space:nowrap;">
                       ${row.candidates.length > 0
-                        ? `<select id="${selectId}" style="height:28px;border:1px solid var(--br-border-strong);border-radius:4px;font-size:11.5px;max-width:210px;">${optionsHtml}</select>
+            ? `<select id="${selectId}" style="height:28px;border:1px solid var(--br-border-strong);border-radius:4px;font-size:11.5px;max-width:210px;">${optionsHtml}</select>
                            <button type="button" class="btn2 btn-sm" style="margin-left:4px;" onclick="rebindBrokenLink('${row.rep.reportId}', '${escapeHtml(row.link.linkType)}', '${escapeHtml(row.link.reference)}', '${selectId}')">Rebind</button>`
-                        : `<span style="font-size:11.5px;color:var(--br-text-muted);">No staged target</span>`}
+            : `<span style="font-size:11.5px;color:var(--br-text-muted);">No staged target</span>`}
                     </td>
                   </tr>`;
-              }).join("")}
+      }).join("")}
             </tbody>
           </table>
         </div>`}`;

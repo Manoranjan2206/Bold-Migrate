@@ -246,33 +246,63 @@ async function startFreshRun() {
 }
 
 // -----------------------------------------------------------------------------
-// View & Tab Switching
+// View & Tab Switching (4-Step Guided Studio + Settings Utilities Modal)
 // -----------------------------------------------------------------------------
+const TAB_ALIASES = {
+  library: "assess",
+  dashboard: "assess",
+  migration: "publish",
+  cutover: "publish",
+};
+
 function switchTab(tabName) {
-  currentTab = tabName;
+  if (tabName === "settings" || tabName === "bold-delete") {
+    if (typeof openSettingsModal === "function") {
+      openSettingsModal(tabName === "bold-delete" ? "cleanup" : "tuning");
+    }
+    return;
+  }
 
-  // Update sidebar .step
-  document.querySelectorAll(".side-nav .step").forEach(el => el.classList.remove("on"));
-  const navEl = document.getElementById(`nav-${tabName}`);
-  if (navEl) navEl.classList.add("on");
+  let resolvedTab = TAB_ALIASES[tabName] || tabName;
+  if (tabName === "local-folder") {
+    resolvedTab = "connections";
+  }
 
-  // Update journey steppers across tabs
-  updateStepperProgression(tabName);
+  currentTab = resolvedTab;
+  updateMilestoneProgression(resolvedTab);
 
-  // Update main panes
-  document.querySelectorAll(".tab-pane").forEach(pane => pane.style.display = "none");
-  const targetPane = document.getElementById(`tab-${tabName}`);
-  if (targetPane) targetPane.style.display = "block";
+  // Update main 4-step panes with smooth slide animation
+  document.querySelectorAll(".tab-pane").forEach(pane => {
+    pane.classList.remove("is-active");
+    pane.style.display = "none";
+  });
+  const targetPane = document.getElementById(`tab-${resolvedTab}`);
+  if (targetPane) {
+    targetPane.style.display = "block";
+    void targetPane.offsetWidth;
+    targetPane.classList.add("is-active");
+  }
+
+  if (tabName === "local-folder" && typeof setSourceEntryMode === "function") {
+    setSourceEntryMode("folder", document.getElementById("choice-folder"));
+  }
+
+  // Keep Step 2 multi-select floating bar scoped to Assess step
+  if (typeof updateSelectedCountUI === "function") {
+    updateSelectedCountUI();
+  }
 
   // Tab specific refreshes
-  if (tabName === "connections") refreshConnectionsState();
-  if (tabName === "library") refreshLibraryState();
-  if (tabName === "dashboard") refreshDashboardState();
-  if (tabName === "migration") refreshMigrationState();
-  if (tabName === "validation") refreshValidationState();
-  if (tabName === "cutover") refreshCutoverState();
-  if (tabName === "settings") loadSettingsView();
-  if (tabName === "bold-delete") syncBulkDeleteFromActiveRun();
+  if (resolvedTab === "connections") refreshConnectionsState();
+  if (resolvedTab === "assess") {
+    refreshLibraryState();
+    refreshDashboardState();
+  }
+  if (resolvedTab === "validation") refreshValidationState();
+  if (resolvedTab === "publish") {
+    refreshMigrationState();
+    refreshCutoverState();
+  }
 }
 
 function syncBulkDeleteFromActiveRun() {
@@ -299,13 +329,22 @@ function syncBulkDeleteFromActiveRun() {
 // fills them from one definition, so the rail is edited in a single place
 // instead of six hand-maintained copies.
 const JOURNEY_STEPS = [
-  { tab: "connections", name: "Connect & Discover" },
-  { tab: "library",     name: "Report Library" },
-  { tab: "dashboard",   name: "Assessment" },
-  { tab: "validation",  name: "Validate" },
-  { tab: "migration",   name: "Upload" },
-  { tab: "cutover",     name: "Cutover" },
+  { tab: "connections", name: "Source & Target" },
+  { tab: "assess",      name: "Assess & Resolve" },
+  { tab: "validation",  name: "Visual Verify" },
+  { tab: "publish",     name: "Publish & Cutover" },
 ];
+
+function updateMilestoneProgression(activeTab) {
+  const activeIdx = JOURNEY_STEPS.findIndex(s => s.tab === activeTab);
+  JOURNEY_STEPS.forEach((step, idx) => {
+    const el = document.getElementById(`mstep-${step.tab}`);
+    if (!el) return;
+    el.classList.toggle("active", idx === activeIdx);
+    if (idx === activeIdx) el.setAttribute("aria-current", "step");
+    else el.removeAttribute("aria-current");
+  });
+}
 
 function renderSteppers() {
   const markup = JOURNEY_STEPS.map((s, i) =>
@@ -340,94 +379,23 @@ function watchStatTiles() {
 }
 
 function updateStepperProgression(activeTab) {
-  const stepOrder = ["connections", "library", "dashboard", "validation", "migration", "cutover"];
-  const activeIdx = stepOrder.indexOf(activeTab);
-
-  document.querySelectorAll(".journey-stepper").forEach(stepper => {
-    const steps = stepper.querySelectorAll(".journey-step");
-    const dividers = stepper.querySelectorAll(".jstep-divider");
-
-    steps.forEach((step, idx) => {
-      step.classList.remove("active", "completed");
-      const numSpan = step.querySelector(".jstep-num");
-      if (idx < activeIdx) {
-        step.classList.add("completed");
-        if (numSpan) numSpan.innerText = "✓";
-      } else if (idx === activeIdx) {
-        step.classList.add("active");
-        if (numSpan) numSpan.innerText = String(idx + 1);
-      } else {
-        if (numSpan) numSpan.innerText = String(idx + 1);
-      }
-    });
-
-    dividers.forEach((div, idx) => {
-      div.classList.toggle("completed", idx < activeIdx);
-    });
-  });
+  updateMilestoneProgression(activeTab);
 }
 
 function showLandingView() {
-  document.getElementById("app-shell").style.display = "none";
-  document.getElementById("view-landing").style.display = "block";
+  switchTab("connections");
+  if (typeof setSourceEntryMode === "function") setSourceEntryMode("scan");
   window.scrollTo(0, 0);
 }
 
 function showAppView(initialTab = "connections") {
-  document.getElementById("view-landing").style.display = "none";
-  document.getElementById("app-shell").style.display = "flex";
-  renderSteppers();
   watchStatTiles();
   switchTab(initialTab);
 }
 
-// -----------------------------------------------------------------------------
-// Step 1: Connections & Discovery
-// -----------------------------------------------------------------------------
-
-// -----------------------------------------------------------------------------
-// Sidebar Collapse / Expand Persistence
-// -----------------------------------------------------------------------------
-const SIDEBAR_COLLAPSE_STORAGE_KEY = "bm_sidebar_collapsed";
-
-function initSidebarState() {
-  let collapsed = false;
-  try {
-    collapsed = localStorage.getItem(SIDEBAR_COLLAPSE_STORAGE_KEY) === "true";
-  } catch {
-    collapsed = false;
-  }
-  applySidebarState(collapsed);
-}
-
-function toggleSidebar() {
-  const sidebar = document.getElementById("app-sidebar");
-  if (!sidebar) return;
-  const nextCollapsed = !sidebar.classList.contains("is-collapsed");
-  applySidebarState(nextCollapsed);
-  try {
-    localStorage.setItem(SIDEBAR_COLLAPSE_STORAGE_KEY, String(nextCollapsed));
-  } catch {
-    // Ignore storage quota or private browsing errors
-  }
-  // Allow embedded viewers/designers inside .main to reflow cleanly
-  window.dispatchEvent(new Event("resize"));
-  setTimeout(() => window.dispatchEvent(new Event("resize")), 220);
-}
-
-function applySidebarState(collapsed) {
-  const sidebar = document.getElementById("app-sidebar");
-  if (!sidebar) return;
-  sidebar.classList.toggle("is-collapsed", !!collapsed);
-
-  const btn = document.getElementById("btn-toggle-sidebar");
-  if (btn) {
-    const label = collapsed ? "Expand sidebar" : "Collapse sidebar";
-    btn.setAttribute("aria-expanded", String(!collapsed));
-    btn.setAttribute("aria-label", label);
-    btn.title = label;
-  }
-}
+function initSidebarState() {}
+function toggleSidebar() {}
+function applySidebarState() {}
 
 
 function startPoller() {
@@ -439,8 +407,12 @@ function startPoller() {
       if (poll) {
         updateJourneyBadges(poll);
         syncServerStageActivity(poll);
-        if (currentTab === "dashboard") refreshDashboardState(poll);
-        if (currentTab === "migration") refreshMigrationState(poll);
+        if (currentTab === "assess") {
+          refreshDashboardState(poll);
+        }
+        if (currentTab === "publish") {
+          refreshMigrationState(poll);
+        }
       }
     } catch { }
   }, 2000);
@@ -463,53 +435,44 @@ function syncServerStageActivity(poll) {
 }
 
 function updateJourneyBadges(poll) {
-  const sideCount = document.getElementById("side-count-reports");
-  if (sideCount) sideCount.innerText = poll.reportsTotal || 0;
-
-  const step1Sub = document.getElementById("side-step1-sub");
-  if (step1Sub) {
-    step1Sub.innerText = poll.itemsTotal > 0 ? `${poll.itemsTotal} items discovered` : "SSRS & Bold Reports";
-  }
-
-  const step3Sub = document.getElementById("side-step3-sub");
-  if (step3Sub) {
-    if (poll.reportsTotal > 0) {
-      const score = Math.round(((poll.reportsClean + poll.reportsAutoFixed) / poll.reportsTotal) * 100);
-      step3Sub.innerText = `Readiness: ${score}%`;
-    } else {
-      step3Sub.innerText = "Readiness & Blockers";
-    }
-  }
-
-  const step4Sub = document.getElementById("side-step4-sub");
-  if (step4Sub) {
-    if (poll.reportsValidated > 0) {
-      step4Sub.innerText = `${poll.reportsValidated}/${poll.reportsTotal || 0} validated`;
-    } else {
-      step4Sub.innerText = "Side-by-side & edit";
-    }
-  }
-
-  const step5Sub = document.getElementById("side-step5-sub");
-  if (step5Sub) {
-    if (poll.reportsUploaded > 0) {
-      step5Sub.innerText = `${poll.reportsUploaded}/${poll.reportsTotal || 0} uploaded`;
-    } else {
-      step5Sub.innerText = "4-stage batch upload";
-    }
-  }
-
-  const toggleDone = (id, done) => {
-    const el = document.getElementById(id);
-    if (el) el.classList.toggle("is-done", !!done);
-  };
   const ssrsOk = ["Connected", "Fetching", "Analysed", "Uploading", "Uploaded", "Validating", "Validated", "CutOver"].includes(poll.status);
-  toggleDone("nav-connections", ssrsOk || poll.itemsTotal > 0);
-  toggleDone("nav-library", (poll.reportsTotal || 0) > 0);
-  toggleDone("nav-dashboard", (poll.reportsTotal || 0) > 0);
-  toggleDone("nav-validation", (poll.reportsValidated || 0) > 0);
-  toggleDone("nav-migration", (poll.reportsUploaded || 0) > 0);
-  toggleDone("nav-cutover", poll.status === "CutOver");
+  const setMilestone = (id, isDone) => {
+    const el = document.getElementById(id);
+    if (el) el.classList.toggle("done", !!isDone);
+  };
+  const reportsTotal = poll.reportsTotal || 0;
+  const reportsValidated = poll.reportsValidated || 0;
+  const reportsUploaded = poll.reportsUploaded || 0;
+
+  setMilestone("mstep-connections", ssrsOk || (poll.itemsTotal || 0) > 0);
+  setMilestone("mstep-assess", reportsTotal > 0);
+  setMilestone("mstep-validation", reportsValidated > 0);
+  setMilestone("mstep-publish", poll.status === "CutOver");
+
+  const sub1 = document.getElementById("mstep1-sub");
+  const sub2 = document.getElementById("mstep2-sub");
+  const sub3 = document.getElementById("mstep3-sub");
+  const sub4 = document.getElementById("mstep4-sub");
+  if (sub1) sub1.textContent = reportsTotal > 0 ? `${reportsTotal} Reports Loaded` : (ssrsOk ? "Connected" : "Connect or Drop .RDL");
+  if (sub2) sub2.textContent = reportsTotal > 0 ? `${reportsTotal} Assessed` : "Catalog & Links";
+  if (sub3) sub3.textContent = reportsValidated > 0 ? `${reportsValidated}/${reportsTotal || 0} Validated` : "Playwright & Diff";
+  if (sub4) sub4.textContent = poll.status === "CutOver" ? "Cutover Complete" : (reportsUploaded > 0 ? `${reportsUploaded}/${reportsTotal || 0} Uploaded` : "4-Stage & URL Shim");
+
+  const topbarStatus = document.getElementById("topbar-run-status");
+  const topbarDot = document.getElementById("topbar-pulse-dot");
+  if (topbarStatus) {
+    const runName = (currentRun && currentRun.name) ? currentRun.name : "Active Run";
+    const countSuffix = reportsTotal > 0 ? ` · ${reportsTotal} reports` : "";
+    topbarStatus.textContent = `${runName} · ${poll.status || "Ready"}${countSuffix}`;
+  }
+  if (topbarDot) {
+    topbarDot.classList.remove("warn", "info");
+    if (["Fetching", "Validating", "Uploading"].includes(poll.status)) {
+      topbarDot.classList.add("info");
+    } else if (poll.status !== "CutOver" && !ssrsOk) {
+      topbarDot.classList.add("warn");
+    }
+  }
 }
 
 function clearFieldError(inputOrId) {
