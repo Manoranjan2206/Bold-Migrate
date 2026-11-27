@@ -409,7 +409,28 @@ async function deleteSingleBoldReport(reportId, reportName) {
 }
 
 
-function openInteractiveViewer(reportId, reportPath, mode = "staged") {
+/// Checks the widget scripts actually loaded before using them. On an air-gapped or
+/// egress-filtered network the Bold Reports CDN never arrives and `$` / the widget plugins are
+/// undefined, which used to throw outside the try and leave a blank modal with no explanation.
+function boldWidgetsAvailable(kind) {
+  if (typeof window.jQuery === "undefined") return false;
+  const fn = kind === "designer" ? "boldReportDesigner" : "boldReportViewer";
+  return typeof window.jQuery.fn?.[fn] === "function";
+}
+
+function showWidgetUnavailable(host, kind) {
+  host.innerHTML = `
+    <div class="note note-warn" style="margin:16px;">
+      <strong>The Bold Reports ${kind === "designer" ? "Designer" : "Viewer"} could not load.</strong>
+      <div style="margin-top:6px;font-size:12.5px;">
+        Its scripts are served from <code>cdn.boldreports.com</code>. If this machine has no
+        internet access, host those files locally and update the script tags in
+        <code>index.html</code>.
+      </div>
+    </div>`;
+}
+
+async function openInteractiveViewer(reportId, reportPath, mode = "staged") {
   window.__activeInspectReport = { reportId, reportPath, mode };
   const modal = document.getElementById("modal-interactive-viewer");
   const host = document.getElementById("interactive-viewer-host");
@@ -428,28 +449,42 @@ function openInteractiveViewer(reportId, reportPath, mode = "staged") {
   try { $(host).boldReportViewer("destroy"); } catch {}
   host.innerHTML = "";
 
+  if (!boldWidgetsAvailable("viewer")) {
+    showWidgetUnavailable(host, "viewer");
+    return;
+  }
+
   if (mode === "staged") {
     $(host).boldReportViewer({
       reportServiceUrl: "/api/preview/runs/" + currentRun.id + "/viewer",
       printMode: true,
       reportPath: reportPath || reportId
     });
-  } else {
-    // Destination Server mode
-    const destUrl = currentRun?.destinationServerUrl || destinationSessionCache.destinationUrl;
-    if (!destUrl) {
-      showToast("Bold Reports destination URL is not configured.");
-      return;
-    }
-    const serviceUrl = destUrl.replace(/\/site\/[^/]+/, "") + "/reporting/reportservice/api/Viewer";
-    $(host).boldReportViewer({
-      reportServiceUrl: serviceUrl,
-      reportServerUrl: destUrl,
-      printMode: true,
-      reportPath: reportPath,
-      serviceAuthorizationToken: destinationSessionCache.bearerToken ? `bearer ${destinationSessionCache.bearerToken}` : ""
-    });
+    return;
   }
+
+  // Destination server mode. The URLs are built server-side from the run and the stored token:
+  // the old client-side guess stripped "/site/x" and re-appended a path, producing URLs like
+  // .../reporting/api/reporting/reportservice/api/Viewer, and passed an empty token whenever the
+  // page had been refreshed since connecting. That is why uploaded reports would not open.
+  host.innerHTML = `<div style="padding:24px;text-align:center;color:var(--br-text-muted);font-size:13px;">Connecting to Bold Reports Server…</div>`;
+
+  let cfg;
+  try {
+    cfg = await Api.getEmbedConfig(currentRun.id);
+  } catch (err) {
+    showToast(err?.message || "Could not load Bold Reports server configuration.", true);
+    host.innerHTML = `<div class="note note-warn" style="margin:16px;"><strong>Could not open this report on the server.</strong><div style="margin-top:6px;font-size:12.5px;">${escapeHtml(err?.message || "Unknown error")}</div></div>`;
+    return;
+  }
+
+  host.innerHTML = "";
+  $(host).boldReportViewer({
+    reportServiceUrl: cfg.viewerServiceUrl,
+    reportServerUrl: cfg.reportServerUrl,
+    serviceAuthorizationToken: cfg.serviceAuthorizationToken,
+    reportPath: reportPath
+  });
 }
 
 function closeInteractiveViewer() {
@@ -470,7 +505,7 @@ function switchViewerToDesigner() {
   }
 }
 
-function openInteractiveDesigner(reportId, reportPath, mode = "staged") {
+async function openInteractiveDesigner(reportId, reportPath, mode = "staged") {
   const modal = document.getElementById("modal-interactive-designer");
   const host = document.getElementById("interactive-designer-host");
   const title = document.getElementById("interactive-designer-title");
@@ -488,6 +523,11 @@ function openInteractiveDesigner(reportId, reportPath, mode = "staged") {
   try { $(host).boldReportDesigner("destroy"); } catch {}
   host.innerHTML = "";
 
+  if (!boldWidgetsAvailable("designer")) {
+    showWidgetUnavailable(host, "designer");
+    return;
+  }
+
   if (mode === "staged") {
     $(host).boldReportDesigner({
       serviceUrl: "/api/preview/runs/" + currentRun.id + "/designer",
@@ -501,26 +541,37 @@ function openInteractiveDesigner(reportId, reportPath, mode = "staged") {
         showToast("Report changes saved to local staging.");
       }
     });
-  } else {
-    // Destination Server mode
-    const destUrl = currentRun?.destinationServerUrl || destinationSessionCache.destinationUrl;
-    if (!destUrl) {
-      showToast("Bold Reports destination URL is not configured.");
-      return;
-    }
-    const serviceUrl = destUrl.replace(/\/site\/[^/]+/, "") + "/reporting/reportservice/api/Designer";
-    $(host).boldReportDesigner({
-      serviceUrl: serviceUrl,
-      serverUrl: destUrl,
-      serviceAuthorizationToken: destinationSessionCache.bearerToken ? `bearer ${destinationSessionCache.bearerToken}` : "",
-      create: function () {
-        const designer = $(host).data("boldReportDesigner");
-        if (designer && targetPath) {
-          designer.openReport(targetPath);
-        }
-      }
-    });
+    return;
   }
+
+  // Destination server mode — same server-built config as the viewer. The previous code also
+  // passed `serverUrl`, which the designer ignores; the documented option is `reportServerUrl`.
+  host.innerHTML = `<div style="padding:24px;text-align:center;color:var(--br-text-muted);font-size:13px;">Connecting to Bold Reports Server…</div>`;
+
+  let cfg;
+  try {
+    cfg = await Api.getEmbedConfig(currentRun.id);
+  } catch (err) {
+    showToast(err?.message || "Could not load Bold Reports server configuration.", true);
+    host.innerHTML = `<div class="note note-warn" style="margin:16px;"><strong>Could not open the designer on the server.</strong><div style="margin-top:6px;font-size:12.5px;">${escapeHtml(err?.message || "Unknown error")}</div></div>`;
+    return;
+  }
+
+  host.innerHTML = "";
+  $(host).boldReportDesigner({
+    serviceUrl: cfg.designerServiceUrl,
+    reportServerUrl: cfg.reportServerUrl,
+    serviceAuthorizationToken: cfg.serviceAuthorizationToken,
+    create: function () {
+      const designer = $(host).data("boldReportDesigner");
+      if (designer && targetPath) {
+        designer.openReport(targetPath);
+      }
+    },
+    reportSaved: function () {
+      showToast("Report saved to Bold Reports Server.");
+    }
+  });
 }
 
 function closeInteractiveDesigner() {
@@ -631,6 +682,42 @@ async function loadServerUploadedReports() {
   } catch (err) {
     console.error("Failed loading uploaded server reports:", err);
   }
+
+  loadUploadOutcome();
+}
+
+/// Shows every report that did NOT reach the destination, with the reason and the fix.
+/// Without this the count simply dropped and nothing said which reports were held back or why.
+async function loadUploadOutcome() {
+  if (!currentRun) return;
+  const card = document.getElementById("upload-not-uploaded-card");
+  const tbody = document.getElementById("upload-not-uploaded-tbody");
+  const countEl = document.getElementById("upload-not-uploaded-count");
+  if (!card || !tbody) return;
+
+  let data;
+  try {
+    data = await Api.getUploadOutcome(currentRun.id);
+  } catch {
+    return; // non-critical panel; the main table already rendered
+  }
+
+  const list = data?.notUploaded || [];
+  if (list.length === 0) {
+    card.style.display = "none";
+    return;
+  }
+
+  card.style.display = "block";
+  if (countEl) countEl.innerText = list.length;
+
+  tbody.innerHTML = list.map(r => `
+    <tr>
+      <td><strong>${escapeHtml(r.name)}</strong><div class="mono" style="font-size:11px;color:var(--br-text-muted);">${escapeHtml(r.path)}</div></td>
+      <td><span class="pill warn">${escapeHtml(r.state)}</span></td>
+      <td style="font-size:12px;">${escapeHtml(r.reason)}</td>
+      <td style="font-size:12px;color:var(--br-text-secondary);">${escapeHtml(r.fix)}</td>
+    </tr>`).join("");
 }
 
 async function openRdlDiffModal(reportId) {
@@ -699,13 +786,115 @@ function closeVisualCompareModal() {
 }
 
 function setCompareMode(mode) {
-  const modes = ["swipe", "side", "diff"];
+  const modes = ["swipe", "side", "diff", "data"];
   for (const m of modes) {
     const pane = document.getElementById(`cmp-pane-${m}`);
     const btn = document.getElementById(`cmp-mode-${m}`);
     if (pane) pane.style.display = m === mode ? "block" : "none";
     if (btn) btn.classList.toggle("active", m === mode);
   }
+  if (mode === "data") loadDataDiff();
+}
+
+/// Answers the question the pixel diff cannot: is this visual delta layout, or real data?
+async function loadDataDiff(force = false) {
+  const host = document.getElementById("cmp-data-body");
+  if (!host || !currentRun || !__cmpActiveReportId) return;
+  if (host.dataset.loadedFor === __cmpActiveReportId && !force) return;
+
+  host.innerHTML = `<div style="padding:24px;text-align:center;color:var(--br-text-muted);font-size:13px;">
+      Exporting both renders to CSV and comparing records…
+    </div>`;
+
+  let data;
+  try {
+    data = await Api.getReportDataDiff(currentRun.id, __cmpActiveReportId);
+  } catch (err) {
+    host.innerHTML = `<div class="note note-warn" style="margin:0;">
+        <strong>Could not compare the data.</strong>
+        <div style="margin-top:4px;font-size:12.5px;">${escapeHtml(err?.message || "Unknown error")}</div>
+      </div>`;
+    return;
+  }
+
+  if (!data || data.available === false) {
+    host.innerHTML = `<div class="note note-warn" style="margin:0;">
+        <strong>Data comparison unavailable.</strong>
+        <div style="margin-top:4px;font-size:12.5px;">${escapeHtml(data?.reason || "No detail returned.")}</div>
+      </div>`;
+    return;
+  }
+
+  host.dataset.loadedFor = __cmpActiveReportId;
+  host.innerHTML = buildDataDiffHtml(data);
+}
+
+function buildDataDiffHtml(d) {
+  const layoutOnly = d.isLayoutOnlyDifference === true;
+  const verdictClass = layoutOnly ? "note" : "note note-warn";
+  const verdictIcon = {
+    Identical: "✓",
+    ReorderedOnly: "⇅",
+    ValuesDiffer: "≠",
+    RecordsDiffer: "⚠",
+    SchemaDiffers: "⚠",
+    NoData: "—"
+  }[d.verdict] || "•";
+
+  const verdictLabel = {
+    Identical: "Data identical — the visual difference is layout only",
+    ReorderedOnly: "Same records, different order — no data was lost",
+    ValuesDiffer: "Same records, but values changed",
+    RecordsDiffer: "Different records returned",
+    SchemaDiffers: "Different columns returned",
+    NoData: "No data to compare"
+  }[d.verdict] || d.verdict;
+
+  let html = `
+    <div class="${verdictClass}" style="margin:0 0 12px;">
+      <strong>${verdictIcon} ${escapeHtml(verdictLabel)}</strong>
+      <div style="margin-top:4px;font-size:12.5px;">${escapeHtml(d.summary || "")}</div>
+      <div style="margin-top:6px;font-size:12px;color:var(--br-text-secondary);">
+        SSRS: <strong>${d.sourceRowCount}</strong> rows · Staged: <strong>${d.targetRowCount}</strong> rows
+        ${d.truncated ? " · <em>sample truncated</em>" : ""}
+      </div>
+    </div>`;
+
+  if (Array.isArray(d.cellDifferences) && d.cellDifferences.length > 0) {
+    html += `
+      <h4 style="margin:14px 0 6px;font-size:13px;">Changed values (${d.cellDifferences.length})</h4>
+      <div class="table-scroll" style="border:1px solid var(--br-border);border-radius:10px;max-height:240px;">
+        <table><thead><tr><th>Row</th><th>Column</th><th>SSRS</th><th>Staged</th></tr></thead><tbody>
+        ${d.cellDifferences.map(c => `
+          <tr>
+            <td class="mono">${c.rowNumber}</td>
+            <td><strong>${escapeHtml(c.column)}</strong></td>
+            <td class="mono" style="color:var(--br-text-secondary);">${escapeHtml(c.sourceValue)}</td>
+            <td class="mono" style="color:var(--br-danger-text);">${escapeHtml(c.targetValue)}</td>
+          </tr>`).join("")}
+        </tbody></table>
+      </div>`;
+  }
+
+  html += buildDataDiffRowTable("Records only in SSRS (missing from the staged render)", d.onlyInSource, d.sourceColumns, "var(--br-danger-text)");
+  html += buildDataDiffRowTable("Records only in the staged render (extra)", d.onlyInTarget, d.targetColumns, "var(--br-warning-text)");
+
+  return html;
+}
+
+function buildDataDiffRowTable(title, rows, columns, accent) {
+  if (!Array.isArray(rows) || rows.length === 0) return "";
+  const cols = Array.isArray(columns) ? columns : [];
+  return `
+    <h4 style="margin:14px 0 6px;font-size:13px;color:${accent};">${escapeHtml(title)} (${rows.length})</h4>
+    <div class="table-scroll" style="border:1px solid var(--br-border);border-radius:10px;max-height:220px;">
+      <table>
+        <thead><tr><th>Row</th>${cols.map(c => `<th>${escapeHtml(c)}</th>`).join("")}</tr></thead>
+        <tbody>
+          ${rows.map(r => `<tr><td class="mono">${r.rowNumber}</td>${(r.values || []).map(v => `<td class="mono">${escapeHtml(v)}</td>`).join("")}</tr>`).join("")}
+        </tbody>
+      </table>
+    </div>`;
 }
 
 function onCompareSliderInput(val) {

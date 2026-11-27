@@ -60,12 +60,37 @@ public class MigrationOrchestrator : BackgroundService, IMigrationOrchestrator
             var store = scope.ServiceProvider.GetRequiredService<IMigrationStore>();
             var logger = scope.ServiceProvider.GetRequiredService<MigrationLogger>();
             var active = await store.GetActiveRunAsync(stoppingToken);
+
+            // Re-hydrate the destination origin so the CSP keeps allowing the embedded Bold
+            // Reports widgets after a restart, before the operator reconnects.
+            if (active != null && !string.IsNullOrWhiteSpace(active.DestinationServerUrl))
+            {
+                _settings.DestinationServerUrl = active.DestinationServerUrl;
+            }
+
             if (active != null && active.Status is RunStatus.Uploading or RunStatus.Validating)
             {
                 active.Status = active.Status == RunStatus.Uploading ? RunStatus.Validated : RunStatus.Analysed;
                 await store.UpdateRunAsync(active, stoppingToken);
                 logger.Log(LogLevel.Warning, EventCodes.RunResume, active.Id,
                     "Recovered active run from an unexpected shutdown and reset its transient stage state.");
+
+                // Report records left mid-flight are stranded: IsEligibleForUpload excludes
+                // Uploading, so without this they are skipped forever with a misleading
+                // "must be validated" message. We cannot know whether the destination accepted
+                // them, so mark them failed and let the existing Retry flow re-queue them.
+                var stranded = await store.GetReportRecordsAsync(active.Id, ReportState.Uploading, ct: stoppingToken);
+                foreach (var record in stranded)
+                {
+                    ReportStateMachine.Transition(record, ReportState.UploadFailed);
+                    await store.UpdateReportRecordAsync(record, stoppingToken);
+                }
+
+                if (stranded.Count > 0)
+                {
+                    logger.Log(LogLevel.Warning, EventCodes.RunResume, active.Id,
+                        $"Reset {stranded.Count} report(s) stranded in Uploading to UploadFailed so they can be retried.");
+                }
             }
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
@@ -198,6 +223,8 @@ public class MigrationOrchestrator : BackgroundService, IMigrationOrchestrator
             var recordBag = new ConcurrentBag<ReportRecord>();
             var permBag = new ConcurrentBag<PermissionMapping>();
             var subBag = new ConcurrentBag<SubscriptionRecord>();
+            // Per-item discovery failures that must not be mistaken for "this item has none".
+            var discoveryWarnings = new ConcurrentBag<(string Path, string Kind, string Error)>();
             var maxParallel = Math.Clamp(_settings.ExtractionMaxParallel, 1, 16);
 
             await Parallel.ForEachAsync(toAdd, new ParallelOptions { MaxDegreeOfParallelism = maxParallel, CancellationToken = ct }, async (s, token) =>
@@ -249,7 +276,12 @@ public class MigrationOrchestrator : BackgroundService, IMigrationOrchestrator
                         var paramsList = await adapter.GetParametersAsync(s.Id, token);
                         paramCount = paramsList.Count;
                     }
-                    catch { }
+                    catch (Exception ex)
+                    {
+                        // Silently recording 0 parameters hid 403s and timeouts, and a report with
+                        // prompt parameters then looked like one that had none.
+                        discoveryWarnings.Add((s.Path, "parameters", ex.Message));
+                    }
 
                     recordBag.Add(new ReportRecord
                     {
@@ -277,7 +309,12 @@ public class MigrationOrchestrator : BackgroundService, IMigrationOrchestrator
                             });
                         }
                     }
-                    catch { }
+                    catch (Exception ex)
+                    {
+                        // "No permissions on this item" and "could not read permissions" are
+                        // different facts; collapsing them misrepresents the estate's security.
+                        discoveryWarnings.Add((s.Path, "permissions", ex.Message));
+                    }
 
                     try
                     {
@@ -297,7 +334,12 @@ public class MigrationOrchestrator : BackgroundService, IMigrationOrchestrator
                             });
                         }
                     }
-                    catch { }
+                    catch (Exception ex)
+                    {
+                        // An unreadable subscription list must not look like an empty one: the
+                        // operator would migrate believing no schedules needed recreating.
+                        discoveryWarnings.Add((s.Path, "subscriptions", ex.Message));
+                    }
                 }
             });
 
@@ -319,6 +361,27 @@ public class MigrationOrchestrator : BackgroundService, IMigrationOrchestrator
                 runId,
                 $"Discovery complete. Discovered {catalogItems.Count} items ({catalogItems.Count(i => i.ItemType == ItemType.Report)} reports).",
                 step: 2);
+
+            // Surface what could NOT be read. These used to be swallowed, so a 403 or a timeout
+            // was indistinguishable from "this report genuinely has no parameters/permissions/
+            // subscriptions" — the wrong failure mode for a migration tool.
+            if (!discoveryWarnings.IsEmpty)
+            {
+                foreach (var group in discoveryWarnings.GroupBy(w => w.Kind))
+                {
+                    var affected = group.Select(w => w.Path).Distinct().ToList();
+                    var sample = string.Join(", ", affected.Take(5));
+                    var more = affected.Count > 5 ? $" (+{affected.Count - 5} more)" : string.Empty;
+
+                    logger.Log(
+                        LogLevel.Warning,
+                        "DISC-PARTIAL",
+                        runId,
+                        $"Could not read {group.Key} for {affected.Count} item(s); they are recorded as empty and may be incomplete. " +
+                        $"Affected: {sample}{more}. First error: {Redactor.RedactSecrets(group.First().Error)}",
+                        step: 2);
+                }
+            }
         }
         finally
         {
@@ -447,9 +510,22 @@ public class MigrationOrchestrator : BackgroundService, IMigrationOrchestrator
 
             try
             {
-                await upload.UploadEstateAsync(runId, destClient, () => _pausedRuns.TryGetValue(runId, out var p) && p, policy, ct);
-                run.Status = RunStatus.Uploaded;
-                await store.UpdateRunAsync(run, ct);
+                var result = await upload.UploadEstateAsync(runId, destClient, () => _pausedRuns.TryGetValue(runId, out var p) && p, policy, ct);
+
+                // A paused run is NOT a completed run: leaving it in Uploading keeps the cutover
+                // gates honest and lets ResumeRun pick the remaining items back up.
+                if (result.Paused)
+                {
+                    run.Status = RunStatus.Uploading;
+                    await store.UpdateRunAsync(run, ct);
+                    logger.Log(LogLevel.Warning, "UPLD-PAUSED", runId,
+                        $"Upload paused by operator after {result.UploadedCount} item(s). Run remains in Uploading until resumed.", step: 5);
+                }
+                else
+                {
+                    run.Status = RunStatus.Uploaded;
+                    await store.UpdateRunAsync(run, ct);
+                }
             }
             catch
             {

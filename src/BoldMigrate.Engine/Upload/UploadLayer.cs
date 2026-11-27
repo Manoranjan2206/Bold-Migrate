@@ -1136,6 +1136,12 @@ public sealed record UploadPlanItem(
     string? ExistingId,
     string? Note = null);
 
+/// <summary>
+/// Outcome of a 4-stage estate upload. <see cref="Paused"/> is true when the operator paused the
+/// run before every stage completed, so callers must NOT treat the run as fully uploaded.
+/// </summary>
+public sealed record UploadEstateResult(int UploadedCount, bool Paused);
+
 public sealed record UploadDryRunPlan(
     string ConflictPolicy,
     int Total,
@@ -1309,14 +1315,14 @@ public class UploadLayer
         };
     }
 
-    public Task<int> UploadEstateAsync(
+    public Task<UploadEstateResult> UploadEstateAsync(
         Guid runId,
         DestinationClient client,
         Func<bool> isPaused,
         CancellationToken ct = default) =>
         UploadEstateAsync(runId, client, isPaused, ConflictResolutionPolicy.Skip, ct);
 
-    public async Task<int> UploadEstateAsync(
+    public async Task<UploadEstateResult> UploadEstateAsync(
         Guid runId,
         DestinationClient client,
         Func<bool> isPaused,
@@ -1345,7 +1351,7 @@ public class UploadLayer
 
         foreach (var folder in folders)
         {
-            if (isPaused()) return uploadedCount;
+            if (isPaused()) break;
             var normPath = StagedCatalog.NormalizePath(folder.SourcePath);
             var parentPath = StagedCatalog.ParentOf(normPath);
             folderCategoryMap.TryGetValue(parentPath, out var parentCatId);
@@ -1358,6 +1364,8 @@ public class UploadLayer
             }
         }
 
+        if (isPaused()) return new UploadEstateResult(uploadedCount, true);
+
         // Stage 2: Data Sources (honoring UploadMaxParallel)
         var maxParallel = Math.Clamp(_settings.UploadMaxParallel, 1, 16);
         var dataSources = (await _store.GetCatalogItemsAsync(runId, ItemType.DataSource, ct)).ToList();
@@ -1369,6 +1377,8 @@ public class UploadLayer
                 Interlocked.Increment(ref uploadedCount);
             }
         });
+
+        if (isPaused()) return new UploadEstateResult(uploadedCount, true);
 
         // Stage 3: Datasets (upload actual .rsd Base64 content & DataSourceReference)
         var datasets = (await _store.GetCatalogItemsAsync(runId, ItemType.DataSet, ct)).ToList();
@@ -1385,6 +1395,8 @@ public class UploadLayer
                 Interlocked.Increment(ref uploadedCount);
             }
         });
+
+        if (isPaused()) return new UploadEstateResult(uploadedCount, true);
 
         // Stage 4: Reports (gated, dependency-mapped, parallelized)
         var reports = (await _store.GetCatalogItemsAsync(runId, ItemType.Report, ct)).ToList();
@@ -1460,7 +1472,7 @@ public class UploadLayer
             }
         });
 
-        return uploadedCount;
+        return new UploadEstateResult(uploadedCount, isPaused());
     }
 
     private async Task<bool> UploadItemWithRetryAsync(

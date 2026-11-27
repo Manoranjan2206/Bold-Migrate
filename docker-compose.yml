@@ -6,7 +6,10 @@ services:
     container_name: bold-migrate
     restart: unless-stopped
     ports:
-      - "8085:8080"
+      # Bound to loopback on purpose: Bold Migrate has no login UI and holds SSRS credentials,
+      # Bold Reports admin tokens and SQL passwords. To reach it from another machine, put it
+      # behind an authenticating reverse proxy AND set BoldMigrate__ApiAccessToken below.
+      - "127.0.0.1:8085:8080"
     environment:
       - ASPNETCORE_URLS=http://+:8080
       - ASPNETCORE_ENVIRONMENT=Production

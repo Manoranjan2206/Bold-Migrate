@@ -51,10 +51,17 @@
           reportServiceUrl: "/api/preview/runs/" + encodeURIComponent(runId) + "/viewer",
           reportPath: reportPath,
           printMode: true,
+          // Authoritative completion signal from the viewer itself. Preferred over the DOM
+          // watcher below, which only exists because printMode can suppress this event.
           renderingComplete: function (args) {
             console.log("Bold Reports: Rendering complete", args);
             window.__renderStatus = 'complete';
+            window.__renderCompleteSource = 'renderingComplete';
             document.body.setAttribute('data-render-status', 'complete');
+          },
+          renderingBegin: function () {
+            // Proves the viewer actually started: distinguishes "slow report" from "never began".
+            window.__renderBegan = true;
           },
           reportError: function (args) {
             let msg = 'Rendering failed';
@@ -95,22 +102,49 @@
       }
     }
 
-    // printMode:true does not raise renderingComplete, so treat the report as rendered once the
-    // page view container (id prefix varies, suffix is stable) has content that stops changing.
+    // Completion detection.
+    //
+    // renderingComplete (https://help.boldreports.com/embedded-reporting/javascript-reporting/
+    // report-viewer/api-reference/events/#renderingcomplete) is the authoritative signal and is
+    // wired above — when it fires, we are done immediately and mark how we knew.
+    //
+    // It is not always raised with printMode:true, so this DOM-stability watcher is the fallback
+    // only. It is deliberately stricter than before: it waits for the page container to hold real
+    // content AND stop changing for several consecutive ticks, and it refuses to declare success
+    // while the viewer is still showing its loading indicator — which is how a report could be
+    // called "complete" before its data had actually arrived.
     (function () {
       var last = '', stable = 0;
+      var REQUIRED_STABLE_TICKS = 4;   // ~2s of no DOM change
+      var TICK_MS = 500;
+
+      function viewerStillBusy() {
+        // Bold Reports shows a waiting popup / spinner while a report is loading.
+        var busy = document.querySelector(
+          '.e-reportviewer-waitingpopup, .e-waitingpopup, .e-spinner-pane.e-spin-show, [id$="_waitingpopup"]'
+        );
+        if (!busy) return false;
+        var cs = window.getComputedStyle(busy);
+        return cs && cs.display !== 'none' && cs.visibility !== 'hidden';
+      }
+
       setInterval(function () {
         if (document.body.getAttribute('data-render-status') !== 'rendering') return;
-        var c = document.querySelector('[id$="_pageviewContainer"]');
+        if (viewerStillBusy()) { stable = 0; return; }
+
+        var c = document.querySelector('[id$="_pageviewContainer"], .e-reportviewer-pageview');
         var sig = c ? c.querySelectorAll('*').length + ':' + (c.innerText || '').trim().length : '';
-        var hasText = c && (c.innerText || '').trim().length > 20;
-        if (hasText && sig === last) { stable++; } else { stable = 0; }
+        var hasContent = c && (c.querySelectorAll('*').length > 5 || (c.innerText || '').trim().length > 20);
+
+        if (hasContent && sig === last) { stable++; } else { stable = 0; }
         last = sig;
-        if (stable >= 3) {
+
+        if (stable >= REQUIRED_STABLE_TICKS) {
           window.__renderStatus = 'complete';
+          window.__renderCompleteSource = 'dom-stable';
           document.body.setAttribute('data-render-status', 'complete');
         }
-      }, 500);
+      }, TICK_MS);
     })();
 
     window.addEventListener('error', function (event) {

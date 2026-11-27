@@ -8,11 +8,11 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700;800&family=Geist+Mono:wght@400;500;600&display=swap">
-  <link rel="stylesheet" href="/css/tokens.css?v=4.1">
-  <link rel="stylesheet" href="/css/app.css?v=4.1">
+  <link rel="stylesheet" href="/css/tokens.css?v=5.2">
+  <link rel="stylesheet" href="/css/app.css?v=5.2">
   <!-- Bold Reports Designer Dependencies Styles -->
-  <link href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.37.0/codemirror.min.css" rel="stylesheet" />
-  <link href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.37.0/addon/hint/show-hint.min.css" rel="stylesheet" />
+  <link href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.37.0/codemirror.min.css" rel="stylesheet" integrity="sha384-T6md2jYuokZmxpt4u/OxutZZs2NFnA/5oVdjrDkapBl/HHH3NfxhUMbFxEv5NTlh" crossorigin="anonymous" referrerpolicy="no-referrer" />
+  <link href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.37.0/addon/hint/show-hint.min.css" rel="stylesheet" integrity="sha384-v0iorViqQ20Pln37W34iDndUvqACK4iV/c59VYgs+n5WOAHoWSLULs41ILqFDLED" crossorigin="anonymous" referrerpolicy="no-referrer" />
   <link href="https://cdn.boldreports.com/15.1.17/content/v2.0/tailwind-light/bold.report-viewer.min.css" rel="stylesheet" />
   <link href="https://cdn.boldreports.com/15.1.17/content/v2.0/tailwind-light/bold.report-designer.min.css" rel="stylesheet" />
 </head>
@@ -270,8 +270,10 @@
           </div>
 
           <div style="display:flex;justify-content:flex-end;align-items:center;margin-top:16px;gap:10px;flex-wrap:wrap;">
-            <button type="button" class="btn2" id="btn-discover-primary" onclick="saveAndDiscoverCatalog()">Discover &amp; Assess Catalog →</button>
-            <button type="button" class="btn" id="btn-step1-next" style="display:none;" onclick="switchTab('assess')">Continue to Assess →</button>
+            <!-- Discover is the action that actually moves Step 1 forward, so it is the primary
+                 button; "Continue" was styled primary while Discover looked secondary. -->
+            <button type="button" class="btn" id="btn-discover-primary" onclick="saveAndDiscoverCatalog()">Discover &amp; Assess Catalog →</button>
+            <button type="button" class="btn2" id="btn-step1-next" style="display:none;" onclick="switchTab('assess')">Continue to Assess →</button>
           </div>
         </div>
 
@@ -340,12 +342,12 @@
           </div>
         </div>
 
-        <!-- 4 Compact KPI Tiles -->
-        <div class="tiles">
-          <div class="tile"><div class="n" id="dash-tile-found">0</div><div class="l">Reports Discovered</div></div>
-          <div class="tile"><div class="n is-ok" id="dash-tile-blocked">0</div><div class="l">Compatible (Ready)</div></div>
-          <div class="tile"><div class="n is-warn" id="dash-tile-review">0</div><div class="l">Needs Review</div></div>
-          <div class="tile"><div class="n is-ok" id="dash-tile-readiness">—</div><div class="l">Readiness Score</div></div>
+        <!-- One readiness sentence. The four KPI tiles that used to sit here repeated the same
+             three numbers as the filter chips below, from a different endpoint, which is how the
+             headline could read "9 reports / 100% ready" above an empty table. -->
+        <div class="assess-summary" id="assess-summary" role="status" aria-live="polite">
+          <span class="assess-summary-main" id="assess-summary-main">Loading assessment…</span>
+          <span class="assess-summary-sub" id="assess-summary-sub"></span>
         </div>
 
         <!-- Dependency Link Audit Output (Hidden until user clicks Verify Links) -->
@@ -364,12 +366,15 @@
               <button type="button" class="chip active" data-filter="all" onclick="setLibraryFilter('all', this)">All (<span id="lib-count-all">0</span>)</button>
               <button type="button" class="chip" data-filter="clean" onclick="setLibraryFilter('clean', this)">Compatible (<span id="lib-count-clean">0</span>)</button>
               <button type="button" class="chip" data-filter="review" onclick="setLibraryFilter('review', this)">Needs Review (<span id="lib-count-review">0</span>)</button>
+              <button type="button" class="chip" data-filter="blocked" onclick="setLibraryFilter('blocked', this)">Blocked (<span id="lib-count-blocked">0</span>)</button>
             </div>
             <button type="button" class="btn-ghost btn-sm" onclick="selectAllReady()"><span id="btn-select-clean-text">Select Compatible</span></button>
           </div>
           <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
             <input aria-label="Search reports" id="library-search" placeholder="Search reports or folders..." style="height:34px;width:230px;border:1px solid var(--br-border-strong);border-radius:9px;padding:0 12px;font-size:13px;" oninput="filterReportLibrary()">
-            <button type="button" class="btn2 btn-danger btn-sm" onclick="openDeleteReportsModal('selected')" title="Delete selected reports on Bold Reports server">Delete Selected (<span id="del-bar-count">0</span>)</button>
+            <!-- Destination bulk-delete lives in Settings & Utilities. It was removed from Step 2:
+                 deleting from the Bold Reports server has nothing to do with choosing a migration
+                 scope, and the red trash sat directly beside the "include this" checkbox. -->
           </div>
         </div>
 
@@ -396,7 +401,7 @@
           <span style="font-size:12.5px;color:var(--br-text-muted);">
             <strong id="lib-selected-count">0</strong> of <strong id="lib-total-count">0</strong> selected · <span id="lib-footer-status">No reports cataloged yet.</span>
           </span>
-          <button type="button" class="btn" onclick="startMigrationWithSelected()"><span id="btn-footer-migrate-text">Visual Verify (0) →</span></button>
+          <button type="button" class="btn" id="btn-footer-migrate" onclick="startMigrationWithSelected()"><span id="btn-footer-migrate-text">Visual Verify (0) →</span></button>
         </div>
       </div>
     </section>
@@ -457,7 +462,7 @@
         <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px;">
           <button type="button" class="btn2" onclick="switchTab('assess')">← Back</button>
           <span style="font-size:12.5px;color:var(--br-text-muted);" id="val-footer-status">Ready to validate or proceed to upload.</span>
-          <button type="button" class="btn" onclick="switchTab('publish')">Continue to Publish &amp; Cutover →</button>
+          <button type="button" class="btn" id="btn-validation-continue" onclick="switchTab('publish')">Continue to Publish &amp; Cutover →</button>
         </div>
       </div>
     </section>
@@ -573,6 +578,21 @@
                     <tbody id="server-uploaded-reports-tbody"><tr><td colspan="4" style="text-align:center;color:var(--br-text-muted);padding:16px;">Uploaded reports appear here.</td></tr></tbody>
                   </table>
                 </div>
+              </div>
+            </div>
+
+            <!-- Reports that did NOT reach the server, each with the reason and the fix.
+                 Previously these just vanished from the count with no explanation. -->
+            <div id="upload-not-uploaded-card" style="display:none;margin-top:14px;">
+              <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
+                <strong style="font-size:13px;color:var(--br-warning-text);">Not uploaded — <span id="upload-not-uploaded-count">0</span> report(s)</strong>
+                <button type="button" class="btn-ghost btn-sm" onclick="loadUploadOutcome()">↻ Re-check</button>
+              </div>
+              <div class="table-scroll" style="max-height:220px;background:var(--br-surface);border:1px solid var(--br-warning-border);border-radius:10px;">
+                <table>
+                  <thead><tr><th>Report</th><th>State</th><th>Why</th><th>What to do</th></tr></thead>
+                  <tbody id="upload-not-uploaded-tbody"></tbody>
+                </table>
               </div>
             </div>
           </div>
@@ -932,6 +952,9 @@
             <button type="button" class="chip active" id="cmp-mode-swipe" onclick="setCompareMode('swipe')">◫ Swipe Slider</button>
             <button type="button" class="chip" id="cmp-mode-side" onclick="setCompareMode('side')">▯▯ Side-by-Side</button>
             <button type="button" class="chip" id="cmp-mode-diff" onclick="setCompareMode('diff')">◈ Pixel Diff</button>
+            <!-- A pixel diff cannot separate "shifted a few pixels" from "different rows came
+                 back". This mode exports both sides to CSV and diffs the records. -->
+            <button type="button" class="chip" id="cmp-mode-data" onclick="setCompareMode('data')">▤ Data Diff</button>
           </div>
           <label class="btn2 btn-sm" style="cursor:pointer;">📁 Reference PNG<input type="file" id="cmp-ref-file" accept="image/*" style="display:none;" onchange="loadCompareReferenceFile(event)"></label>
           <button type="button" class="btn2 btn-sm" onclick="retryCaptureSourceSnapshot()">↻ SSRS Snapshot</button>
@@ -967,6 +990,13 @@
             <label style="font-size:12px;display:inline-flex;align-items:center;gap:6px;">Channel tolerance: <input type="number" id="cmp-tolerance" value="8" min="0" max="50" style="width:58px;padding:2px 6px;border:1px solid var(--br-border-strong);border-radius:4px;" onchange="recomputeVisualPixelDiff()"></label>
           </div>
           <div class="cmp-stage" style="padding:8px;text-align:center;"><canvas id="cmp-diff-canvas" style="max-width:100%;height:auto;border-radius:4px;"></canvas></div>
+        </div>
+        <div id="cmp-pane-data" style="display:none;">
+          <div id="cmp-data-body" role="status" aria-live="polite">
+            <div style="padding:24px;text-align:center;color:var(--br-text-muted);font-size:13px;">
+              Select <strong>Data Diff</strong> to compare the records behind both renders.
+            </div>
+          </div>
         </div>
       </div>
       <div class="modal-footer-end"><button type="button" class="btn2" onclick="closeVisualCompareModal()">Close</button></div>
@@ -1020,26 +1050,30 @@
   </div>
 
   <!-- Bold Reports Designer Dependencies Scripts (Official CDN 15.1.17) -->
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/jquery/3.6.0/jquery.min.js"></script>
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.37.0/codemirror.min.js"></script>
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.37.0/addon/hint/show-hint.min.js"></script>
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.37.0/addon/hint/sql-hint.min.js"></script>
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.37.0/mode/sql/sql.min.js"></script>
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.37.0/mode/vb/vb.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jquery/3.6.0/jquery.min.js" integrity="sha384-vtXRMe3mGCbOeY7l30aIg8H9p3GdeSe4IFlP6G8JMa7o7lXvnz3GFKzPxzJdPfGK" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.37.0/codemirror.min.js" integrity="sha384-ClcLhiYSnERAsnE48RhjSm10+HnLGh5Eb+ONE7BXC8ga91621bf9RUyy6A7xmwlg" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.37.0/addon/hint/show-hint.min.js" integrity="sha384-ip2pQ6pVLvuZeEJJzQl2CrVdXR4kTfsTVYmSWoQOEM12fXQAquOEPYK+zbeR+rF4" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.37.0/addon/hint/sql-hint.min.js" integrity="sha384-9IA1ZxIkRD5LfDifDd9dKJyuzDxZYmhxhRJmTvXo9GqNzt6Yg0ODDBWP/ocUWk0G" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.37.0/mode/sql/sql.min.js" integrity="sha384-kSdOHajQIseUIsI5PnpHF6zDpPg2fUBFzaITy4SaNU6EIIvsga1bieBhNj7hlSA0" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.37.0/mode/vb/vb.min.js" integrity="sha384-NgdrR5dwF/EGFoqRPvsBrd8DW6o9qQk110vlAUYt6trL7MYkkXS6lI8AviFoQBpi" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
+  <!-- Bold Reports viewer/designer are intentionally left without SRI: the vendor CDN is not
+       guaranteed byte-stable across edges, and a hash mismatch would silently disable Step 3
+       validation entirely. Vendor these files locally (which also fixes air-gapped installs)
+       before adding integrity hashes. Version must stay in step with BoldMigrate.Api.csproj. -->
   <script src="https://cdn.boldreports.com/15.1.17/scripts/v2.0/common/bold.reports.common.min.js"></script>
   <script src="https://cdn.boldreports.com/15.1.17/scripts/v2.0/common/bold.reports.widgets.min.js"></script>
   <script src="https://cdn.boldreports.com/15.1.17/scripts/v2.0/bold.report-viewer.min.js"></script>
   <script src="https://cdn.boldreports.com/15.1.17/scripts/v2.0/bold.report-designer.min.js"></script>
 
-  <script src="/js/api.js?v=4.1"></script>
-  <script src="/js/app.js?v=4.1"></script>
-  <script src="/js/modals.js?v=4.1"></script>
-  <script src="/js/connections.js?v=4.1"></script>
-  <script src="/js/library.js?v=4.1"></script>
-  <script src="/js/validation.js?v=4.1"></script>
-  <script src="/js/migration.js?v=4.1"></script>
-  <script src="/js/tools.js?v=4.1"></script>
-  <script src="/js/bolddelete.js?v=9"></script>
+  <script src="/js/api.js?v=5.2"></script>
+  <script src="/js/app.js?v=5.2"></script>
+  <script src="/js/modals.js?v=5.2"></script>
+  <script src="/js/connections.js?v=5.2"></script>
+  <script src="/js/library.js?v=5.2"></script>
+  <script src="/js/validation.js?v=5.2"></script>
+  <script src="/js/migration.js?v=5.2"></script>
+  <script src="/js/tools.js?v=5.2"></script>
+  <script src="/js/bolddelete.js?v=5.2"></script>
 </body>
 
 </html>

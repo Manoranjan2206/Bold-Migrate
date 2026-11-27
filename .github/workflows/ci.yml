@@ -1,0 +1,129 @@
+name: CI
+
+# Nothing ran the test suite automatically before this: the Dockerfile copies the test projects
+# but never invokes them, so 24k lines of production code rested on a suite a developer had to
+# remember to run. Build + test on every push and pull request.
+on:
+  push:
+    branches: ["main"]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-and-test:
+    name: Build & test (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        # Windows is the primary operator platform (DPAPI vault, Windows Integrated auth).
+        # Linux is what the Docker image runs, where the vault falls back to AES-GCM — the
+        # combination is what shakes out platform-specific assumptions in the credential store.
+        os: [windows-latest, ubuntu-latest]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "10.0.x"
+
+      - name: Restore
+        run: dotnet restore BoldMigrate.slnx
+
+      - name: Build
+        run: dotnet build BoldMigrate.slnx --configuration Release --no-restore
+
+      - name: Test
+        run: >
+          dotnet test BoldMigrate.slnx
+          --configuration Release
+          --no-build
+          --logger "trx;LogFileName=test-results.trx"
+          --collect:"XPlat Code Coverage"
+          --results-directory ./TestResults
+
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-results-${{ matrix.os }}
+          path: ./TestResults
+          retention-days: 7
+
+  invariants:
+    name: Repository invariants
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "10.0.x"
+
+      # AGENTS.md invariant 8: every compatibility rule must carry a KB article URL. The loader
+      # throws at runtime if one does not, which would take the whole app down on startup.
+      - name: Every compatibility rule has an article URL
+        run: |
+          python3 - <<'PY'
+          import json, sys
+          with open("data/compatibility-rules.json", encoding="utf-8") as fh:
+              doc = json.load(fh)
+          rules = doc.get("rules", doc if isinstance(doc, list) else [])
+          missing = [r.get("id", "<no id>") for r in rules if not str(r.get("article", "")).strip()]
+          if missing:
+              print("Rules missing a non-empty 'article' URL:", ", ".join(missing))
+              sys.exit(1)
+          print(f"OK: {len(rules)} rules, all with article URLs.")
+          PY
+
+      # AGENTS.md invariant 5: the BoldReports NuGet version and the CDN script/CSS version must
+      # match, or the viewer and designer break in ways that only show up at runtime.
+      - name: Bold Reports NuGet and CDN versions match
+        run: |
+          python3 - <<'PY'
+          import re, sys, pathlib
+
+          csproj = pathlib.Path("src/BoldMigrate.Api/BoldMigrate.Api.csproj").read_text(encoding="utf-8")
+          nuget = set(re.findall(r'Include="BoldReports\.[^"]+"\s+Version="([^"]+)"', csproj))
+          if len(nuget) != 1:
+              print("Expected exactly one BoldReports NuGet version, found:", nuget or "none")
+              sys.exit(1)
+          version = nuget.pop()
+
+          failed = False
+          for name in ("src/BoldMigrate.Api/wwwroot/index.html",
+                       "src/BoldMigrate.Api/wwwroot/preview-runner.html"):
+              html = pathlib.Path(name).read_text(encoding="utf-8")
+              cdn = set(re.findall(r'cdn\.boldreports\.com/([0-9][^/]*)/', html))
+              bad = {v for v in cdn if v != version}
+              if bad:
+                  print(f"{name}: CDN version(s) {sorted(bad)} do not match NuGet {version}")
+                  failed = True
+              elif not cdn:
+                  print(f"{name}: no Bold Reports CDN references found")
+              else:
+                  print(f"{name}: OK ({version})")
+
+          sys.exit(1 if failed else 0)
+          PY
+
+      # Inline event handlers cannot be protected by escapeHtml: the browser HTML-decodes an
+      # attribute before the JS parser runs, which is how RDL-controlled names became a DOM-XSS.
+      # Keep the dependency-verify table, which renders untrusted report metadata, handler-free.
+      - name: No inline handlers in the dependency-verify renderer
+        run: |
+          if grep -nE 'onclick="[^"]*\$\{' src/BoldMigrate.Api/wwwroot/js/library.js; then
+            echo "library.js must build these buttons from data-* attributes, not inline onclick."
+            exit 1
+          fi
+          echo "OK: no interpolated inline handlers in library.js"

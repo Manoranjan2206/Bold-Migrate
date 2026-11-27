@@ -568,6 +568,18 @@ function resetLocalRunState() {
   dataSourcesCache = [];
   selectedValidationReportId = null;
   latestValidation = null;
+  // These were previously left behind on "New Run", so a fresh run could still show the old
+  // run's validation selection, paused flag and loaded-state.
+  selectedReportsInitialized = false;
+  libraryLoaded = false;
+  libraryLoadError = null;
+  selectedValReportIds = new Set();
+  validationSummaryCache = null;
+  isPaused = false;
+  if (typeof valPollInterval !== "undefined" && valPollInterval) {
+    clearInterval(valPollInterval);
+    valPollInterval = null;
+  }
 }
 
 async function applyFormConnectionsToCurrentRun() {
@@ -633,33 +645,44 @@ async function saveAndDiscoverCatalog(forceRescan = false) {
     // 1. Trigger Fetch and poll until discovery populates items (up to ~18s)
     await Api.fetchEstate(currentRun.id);
 
-    for (let i = 0; i < 30; i++) {
-      await new Promise(r => setTimeout(r, 600));
-      const poll = await Api.pollState(currentRun.id);
-      if (poll) {
-        updateJourneyBadges(poll);
-        const pct = Math.min(55, 15 + Math.round((i / 30) * 40));
-        updateActivity("discover", `Discovered ${poll.itemsTotal || 0} catalog items (${poll.reportsTotal || 0} reports)...`, poll.itemsTotal > 0 ? 55 : pct);
-        if (poll.itemsTotal > 0 && poll.status !== "Fetching") {
-          break;
-        }
+    // Poll to a terminal state rather than for a fixed number of ticks: a large estate takes
+    // longer than the old ~18s budget, and falling through used to look like success.
+    const discovery = await pollUntil(
+      p => (p.itemsTotal || 0) > 0 && p.status !== "Fetching",
+      {
+        intervalMs: 600,
+        timeoutMs: 300000,
+        onTick: (p, progress) => updateActivity(
+          "discover",
+          `Discovered ${p.itemsTotal || 0} catalog items (${p.reportsTotal || 0} reports)...`,
+          Math.min(55, 15 + Math.round(progress * 40))
+        )
       }
+    );
+
+    if (discovery.timedOut) {
+      showToast("Discovery is taking longer than expected and is still running on the server. Re-open Step 2 shortly to see the catalog.");
+      return;
     }
 
     // 2. Trigger Assessment check and poll until status reaches Analysed
     updateActivity("discover", "Evaluating RDL schemas, parameters, and compatibility rules...", 65, "Running Compatibility Assessment");
     await Api.checkEstate(currentRun.id);
-    for (let i = 0; i < 20; i++) {
-      await new Promise(r => setTimeout(r, 500));
-      const poll = await Api.pollState(currentRun.id);
-      if (poll) {
-        updateJourneyBadges(poll);
-        if (poll.status === "Analysed") {
-          updateActivity("discover", `Analysed ${poll.reportsTotal || 0} reports.`, 90);
-          break;
-        }
-      }
+
+    const assessment = await pollUntil(p => p.status === "Analysed", {
+      intervalMs: 500,
+      timeoutMs: 300000,
+      onTick: p => updateActivity("discover", `Analysing ${p.reportsTotal || 0} reports...`, 80)
+    });
+
+    if (assessment.timedOut) {
+      await refreshConnectionsState();
+      await refreshLibraryState();
+      showToast("Compatibility assessment is still running on the server. The report list will fill in as it finishes.");
+      return;
     }
+
+    updateActivity("discover", `Analysed ${assessment.poll?.reportsTotal || 0} reports.`, 90);
 
     // 3. Refresh caches and stay on Step 1 so the user can enter discovered data source credentials
     await refreshConnectionsState();

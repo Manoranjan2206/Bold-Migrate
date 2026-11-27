@@ -89,4 +89,59 @@ public class ReportStateMachineTests
         Assert.Equal(ReportState.Excluded, report.State);
         Assert.Equal("Excluded by user decision", report.ExcludedReason);
     }
+
+    /// <summary>
+    /// Regression: de-selecting a report in Step 2 and re-selecting it used to come back as
+    /// Analysed, silently throwing away an approval and forcing the operator to validate again.
+    /// </summary>
+    [Theory]
+    [InlineData(ReportState.Approved)]
+    [InlineData(ReportState.AutoPassed)]
+    [InlineData(ReportState.AwaitingReview)]
+    [InlineData(ReportState.Uploaded)]
+    public void DeselectThenReselect_RestoresThePreviousState(ReportState original)
+    {
+        var report = new ReportRecord { CatalogItemId = Guid.NewGuid(), State = original };
+
+        ReportStateMachine.ExcludeForDeselect(report);
+        Assert.Equal(ReportState.Excluded, report.State);
+
+        var restored = ReportStateMachine.RestoreFromDeselect(report);
+
+        Assert.Equal(original, restored);
+        Assert.Equal(original, report.State);
+        Assert.Null(report.ExcludedReason);
+    }
+
+    [Fact]
+    public void RestoreFromDeselect_WithoutMarker_FallsBackToAnalysed()
+    {
+        var report = new ReportRecord { CatalogItemId = Guid.NewGuid(), State = ReportState.Analysed };
+        ReportStateMachine.Transition(report, ReportState.Excluded, "Blocked by compatibility rule");
+
+        var restored = ReportStateMachine.RestoreFromDeselect(report);
+
+        Assert.Equal(ReportState.Analysed, restored);
+    }
+
+    [Fact]
+    public void TryTransition_ReturnsFalseInsteadOfThrowingOnIllegalMove()
+    {
+        var report = new ReportRecord { CatalogItemId = Guid.NewGuid(), State = ReportState.Discovered };
+
+        Assert.False(ReportStateMachine.TryTransition(report, ReportState.Uploaded));
+        Assert.Equal(ReportState.Discovered, report.State);
+
+        Assert.True(ReportStateMachine.TryTransition(report, ReportState.Analysed));
+        Assert.Equal(ReportState.Analysed, report.State);
+    }
+
+    [Fact]
+    public void TryTransition_IsIdempotentForTheCurrentState()
+    {
+        var report = new ReportRecord { CatalogItemId = Guid.NewGuid(), State = ReportState.Approved };
+
+        Assert.True(ReportStateMachine.TryTransition(report, ReportState.Approved));
+        Assert.Equal(ReportState.Approved, report.State);
+    }
 }

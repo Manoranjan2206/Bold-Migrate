@@ -44,7 +44,7 @@ Before concluding any code change, run `dotnet test` and confirm zero failures a
 - **Skills (`.agents/skills/`):**
   - `boldmigrate-agent-orchestration` — Master orchestration playbook for coordinating specialist agents across backend, frontend, security/QA, and docs.
   - `boldmigrate-backend-pipeline` — Extending adapters, transform rules, dependency verifier, upload policies, Playwright validation, and SQLite schema.
-  - `boldmigrate-frontend-ui` — Extending the 6-step SPA, `Api.request()` CSRF client, modals, visual diff, and Bold Reports Viewer/Designer widgets.
+  - `boldmigrate-frontend-ui` — Extending the 4-step SPA, `Api.request()` CSRF client, modals, visual diff, and Bold Reports Viewer/Designer widgets.
   - `boldmigrate-security-and-diagnostics` — Security middleware, redaction, path/redirect hardening, logging, health checks, and support bundles.
   - `boldmigrate-testing-and-release` — xUnit + `WebApplicationFactory` testing, compatibility rules validation, and multi-stage Playwright Docker builds.
 - **Master & Specialist Agent Profiles (`.agents/agents/`):**

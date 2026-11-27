@@ -100,7 +100,7 @@ public class ValidationEngine
 
         if (!stagedExists && !destinationUploaded)
         {
-            reportRecord.State = ReportState.AwaitingReview;
+            ReportStateMachine.TryTransition(reportRecord, ReportState.AwaitingReview);
             await _store.UpdateReportRecordAsync(reportRecord, ct);
             _logger.Log(
                 Microsoft.Extensions.Logging.LogLevel.Warning,
@@ -114,7 +114,7 @@ public class ValidationEngine
 
         await RunFontCalibrationAsync(runId, source, ct);
 
-        reportRecord.State = ReportState.Validating;
+        ReportStateMachine.TryTransition(reportRecord, ReportState.Validating);
         await _store.UpdateReportRecordAsync(reportRecord, ct);
 
         var paramDict = new Dictionary<string, string>();
@@ -129,7 +129,7 @@ public class ValidationEngine
         }
         catch (Exception ex)
         {
-            reportRecord.State = ReportState.AwaitingReview;
+            ReportStateMachine.TryTransition(reportRecord, ReportState.AwaitingReview);
             await _store.UpdateReportRecordAsync(reportRecord, ct);
             _logger.Log(
                 Microsoft.Extensions.Logging.LogLevel.Warning,
@@ -177,7 +177,7 @@ public class ValidationEngine
         {
             // Fail closed: an unrenderable report copy is routed to review queue,
             // never an automatic pass.
-            reportRecord.State = ReportState.AwaitingReview;
+            ReportStateMachine.TryTransition(reportRecord, ReportState.AwaitingReview);
             await _store.UpdateReportRecordAsync(reportRecord, ct);
             _logger.Log(
                 Microsoft.Extensions.Logging.LogLevel.Warning,
@@ -222,7 +222,7 @@ public class ValidationEngine
 
         if (!passedData)
         {
-            reportRecord.State = ReportState.AwaitingReview;
+            ReportStateMachine.TryTransition(reportRecord, ReportState.AwaitingReview);
             _logger.Log(
                 Microsoft.Extensions.Logging.LogLevel.Warning,
                 "VALD-RESULT",
@@ -235,7 +235,7 @@ public class ValidationEngine
         }
         else if (!pagesComparable)
         {
-            reportRecord.State = ReportState.AwaitingReview;
+            ReportStateMachine.TryTransition(reportRecord, ReportState.AwaitingReview);
             _logger.Log(
                 Microsoft.Extensions.Logging.LogLevel.Warning,
                 "VALD-RESULT",
@@ -247,7 +247,7 @@ public class ValidationEngine
         }
         else if (!pagesMatch)
         {
-            reportRecord.State = ReportState.AwaitingReview;
+            ReportStateMachine.TryTransition(reportRecord, ReportState.AwaitingReview);
             _logger.Log(
                 Microsoft.Extensions.Logging.LogLevel.Warning,
                 "VALD-RESULT",
@@ -259,7 +259,7 @@ public class ValidationEngine
         }
         else
         {
-            reportRecord.State = ReportState.AutoPassed;
+            ReportStateMachine.TryTransition(reportRecord, ReportState.AutoPassed);
             _logger.Log(
                 Microsoft.Extensions.Logging.LogLevel.Information,
                 "VALD-RESULT",

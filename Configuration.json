@@ -1,4 +1,5 @@
 {
+  "_comment": "TEMPLATE ONLY — this file is committed and must stay empty. Copy it to Configuration.local.json (gitignored) and fill in credentials there, or supply them via environment variables. Never commit a filled-in copy.",
   "SourceRsUri": "http://localhost/ReportServer/ReportService2010.asmx?wsdl",
   "FolderPath": "C:\\SSRS_Export",
   "BaseUrl": "http://localhost:8090",

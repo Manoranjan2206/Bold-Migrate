@@ -130,6 +130,13 @@ public class MigrationSettings
     public int ValidationSampleRowLimit { get; set; } = 10000;
 
     /// <summary>
+    /// How long a single staged report may take to render during Step 3 validation.
+    /// Raised from the old hard-coded 30s: real reports with live queries routinely needed longer
+    /// and were reported as timeouts rather than as slow.
+    /// </summary>
+    public int ValidationRenderTimeoutSeconds { get; set; } = 60;
+
+    /// <summary>
     /// Validation.MaxParallel: Concurrent renders (1 to 8). Deliberately lower than upload.
     /// Default: 2
     /// </summary>
@@ -190,6 +197,22 @@ public class MigrationSettings
     public string[] AllowedLocalFolderRoots { get; set; } = [];
 
     /// <summary>
+    /// Optional allowlist of hosts Bold Migrate may make server-side requests to (source SSRS/PBIRS
+    /// and destination Bold Reports servers). Empty = any host except link-local / cloud metadata
+    /// endpoints, which <see cref="Common.OutboundUrlGuard"/> always blocks.
+    /// </summary>
+    public string[] AllowedSourceHosts { get; set; } = [];
+
+    /// <summary>
+    /// Origin of the Bold Reports destination server the operator is currently connected to.
+    /// Runtime state rather than configuration: it is set when a destination is connected and
+    /// hydrated at startup from the active run. SecurityMiddleware needs it to widen the CSP so
+    /// the embedded Viewer/Designer can reach that server, which `connect-src 'self'` would block.
+    /// </summary>
+    [JsonIgnore]
+    public string? DestinationServerUrl { get; set; }
+
+    /// <summary>
     /// Optional static operator access token. When set, all /api requests require Bearer/session auth.
     /// </summary>
     [JsonIgnore]
@@ -222,6 +245,7 @@ public class MigrationSettings
         ValidationVisualSimilarityThreshold = Math.Clamp(ValidationVisualSimilarityThreshold, 80.0m, 100.0m);
         ValidationPixelTolerance = Math.Clamp(ValidationPixelTolerance, 0, 10);
         ValidationSampleRowLimit = Math.Clamp(ValidationSampleRowLimit, 100, 1_000_000);
+        ValidationRenderTimeoutSeconds = Math.Clamp(ValidationRenderTimeoutSeconds, 15, 600);
         ValidationMaxParallel = Math.Clamp(ValidationMaxParallel, 1, 8);
         LoggingRetentionDays = Math.Clamp(LoggingRetentionDays, 7, 365);
 

@@ -2,6 +2,7 @@ using System.Net;
 using System.Text;
 using System.Xml.Linq;
 using BoldMigrate.Core;
+using BoldMigrate.Core.Common;
 using BoldMigrate.Core.Dto;
 using BoldMigrate.Core.Enums;
 using BoldMigrate.Core.Interfaces;
@@ -149,7 +150,7 @@ public class SoapSourceAdapter : ISourceCatalog, IDisposable
         }
 
         var xml = await res.Content.ReadAsStringAsync(ct);
-        var doc = XDocument.Parse(xml);
+        var doc = SafeXml.Parse(xml);
         XNamespace ns = "http://schemas.microsoft.com/sqlserver/reporting/2010/03/01/ReportServer";
 
         foreach (var elem in doc.Descendants(ns + "CatalogItem"))
@@ -207,7 +208,7 @@ public class SoapSourceAdapter : ISourceCatalog, IDisposable
         res.EnsureSuccessStatusCode();
 
         var xml = await res.Content.ReadAsStringAsync(ct);
-        var doc = XDocument.Parse(xml);
+        var doc = SafeXml.Parse(xml);
         XNamespace ns = "http://schemas.microsoft.com/sqlserver/reporting/2010/03/01/ReportServer";
 
         var defBase64 = doc.Descendants(ns + "Definition").FirstOrDefault()?.Value;

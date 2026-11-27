@@ -8,6 +8,13 @@ namespace BoldMigrate.Infrastructure.SourceAdapters;
 
 public static class SourceAdapterFactory
 {
+    /// <summary>
+    /// Optional operator allowlist of permitted source hosts, set once from configuration at
+    /// startup. Empty means "any host except the destinations OutboundUrlGuard always blocks".
+    /// </summary>
+    public static IReadOnlyCollection<string> AllowedHosts { get; set; } = [];
+
+
     public static async Task<(ISourceCatalog Adapter, SourceApi DetectedApi)> CreateAndProbeAsync(
         string baseUrl,
         NetworkCredential? credential = null,
@@ -25,6 +32,15 @@ public static class SourceAdapterFactory
         CancellationToken ct = default)
     {
         var resolvedUrl = HostResolver.Resolve(baseUrl);
+
+        // Guard before any socket is opened: with no explicit credential the adapters fall back to
+        // the process's Windows identity, so an unchecked URL leaks it to whatever host was named.
+        var guard = OutboundUrlGuard.Check(resolvedUrl, AllowedHosts);
+        if (!guard.Allowed)
+        {
+            throw new InvalidOperationException($"Source server URL rejected: {guard.Reason}");
+        }
+
         var restAdapter = new RestV2SourceAdapter(resolvedUrl, credential);
         var soapAdapter = new SoapSourceAdapter(resolvedUrl, credential);
 
@@ -73,6 +89,13 @@ public static class SourceAdapterFactory
     public static ISourceCatalog Create(string baseUrl, SourceApi api, NetworkCredential? credential = null)
     {
         var resolvedUrl = HostResolver.Resolve(baseUrl);
+
+        var guard = OutboundUrlGuard.Check(resolvedUrl, AllowedHosts);
+        if (!guard.Allowed)
+        {
+            throw new InvalidOperationException($"Source server URL rejected: {guard.Reason}");
+        }
+
         return api switch
         {
             SourceApi.Soap2010 => new SoapSourceAdapter(resolvedUrl, credential),

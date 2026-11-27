@@ -201,8 +201,10 @@ function renderValidationEvidenceGrid() {
   }
 
   const buildValActionsHtml = (r) => {
+    // Failed renders now carry diagnostic evidence, so Compare is offered for them too: that is
+    // where the operator sees the error screen beside the SSRS render and can run the data diff.
     const primaryBtn = r.screenshotUrl
-      ? `<button type="button" class="btn2 btn-sm" data-val-action="compare" data-report-id="${r.reportId}" title="Compare Source SSRS vs Bold Reports">◫ Compare</button>`
+      ? `<button type="button" class="btn2 btn-sm" data-val-action="compare" data-report-id="${escapeHtml(r.reportId)}" title="${r.screenshotIsFailureEvidence ? "See what the viewer showed, beside the SSRS render" : "Compare Source SSRS vs Bold Reports"}">◫ Compare</button>`
       : `<button type="button" class="btn2 btn-sm" data-val-action="viewer" data-report-id="${r.reportId}" title="Preview in interactive local viewer">👁 Preview</button>`;
     const showLogItem = r.status === "Failed" || r.status === "DataSourceOffline";
     return `
@@ -237,8 +239,9 @@ function renderValidationEvidenceGrid() {
           <tbody>
             ${filtered.map(r => {
               const isSel = selectedValReportIds.has(r.reportId);
+              const evidence = r.screenshotIsFailureEvidence === true;
               const thumbCell = r.screenshotUrl
-                ? `<img src="${escapeHtml(r.screenshotUrl)}?t=${valRenderVersion}" alt="${escapeHtml(r.name)}" data-val-action="zoom" data-report-id="${r.reportId}" style="width:68px;height:42px;object-fit:cover;object-position:top;border-radius:6px;border:1px solid var(--br-border);cursor:pointer;" title="Click to expand snapshot">`
+                ? `<img src="${escapeHtml(r.screenshotUrl)}?t=${valRenderVersion}" alt="${evidence ? "Failure evidence for " : ""}${escapeHtml(r.name)}" data-val-action="zoom" data-report-id="${escapeHtml(r.reportId)}" style="width:68px;height:42px;object-fit:cover;object-position:top;border-radius:6px;border:1px solid ${evidence ? "var(--br-danger-border)" : "var(--br-border)"};cursor:pointer;" title="${evidence ? "What the viewer showed when the render failed — click to expand" : "Click to expand snapshot"}">`
                 : `<span style="font-size:11px;color:var(--br-text-subtle);">—</span>`;
               const subNote = r.status === "DataSourceOffline"
                 ? `<div style="font-size:11.5px;color:var(--br-info-text);margin-top:3px;">RDL valid (DB offline locally)</div>`
@@ -273,9 +276,12 @@ function renderValidationEvidenceGrid() {
 
     let thumbHtml = "";
     if (r.screenshotUrl) {
+      // A screenshot captured from a FAILED render must never read as a good preview.
+      const evidence = r.screenshotIsFailureEvidence === true;
       thumbHtml = `
-        <div style="height:150px;width:100%;background:var(--br-surface-alt);border-bottom:1px solid var(--br-border);position:relative;overflow:hidden;cursor:pointer;" data-val-action="zoom" data-report-id="${r.reportId}">
-          <img src="${escapeHtml(r.screenshotUrl)}?t=${valRenderVersion}" alt="${escapeHtml(r.name)}" style="width:100%;height:100%;object-fit:cover;object-position:top;" loading="lazy">
+        <div style="height:150px;width:100%;background:var(--br-surface-alt);border-bottom:1px solid ${evidence ? "var(--br-danger-border)" : "var(--br-border)"};position:relative;overflow:hidden;cursor:pointer;" data-val-action="zoom" data-report-id="${escapeHtml(r.reportId)}">
+          <img src="${escapeHtml(r.screenshotUrl)}?t=${valRenderVersion}" alt="${evidence ? "Failure evidence for " : ""}${escapeHtml(r.name)}" style="width:100%;height:100%;object-fit:cover;object-position:top;" loading="lazy">
+          ${evidence ? `<div style="position:absolute;top:6px;left:6px;background:var(--br-danger);color:#fff;font-size:10.5px;font-weight:700;padding:2px 6px;border-radius:4px;">What the viewer showed</div>` : ""}
           <div style="position:absolute;bottom:6px;right:6px;background:rgba(15,23,42,0.7);color:var(--br-text-inverse);font-size:10.5px;padding:2px 6px;border-radius:4px;">Expand</div>
         </div>`;
     } else if (r.status === "DataSourceOffline") {
@@ -416,15 +422,25 @@ async function startAutomatedRenderValidation(selectedOnly = true) {
         setValidationProgressBanner(true, "Automated Playwright Render Validation in progress...",
           `Completed ${done} of ${subset.length} reports · Passed: ${summary.passed} · Offline: ${summary.dataSourceOffline || 0} · Render Errors: ${summary.failed}`, pct);
 
-        // Wait at least 2 poll cycles so re-runs on already-validated reports complete before closing timer
-        if ((notDone === 0 && attempts >= 2) || attempts >= 40) {
+        // Wait at least 2 poll cycles so re-runs on already-validated reports complete before
+        // closing the timer. The old loop also stopped at 40 ticks (~80s) and announced
+        // "Validation finished!" even with reports still unvalidated — report that honestly.
+        const complete = notDone === 0 && attempts >= 2;
+        const gaveUp = attempts >= 300; // ~10 minutes
+
+        if (complete || gaveUp) {
           clearInterval(valPollInterval);
           valPollInterval = null;
           endActivity("val-batch");
           setValidationProgressBanner(false);
           setButtonLoading(btnAll, false);
           updateValSelectedCountUI();
-          showToast(`Validation finished! Passed: ${summary.passed}, Render Errors: ${summary.failed}, Needs Params: ${summary.needsManualCheck}`);
+
+          if (complete) {
+            showToast(`Validation finished. Passed: ${summary.passed}, Render Errors: ${summary.failed}, Needs Params: ${summary.needsManualCheck}`);
+          } else {
+            showToast(`Still validating on the server: ${done} of ${subset.length} done. Reopen this step to see the rest.`, true);
+          }
         }
       }
     }, 2000);
