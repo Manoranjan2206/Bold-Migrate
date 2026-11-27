@@ -13,6 +13,8 @@ using BoldMigrate.Engine.Validation;
 using BoldMigrate.Infrastructure.Credentials;
 using BoldMigrate.Infrastructure.Data;
 using BoldMigrate.Infrastructure.Staging;
+using Microsoft.AspNetCore.Hosting.Server;
+using Microsoft.AspNetCore.Hosting.Server.Features;
 using Microsoft.EntityFrameworkCore;
 
 var contentRoot = AppContext.BaseDirectory;
@@ -48,6 +50,10 @@ builder.Configuration.GetSection("BoldMigrate").Bind(settings);
 BoldMigrate.Api.Controllers.SettingsController.LoadPersistedSettings(settings);
 settings.ValidateAndNormalize();
 builder.Services.AddSingleton(settings);
+
+// Share the operator's source-host allowlist with the static adapter factory so every
+// server-side request to a user-supplied URL is guarded before a socket is opened.
+BoldMigrate.Infrastructure.SourceAdapters.SourceAdapterFactory.AllowedHosts = settings.AllowedSourceHosts;
 
 // Database (SQLite) — prefer configured path or container /app/data volume
 var dataDir = BoldMigrate.Api.Controllers.SettingsController.ResolveDataDirectory(settings);
@@ -299,6 +305,49 @@ app.MapControllers();
 
 // Single service fallback: Any unmapped non-API GET request loads index.html
 app.MapFallbackToFile("index.html");
+
+// Secure-by-default bind guard. Bold Migrate has no login UI: every /api/* route is open unless
+// BoldMigrate:ApiAccessToken is set. Binding a tokenless instance to a non-loopback address would
+// hand anyone on the network the ability to read staged RDL, drive migrations and bulk-delete
+// reports on the destination server, so refuse to start instead.
+app.Lifetime.ApplicationStarted.Register(() =>
+{
+    if (!string.IsNullOrWhiteSpace(settings.ApiAccessToken)) return;
+
+    var addresses = app.Services.GetService<IServer>()?.Features.Get<IServerAddressesFeature>()?.Addresses;
+    if (addresses == null) return;
+
+    var exposed = addresses
+        .Select(a => Uri.TryCreate(a, UriKind.Absolute, out var u) ? u.Host : null)
+        .Where(h => !string.IsNullOrWhiteSpace(h))
+        .Where(h => !(h!.Equals("localhost", StringComparison.OrdinalIgnoreCase)
+                      || h == "127.0.0.1"
+                      || h == "::1"
+                      || h == "[::1]"))
+        .ToList();
+
+    if (exposed.Count == 0) return;
+
+    // In a container the bind is 0.0.0.0 by design; docker-compose publishes it on loopback only.
+    var inContainer = Environment.GetEnvironmentVariable("DOTNET_RUNNING_IN_CONTAINER") == "true"
+                      || File.Exists("/.dockerenv");
+
+    var logger = app.Services.GetRequiredService<ILoggerFactory>().CreateLogger("BoldMigrate.Startup");
+    var detail = string.Join(", ", exposed);
+
+    if (inContainer)
+    {
+        logger.LogWarning(
+            "Bold Migrate is listening on non-loopback address(es) [{Addresses}] with no BoldMigrate:ApiAccessToken set. " +
+            "Ensure the container port is published to 127.0.0.1 only, or set a token.", detail);
+        return;
+    }
+
+    logger.LogCritical(
+        "Refusing to run: Bold Migrate is bound to non-loopback address(es) [{Addresses}] with no BoldMigrate:ApiAccessToken set. " +
+        "Set BoldMigrate__ApiAccessToken, or bind to localhost.", detail);
+    app.Lifetime.StopApplication();
+});
 
 app.Run();
 

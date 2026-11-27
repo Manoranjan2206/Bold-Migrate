@@ -92,7 +92,21 @@ public class LocalFolderMigrationService
             throw new InvalidOperationException($"{paramName} cannot contain '..' path traversal segments.");
         }
 
-        var full = Path.GetFullPath(rawPath.Trim());
+        var trimmed = rawPath.Trim();
+
+        // A UNC path makes Windows authenticate outbound to the named share, leaking NTLM material
+        // for the service account, and device paths bypass normal path normalisation entirely.
+        // Neither is ever a legitimate local import folder.
+        if (trimmed.StartsWith(@"\\", StringComparison.Ordinal) ||
+            trimmed.StartsWith("//", StringComparison.Ordinal) ||
+            trimmed.StartsWith(@"\\?\", StringComparison.Ordinal) ||
+            trimmed.StartsWith(@"\\.\", StringComparison.Ordinal))
+        {
+            throw new UnauthorizedAccessException(
+                $"{paramName} must be a local directory. UNC and device paths are not allowed.");
+        }
+
+        var full = Path.GetFullPath(trimmed);
         var roots = _settings.AllowedLocalFolderRoots;
         if (roots is { Length: > 0 })
         {

@@ -55,12 +55,58 @@ public sealed class SecurityMiddleware
         await _next(context);
     }
 
-    private static void AddSecurityHeaders(HttpResponse response)
+    /// <summary>
+    /// Content Security Policy for the console.
+    ///
+    /// 'unsafe-inline' is still required for script-src because index.html and the JS renderers
+    /// use inline event handlers; removing those is tracked separately. The policy is still
+    /// worth setting: connect-src 'self' blocks exfiltration of SSRS credentials, Bold Reports
+    /// tokens and SQL passwords to an attacker-controlled host, object-src 'none' and
+    /// base-uri 'self' close two common injection vectors, and script-src pins executable code
+    /// to this origin plus the two Bold Reports / cdnjs origins the viewer and designer need.
+    /// </summary>
+    private static string BuildContentSecurityPolicy(string? destinationOrigin)
+    {
+        // The embedded Bold Reports Viewer/Designer call the DESTINATION server directly from the
+        // browser, so a flat `connect-src 'self'` would block exactly the "open on server" feature.
+        // The operator's configured destination origin is added to the directives the widgets use.
+        var dest = string.IsNullOrWhiteSpace(destinationOrigin) ? string.Empty : " " + destinationOrigin;
+
+        return
+            "default-src 'self'; " +
+            $"script-src 'self' 'unsafe-inline' 'unsafe-eval' https://cdnjs.cloudflare.com https://cdn.boldreports.com{dest}; " +
+            $"style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://cdnjs.cloudflare.com https://cdn.boldreports.com{dest}; " +
+            $"font-src 'self' data: https://fonts.gstatic.com https://cdn.boldreports.com{dest}; " +
+            $"img-src 'self' data: blob: https://cdn.boldreports.com{dest}; " +
+            $"connect-src 'self'{dest}; " +
+            $"frame-src 'self'{dest}; " +
+            "worker-src 'self' blob:; " +
+            "object-src 'none'; " +
+            "base-uri 'self'; " +
+            "form-action 'self'; " +
+            "frame-ancestors 'self'";
+    }
+
+    private void AddSecurityHeaders(HttpResponse response)
     {
         response.Headers.TryAdd("X-Content-Type-Options", "nosniff");
         response.Headers.TryAdd("X-Frame-Options", "SAMEORIGIN");
         response.Headers.TryAdd("Referrer-Policy", "no-referrer");
         response.Headers.TryAdd("Permissions-Policy", "camera=(), microphone=(), geolocation=()");
+        response.Headers.TryAdd("Content-Security-Policy", BuildContentSecurityPolicy(ResolveDestinationOrigin()));
+    }
+
+    /// <summary>
+    /// Origin of the configured Bold Reports destination server, or null when none is set.
+    /// </summary>
+    private string? ResolveDestinationOrigin()
+    {
+        var configured = _settings.DestinationServerUrl;
+        if (string.IsNullOrWhiteSpace(configured)) return null;
+
+        return Uri.TryCreate(configured, UriKind.Absolute, out var uri)
+            ? $"{uri.Scheme}://{uri.Authority}"
+            : null;
     }
 
     private static string EnsureCsrfCookie(HttpContext context)

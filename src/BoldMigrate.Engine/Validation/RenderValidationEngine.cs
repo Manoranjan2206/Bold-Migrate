@@ -1,10 +1,13 @@
 using System.Collections.Concurrent;
 using System.Diagnostics;
 using System.Xml.Linq;
+using BoldMigrate.Core.Common;
+using BoldMigrate.Core.StateMachine;
 using BoldMigrate.Core.Enums;
 using BoldMigrate.Core.Interfaces;
 using BoldMigrate.Core.Models;
 using BoldMigrate.Engine.Preview;
+using BoldMigrate.Infrastructure.Credentials;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Microsoft.Playwright;
@@ -31,6 +34,19 @@ public class ReportValidationCardDto
     public string Status { get; set; } = "NotValidated";
     public long? DurationMs { get; set; }
     public string? ScreenshotUrl { get; set; }
+
+    /// <summary>
+    /// True when <see cref="ScreenshotUrl"/> is diagnostic evidence captured from a FAILED render
+    /// rather than a successful one. The UI labels it so an operator never mistakes a captured
+    /// error screen for a good render.
+    /// </summary>
+    public bool ScreenshotIsFailureEvidence { get; set; }
+
+    /// <summary>
+    /// The matching SSRS render, captured in the same pass, or null when the source server could
+    /// not produce one. Lets the UI show whether a side-by-side comparison is ready.
+    /// </summary>
+    public string? SourceSnapshotUrl { get; set; }
     public string? ErrorMessage { get; set; }
     public List<string> FeatureTags { get; set; } = new();
     public List<string> PromptParameters { get; set; } = new();
@@ -43,16 +59,65 @@ public class RenderValidationEngine
     private readonly IRenderLogStore _renderLogs;
     private readonly ILogger<RenderValidationEngine> _logger;
 
+    private readonly BoldMigrate.Core.Configuration.MigrationSettings _settings;
+
     public RenderValidationEngine(
         IServiceScopeFactory scopeFactory,
         IStagingStore staging,
         IRenderLogStore renderLogs,
+        BoldMigrate.Core.Configuration.MigrationSettings settings,
         ILogger<RenderValidationEngine> logger)
     {
         _scopeFactory = scopeFactory;
         _staging = staging;
         _renderLogs = renderLogs;
+        _settings = settings;
         _logger = logger;
+    }
+
+    /// <summary>
+    /// Renders the SAME report on the source SSRS server and caches the PNG next to the staged
+    /// snapshot, under the exact name the compare endpoint serves from cache.
+    ///
+    /// The SSRS image used to be fetched lazily, only when the operator opened the comparison
+    /// modal, so the Bold Reports side appeared immediately and the SSRS side arrived seconds
+    /// later. Capturing both while validating a report means the comparison is ready the moment
+    /// it is opened. A failure here is non-fatal: the staged render is still the primary result.
+    /// </summary>
+    private async Task CaptureSourceSnapshotAsync(Guid runId, CatalogItem report, string runDir, CancellationToken ct)
+    {
+        var sourcePngPath = Path.Combine(runDir, $"{report.Id}-source.png");
+        if (File.Exists(sourcePngPath)) return;
+
+        try
+        {
+            using var scope = _scopeFactory.CreateScope();
+            var store = scope.ServiceProvider.GetRequiredService<IMigrationStore>();
+            var credStore = scope.ServiceProvider.GetRequiredService<ICredentialStore>();
+
+            var run = await store.GetRunAsync(runId, ct);
+            if (run == null || string.IsNullOrWhiteSpace(run.SourceServerUrl)) return;
+
+            var cred = credStore.GetSourceCredential(runId.ToString());
+            var source = BoldMigrate.Infrastructure.SourceAdapters.SourceAdapterFactory.Create(
+                run.SourceServerUrl, run.SourceApi, cred);
+            using var disposable = source as IDisposable;
+
+            var renderParams = new Dictionary<string, string> { ["rc:OutputFormat"] = "PNG", ["rc:StartPage"] = "1" };
+            var bytes = await source.RenderAsync(report.SourcePath, "IMAGE", renderParams, ct);
+
+            // PNG signature guard: SSRS can return TIFF or an HTML error page instead.
+            if (bytes.Length >= 8 && bytes[0] == 0x89 && bytes[1] == 0x50 && bytes[2] == 0x4E && bytes[3] == 0x47)
+            {
+                await File.WriteAllBytesAsync(sourcePngPath, bytes, ct);
+            }
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            _logger.LogInformation(
+                "Source SSRS snapshot unavailable for {Path}: {Message}",
+                report.SourcePath, ex.Message);
+        }
     }
 
     /// <summary>
@@ -93,8 +158,7 @@ public class RenderValidationEngine
     {
         try
         {
-            using var ms = new MemoryStream(rdlBytes);
-            var doc = XDocument.Load(ms);
+            var doc = SafeXml.LoadBytes(rdlBytes);
             var paramElems = doc.Descendants().Where(e => e.Name.LocalName == "ReportParameter").ToList();
             var required = new List<string>();
 
@@ -163,6 +227,10 @@ public class RenderValidationEngine
         };
 
         var cards = new ConcurrentBag<ReportValidationCardDto>();
+
+        // Configurable (default 60s). The old hard-coded 30s was shorter than many real reports
+        // with live queries need, so healthy reports were being reported as timeouts.
+        var renderTimeoutMs = Math.Clamp(_settings.ValidationRenderTimeoutSeconds, 15, 600) * 1000;
 
         // Initialize Playwright
         IPlaywright? playwright = null;
@@ -251,8 +319,7 @@ public class RenderValidationEngine
             {
                 try
                 {
-                    using var tagMs = new MemoryStream(rdlBytes);
-                    var doc = XDocument.Load(tagMs);
+                    var doc = SafeXml.LoadBytes(rdlBytes);
                     var detected = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
                     if (doc.Descendants().Any(e => e.Name.LocalName == "Subreport")) detected.Add("Subreport");
                     if (doc.Descendants().Any(e => e.Name.LocalName == "Chart")) detected.Add("Chart");
@@ -306,7 +373,7 @@ public class RenderValidationEngine
 
                     if (record != null)
                     {
-                        record.State = ReportState.AwaitingReview;
+                        ReportStateMachine.TryTransition(record, ReportState.AwaitingReview);
                         await store.UpdateReportRecordAsync(record, ct);
                     }
                 }
@@ -328,6 +395,38 @@ public class RenderValidationEngine
             IPage? page = null;
             var sw = Stopwatch.StartNew();
 
+            // Start the SSRS capture for THIS report alongside its staged render, so both sides of
+            // the comparison are produced together before we move on to the next report. They used
+            // to be sequential phases, which is why the Bold Reports image appeared first and the
+            // SSRS one only loaded later when the compare modal was opened.
+            var sourceSnapshotTask = CaptureSourceSnapshotAsync(runId, report, runDir, ct);
+
+            // A failed render used to produce a bare message such as "Rendering timed out after
+            // 30 seconds" with no evidence, leaving the operator nothing to act on. Capture what
+            // the viewer was actually showing — an error banner, a parameter prompt, a blank
+            // frame or a half-drawn report — so it can be read and diffed against SSRS. The file
+            // name matches the success path, so the existing screenshot endpoint serves it and
+            // the visual comparison modal can put it beside the SSRS render.
+            async Task CaptureFailureEvidenceAsync()
+            {
+                if (page == null || page.IsClosed) return;
+                try
+                {
+                    var failurePath = Path.Combine(runDir, $"{report.Id}.png");
+                    await page.ScreenshotAsync(new PageScreenshotOptions
+                    {
+                        Path = failurePath,
+                        FullPage = true
+                    });
+                    card.ScreenshotUrl = $"/api/migration/runs/{runId}/screenshots/{report.Id}.png";
+                    card.ScreenshotIsFailureEvidence = true;
+                }
+                catch (Exception shotEx)
+                {
+                    _logger.LogWarning(shotEx, "Could not capture failure evidence for report {ReportId}", report.Id);
+                }
+            }
+
             try
             {
                 context = await browser.NewContextAsync(new BrowserNewContextOptions
@@ -342,14 +441,14 @@ public class RenderValidationEngine
                 await page.GotoAsync(runnerUrl, new PageGotoOptions
                 {
                     WaitUntil = WaitUntilState.DOMContentLoaded,
-                    Timeout = 30000
+                    Timeout = renderTimeoutMs
                 });
 
                 // Wait for render complete or error state
                 await page.WaitForFunctionAsync(
                     "() => document.body.getAttribute('data-render-status') === 'complete' || document.body.getAttribute('data-render-status') === 'error'",
                     null,
-                    new PageWaitForFunctionOptions { Timeout = 30000 });
+                    new PageWaitForFunctionOptions { Timeout = renderTimeoutMs });
 
                 sw.Stop();
                 card.DurationMs = sw.ElapsedMilliseconds;
@@ -378,6 +477,7 @@ public class RenderValidationEngine
                             card.Status = "Failed";
                             card.ErrorMessage = errMsg;
                         }
+                        await CaptureFailureEvidenceAsync();
                     }
                     else
                     {
@@ -426,6 +526,7 @@ public class RenderValidationEngine
                         card.Status = "Failed";
                         card.ErrorMessage = chosenMsg;
                     }
+                    await CaptureFailureEvidenceAsync();
                 }
             }
             catch (TimeoutException)
@@ -433,7 +534,29 @@ public class RenderValidationEngine
                 sw.Stop();
                 card.DurationMs = sw.ElapsedMilliseconds;
                 card.Status = "Failed";
-                card.ErrorMessage = "Rendering timed out after 30 seconds.";
+
+                // renderingBegin tells us whether the viewer ever started drawing. "Never started"
+                // (scripts blocked, service unreachable) and "started but did not finish" (slow
+                // query, huge report) need completely different fixes.
+                var began = false;
+                try
+                {
+                    if (page != null && !page.IsClosed)
+                    {
+                        began = await page.EvaluateAsync<bool>("() => window.__renderBegan === true");
+                    }
+                }
+                catch { /* page may already be gone */ }
+
+                var seconds = renderTimeoutMs / 1000;
+                card.ErrorMessage = began
+                    ? $"Rendering started but did not finish within {seconds}s. The report is likely slow " +
+                      "(large dataset or a long-running query) rather than broken — raise " +
+                      "Validation.RenderTimeoutSeconds in Settings, or check the snapshot below."
+                    : $"The viewer never began rendering within {seconds}s. The snapshot below shows what was " +
+                      "on screen — check for an error banner, a parameter prompt, or an unreachable data source.";
+
+                await CaptureFailureEvidenceAsync();
             }
             catch (Exception ex)
             {
@@ -449,13 +572,23 @@ public class RenderValidationEngine
                     card.Status = "Failed";
                     card.ErrorMessage = ex.Message;
                 }
+                await CaptureFailureEvidenceAsync();
             }
             finally
             {
                 if (page != null) await page.CloseAsync();
                 if (context != null) await context.CloseAsync();
+
+                // Both sides of this report's comparison must be done before the slot is handed to
+                // the next report, so the pair stays together.
+                try { await sourceSnapshotTask; } catch { /* already logged; never fails the render */ }
+
                 semaphore.Release();
             }
+
+            card.SourceSnapshotUrl = File.Exists(Path.Combine(runDir, $"{report.Id}-source.png"))
+                ? $"/api/migration/runs/{runId}/screenshots/{report.Id}/source.png"
+                : null;
 
             // Persist validation result
             var isPassedOrOffline = card.Status == "Passed" || card.Status == "DataSourceOffline";
@@ -516,7 +649,7 @@ public class RenderValidationEngine
             var record = await store.GetReportRecordAsync(report.Id, ct);
             if (record != null && record.State != ReportState.Blocked)
             {
-                record.State = ReportState.AutoPassed;
+                ReportStateMachine.TryTransition(record, ReportState.AutoPassed);
                 await store.UpdateReportRecordAsync(record, ct);
             }
 

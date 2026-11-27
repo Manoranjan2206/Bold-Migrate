@@ -369,5 +369,44 @@ const Api = {
       body: JSON.stringify(request)
     });
     return await res.json();
+  },
+
+  /// Per-report upload outcome, including why each report did not reach the destination.
+  async getUploadOutcome(runId) {
+    const res = await this.request(`${this.baseUrl}/runs/${runId}/upload/outcome`);
+    if (!res.ok) throw new Error(`Upload outcome unavailable (HTTP ${res.status}).`);
+    return await res.json();
+  },
+
+  /// Server-built configuration for the embedded Bold Reports Viewer / Designer against the
+  /// destination server. POST so the CSRF + same-origin check runs before a token is released.
+  async getEmbedConfig(runId) {
+    const res = await this.request(`${this.baseUrl}/runs/${runId}/embed-config`, { method: "POST" });
+    const text = await res.text();
+    let payload = null;
+    try { payload = text ? JSON.parse(text) : null; } catch { /* handled below */ }
+    if (!res.ok) {
+      throw new Error(payload?.message || `Bold Reports configuration unavailable (HTTP ${res.status}).`);
+    }
+    return payload;
+  },
+
+  /// Compares the records behind the SSRS render and the staged render. Unlike most helpers here
+  /// this one reads the body on a non-OK response too, because the server explains WHY a data
+  /// comparison is unavailable (no source server, CSV export refused, credentials missing) and
+  /// that reason is exactly what the operator needs to see.
+  async getReportDataDiff(runId, reportId) {
+    const res = await this.request(`${this.baseUrl}/runs/${runId}/reports/${reportId}/data-diff`);
+    const text = await res.text();
+    let payload;
+    try {
+      payload = text ? JSON.parse(text) : null;
+    } catch {
+      throw new Error(`Server returned a non-JSON response (HTTP ${res.status}).`);
+    }
+    if (!res.ok && !payload) {
+      throw new Error(`Data comparison failed (HTTP ${res.status}).`);
+    }
+    return payload;
   }
 };

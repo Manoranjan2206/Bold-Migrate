@@ -4,6 +4,7 @@ using BoldMigrate.Core.Dto;
 using BoldMigrate.Core.Enums;
 using BoldMigrate.Core.Interfaces;
 using BoldMigrate.Core.Models;
+using BoldMigrate.Core.StateMachine;
 using BoldMigrate.Engine.DeltaSync;
 using BoldMigrate.Engine.ExpressionTester;
 using BoldMigrate.Engine.LocalFolder;
@@ -32,6 +33,7 @@ public class MigrationController : ControllerBase
     private readonly IStagingStore _staging;
     private readonly BoldMigrate.Core.Configuration.MigrationSettings _settings;
     private readonly BoldMigrate.Engine.Validation.RenderValidationEngine _renderValidation;
+    private readonly IStagedReportRenderer _stagedRenderer;
     private readonly IServiceScopeFactory _scopeFactory;
 
     public MigrationController(
@@ -45,6 +47,7 @@ public class MigrationController : ControllerBase
         IStagingStore staging,
         BoldMigrate.Core.Configuration.MigrationSettings settings,
         BoldMigrate.Engine.Validation.RenderValidationEngine renderValidation,
+        IStagedReportRenderer stagedRenderer,
         IServiceScopeFactory scopeFactory)
     {
         _orchestrator = orchestrator;
@@ -57,6 +60,7 @@ public class MigrationController : ControllerBase
         _staging = staging;
         _settings = settings;
         _renderValidation = renderValidation;
+        _stagedRenderer = stagedRenderer;
         _scopeFactory = scopeFactory;
     }
 
@@ -248,6 +252,10 @@ public class MigrationController : ControllerBase
                 run.DestinationUserEmail = req.Email ?? "BearerTokenAuth";
                 await _store.UpdateRunAsync(run, ct);
 
+                // Let SecurityMiddleware widen the CSP to this origin, otherwise the embedded
+                // Bold Reports Viewer/Designer cannot reach the server they are pointed at.
+                _settings.DestinationServerUrl = req.DestinationUrl;
+
                 _credStore.SetDestinationToken(token);
                 _logger.Log(LogLevel.Information, "DEST-OK", id, $"Connected to Bold Reports Server ({req.DestinationUrl})");
                 return Ok(new
@@ -294,7 +302,11 @@ public class MigrationController : ControllerBase
         }
         if (action == "resume")
         {
+            if (await _store.GetRunAsync(id, ct) == null) return NotFound();
             _orchestrator.ResumeRun(id);
+            // Clearing the pause flag alone never restarted anything: the paused upload call had
+            // already returned. Re-queue it so the remaining stages actually run.
+            QueueBackgroundWork(id, "UPLD-ERROR", "Upload", (orch, token) => orch.StartUploadAsync(id, conflictPolicy, token));
             return Ok(new { status = "resumed" });
         }
 
@@ -451,11 +463,14 @@ public class MigrationController : ControllerBase
         {
             if (r.Bucket == ReportBucket.Blocked) continue;
 
+            // Routed through the state machine (invariant 4). Restoring the pre-exclusion state
+            // means de-selecting and re-selecting an approved report no longer throws its
+            // validation away and force it back through Step 3.
             if (selectedSet.Contains(r.CatalogItemId))
             {
                 if (r.State == ReportState.Excluded)
                 {
-                    r.State = ReportState.Analysed;
+                    ReportStateMachine.RestoreFromDeselect(r);
                     await _store.UpdateReportRecordAsync(r, ct);
                 }
             }
@@ -463,7 +478,7 @@ public class MigrationController : ControllerBase
             {
                 if (r.State != ReportState.Excluded)
                 {
-                    r.State = ReportState.Excluded;
+                    ReportStateMachine.ExcludeForDeselect(r);
                     await _store.UpdateReportRecordAsync(r, ct);
                 }
             }
@@ -705,7 +720,7 @@ public class MigrationController : ControllerBase
                 .ToListAsync(ct);
             foreach (var rec in records)
             {
-                rec.State = ReportState.Analysed;
+                ReportStateMachine.TryTransition(rec, ReportState.Analysed);
             }
 
             await db.SaveChangesAsync(ct);
@@ -748,7 +763,7 @@ public class MigrationController : ControllerBase
         var record = await _store.GetReportRecordAsync(reportId, ct);
         if (record == null) return NotFound();
 
-        record.State = ReportState.Approved;
+        ReportStateMachine.TryTransition(record, ReportState.Approved);
         await _store.UpdateReportRecordAsync(record, ct);
 
         await _store.AddApprovalAsync(new Approval
@@ -772,7 +787,7 @@ public class MigrationController : ControllerBase
         var record = await _store.GetReportRecordAsync(reportId, ct);
         if (record == null) return NotFound();
 
-        record.State = ReportState.Flagged;
+        ReportStateMachine.TryTransition(record, ReportState.Flagged);
         await _store.UpdateReportRecordAsync(record, ct);
 
         _logger.Log(LogLevel.Information, "VALD-FLAG", id, $"Report '{reportId}' flagged for review: {req.Comment}");
@@ -791,7 +806,7 @@ public class MigrationController : ControllerBase
             var latest = results.OrderByDescending(v => v.RunUtc).FirstOrDefault();
             if (latest != null && latest.DataAccuracy >= minAccuracy)
             {
-                r.State = ReportState.Approved;
+                ReportStateMachine.TryTransition(r, ReportState.Approved);
                 await _store.UpdateReportRecordAsync(r, ct);
                 approvedCount++;
             }
@@ -1297,7 +1312,7 @@ public class MigrationController : ControllerBase
         {
             try
             {
-                var doc = System.Xml.Linq.XDocument.Load(item.StagedFilePath);
+                var doc = BoldMigrate.Core.Common.SafeXml.LoadFile(item.StagedFilePath);
                 var root = doc.Root;
                 if (root != null)
                 {
@@ -1412,6 +1427,162 @@ public class MigrationController : ControllerBase
             tenantId,
             serverUrl = origin
         });
+    }
+
+    /// <summary>
+    /// Configuration for embedding the Bold Reports Viewer / Designer against the DESTINATION
+    /// server, built from the run plus the stored admin token.
+    ///
+    /// The widgets talk to Bold Reports directly from the browser, so per the embedding API they
+    /// need serviceUrl, reportServerUrl and a bearer token client-side — the front end previously
+    /// guessed these URLs (producing paths like /reporting/api/reporting/reportservice/api/Viewer)
+    /// and relied on a token held only in a JS variable, which was empty after any page refresh.
+    ///
+    /// This is POST, not GET, so SecurityMiddleware's CSRF + same-origin check applies before a
+    /// token is handed out, and so the response is never cached or replayable from a URL.
+    /// </summary>
+    [HttpPost("runs/{id:guid}/embed-config")]
+    public async Task<IActionResult> GetEmbedConfig(Guid id, CancellationToken ct)
+    {
+        var run = await _store.GetRunAsync(id, ct);
+        if (run == null) return NotFound();
+
+        if (string.IsNullOrWhiteSpace(run.DestinationServerUrl))
+        {
+            return BadRequest(new { message = "Connect a Bold Reports destination server first (Step 1)." });
+        }
+
+        if (!Uri.TryCreate(run.DestinationServerUrl, UriKind.Absolute, out var uri))
+        {
+            return BadRequest(new { message = $"Destination server URL '{run.DestinationServerUrl}' is not a valid absolute URL." });
+        }
+
+        var token = _credStore.GetDestinationToken();
+        if (string.IsNullOrWhiteSpace(token))
+        {
+            return BadRequest(new
+            {
+                message = "No Bold Reports session token is held. Re-connect the destination server in Step 1."
+            });
+        }
+
+        using var client = new DestinationClient(run.DestinationServerUrl, token);
+        var tenantId = client.GetTenantId();
+        var origin = $"{uri.Scheme}://{uri.Authority}".TrimEnd('/');
+
+        return Ok(new
+        {
+            origin,
+            tenantId,
+            reportServerUrl = $"{origin}/reporting/api/site/{tenantId}",
+            viewerServiceUrl = $"{origin}/reporting/reportservice/api/Viewer",
+            designerServiceUrl = $"{origin}/reporting/reportservice/api/Designer",
+            // The embedding model requires this in the browser; it is the operator's own session
+            // token, released only over a same-origin, CSRF-checked POST.
+            serviceAuthorizationToken = $"bearer {token}"
+        });
+    }
+
+    /// <summary>
+    /// Per-report upload outcome, with a plain reason for every report that did NOT reach the
+    /// destination.
+    ///
+    /// The upload gate silently skips reports in states like AwaitingReview or ValidationFailed,
+    /// logging UPLD-GATE-SKIP into a collapsed execution drawer. Operators saw "9 reports" become
+    /// "6 uploaded" with nothing explaining the other three. This is derived from persisted state,
+    /// so it survives a refresh and is correct even for a run uploaded in an earlier session.
+    /// </summary>
+    [HttpGet("runs/{id:guid}/upload/outcome")]
+    public async Task<IActionResult> GetUploadOutcome(Guid id, CancellationToken ct)
+    {
+        var run = await _store.GetRunAsync(id, ct);
+        if (run == null) return NotFound();
+
+        var items = (await _store.GetCatalogItemsAsync(id, ItemType.Report, ct)).ToList();
+        var records = (await _store.GetReportRecordsAsync(id, ct: ct))
+            .ToDictionary(r => r.CatalogItemId, r => r);
+
+        var uploaded = new List<object>();
+        var notUploaded = new List<object>();
+
+        foreach (var item in items)
+        {
+            records.TryGetValue(item.Id, out var rec);
+            var state = rec?.State ?? ReportState.Discovered;
+
+            if (IsGenuineDestinationId(item.DestinationItemId))
+            {
+                uploaded.Add(new { reportId = item.Id, name = item.Name, path = item.SourcePath, state = state.ToString() });
+                continue;
+            }
+
+            var (reason, fix) = DescribeNotUploaded(state, rec?.Bucket ?? ReportBucket.Clean, rec?.ExcludedReason);
+
+            notUploaded.Add(new
+            {
+                reportId = item.Id,
+                name = item.Name,
+                path = item.SourcePath,
+                state = state.ToString(),
+                reason,
+                fix
+            });
+        }
+
+        return Ok(new
+        {
+            total = items.Count,
+            uploadedCount = uploaded.Count,
+            notUploadedCount = notUploaded.Count,
+            uploaded,
+            notUploaded
+        });
+    }
+
+    /// <summary>Plain-language reason a report is not on the destination, plus the way to fix it.</summary>
+    private static (string Reason, string Fix) DescribeNotUploaded(ReportState state, ReportBucket bucket, string? excludedReason)
+    {
+        if (bucket == ReportBucket.Blocked)
+        {
+            return ("Blocked by a compatibility rule — it cannot run on Bold Reports as-is.",
+                    "Open the compatibility note in Step 2 and edit the report, or exclude it from this migration.");
+        }
+
+        return state switch
+        {
+            ReportState.Excluded => (
+                string.IsNullOrWhiteSpace(excludedReason)
+                    ? "De-selected in Step 2, so it was never queued."
+                    : $"Excluded: {excludedReason}",
+                "Re-select it in Step 2 to include it."),
+
+            ReportState.AwaitingReview => (
+                "Waiting for manual review — validation could not confirm it renders correctly (usually prompt parameters with no default).",
+                "Open it in Step 3, check the preview, then Approve it. Or use Skip Validation to accept it as-is."),
+
+            ReportState.ValidationFailed => (
+                "Render validation failed, so the upload gate held it back.",
+                "Open the failure snapshot in Step 3 to see what the viewer showed, fix the report, then re-validate."),
+
+            ReportState.Flagged => (
+                "Flagged for designer attention during review.",
+                "Edit it in the Step 3 designer, then Approve it."),
+
+            ReportState.UploadFailed => (
+                "The upload to Bold Reports failed.",
+                "Use Retry Failed in Step 4; check the execution log for the server's error."),
+
+            ReportState.Uploading => (
+                "Left mid-upload by a restart, so its outcome is unknown.",
+                "Use Retry Failed in Step 4 to re-upload it."),
+
+            ReportState.Discovered or ReportState.Staged or ReportState.Analysed or ReportState.Queued => (
+                "Never validated, and the upload gate only accepts validated or approved reports.",
+                "Run validation in Step 3, or use Skip Validation, then upload again."),
+
+            _ => ($"Not uploaded (state: {state}).",
+                  "Re-run validation in Step 3, then upload again.")
+        };
     }
 
     [HttpGet("runs/{id:guid}/destination/sections")]
@@ -1559,7 +1730,7 @@ public class MigrationController : ControllerBase
             await _store.UpdateCatalogItemAsync(r, ct);
             if (records.TryGetValue(r.Id, out var rec))
             {
-                rec.State = ReportState.Analysed;
+                ReportStateMachine.TryTransition(rec, ReportState.Analysed);
                 rec.UploadAttempts = 0;
                 await _store.UpdateReportRecordAsync(rec, ct);
             }
@@ -1815,6 +1986,100 @@ public class MigrationController : ControllerBase
         {
             return StatusCode(502, new { available = false, reason = $"SSRS source render unavailable: {ex.Message}" });
         }
+    }
+
+    /// <summary>
+    /// Compares the DATA behind the SSRS render and the staged local render of the same report.
+    ///
+    /// The swipe / side-by-side / pixel-diff views answer "do these look the same", but a pixel
+    /// diff cannot separate "the table shifted a few pixels" from "the query returned different
+    /// rows" — both light up red. This exports both sides to CSV and diffs the records, so the
+    /// operator gets a straight answer: layout only, reordered, changed values, or missing rows.
+    /// </summary>
+    [HttpGet("runs/{id:guid}/reports/{reportId:guid}/data-diff")]
+    public async Task<IActionResult> GetReportDataDiff(Guid id, Guid reportId, CancellationToken ct = default)
+    {
+        var run = await _store.GetRunAsync(id, ct);
+        if (run == null) return NotFound(new { available = false, reason = "Run not found." });
+
+        var report = await _store.GetCatalogItemAsync(reportId, ct);
+        if (report == null || report.RunId != id || report.ItemType != ItemType.Report)
+            return NotFound(new { available = false, reason = "Report not found." });
+
+        if (string.IsNullOrWhiteSpace(run.SourceServerUrl))
+        {
+            return NotFound(new
+            {
+                available = false,
+                reason = "This run has no SSRS source server (local-folder import), so there is nothing to compare against."
+            });
+        }
+
+        string sourceCsv;
+        try
+        {
+            var cred = _credStore.GetSourceCredential(id.ToString());
+            var source = SourceAdapterFactory.Create(run.SourceServerUrl, run.SourceApi, cred);
+            using var disp = source as IDisposable;
+
+            var bytes = await source.RenderAsync(report.SourcePath, "CSV", new Dictionary<string, string>(), ct);
+            sourceCsv = System.Text.Encoding.UTF8.GetString(bytes);
+        }
+        catch (Exception ex)
+        {
+            return StatusCode(502, new
+            {
+                available = false,
+                reason = $"Could not export the SSRS report as CSV: {Redactor.RedactSecrets(ex.Message)}"
+            });
+        }
+
+        string stagedCsv;
+        try
+        {
+            var bytes = await _stagedRenderer.RenderStagedReportAsync(
+                id, report.SourcePath, "CSV", new Dictionary<string, string>(), ct);
+
+            if (bytes == null || bytes.Length == 0)
+            {
+                return StatusCode(502, new
+                {
+                    available = false,
+                    reason = "The staged report produced no CSV output. Run validation first, or check the data source credentials."
+                });
+            }
+
+            stagedCsv = System.Text.Encoding.UTF8.GetString(bytes);
+        }
+        catch (Exception ex)
+        {
+            return StatusCode(502, new
+            {
+                available = false,
+                reason = $"Could not export the staged report as CSV: {Redactor.RedactSecrets(ex.Message)}"
+            });
+        }
+
+        var diff = BoldMigrate.Engine.Validation.DataDiffEngine.Compare(
+            sourceCsv, stagedCsv, _settings.ValidationSampleRowLimit);
+
+        return Ok(new
+        {
+            available = true,
+            reportName = report.Name,
+            reportPath = report.SourcePath,
+            verdict = diff.Verdict.ToString(),
+            summary = diff.Summary,
+            isLayoutOnlyDifference = diff.IsLayoutOnlyDifference,
+            sourceColumns = diff.SourceColumns,
+            targetColumns = diff.TargetColumns,
+            sourceRowCount = diff.SourceRowCount,
+            targetRowCount = diff.TargetRowCount,
+            cellDifferences = diff.CellDifferences,
+            onlyInSource = diff.OnlyInSource,
+            onlyInTarget = diff.OnlyInTarget,
+            truncated = diff.Truncated
+        });
     }
 }
 

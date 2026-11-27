@@ -6,7 +6,19 @@ Enterprise migration suite for moving Microsoft SQL Server Reporting Services (S
 
 ## Key Capabilities
 
-### 1. Guided 6-Step Migration Journey
+### 1. Guided 4-Step Migration Journey
+
+The console presents four milestones. Discovery and compatibility assessment both complete in
+Step 1; Step 2 is where the operator chooses the migration scope, not where work happens.
+
+| Step | Name | What it does |
+|---|---|---|
+| 1 | **Source & Target** | Connect SSRS/PBIRS and Bold Reports, discover, stage and assess the catalog |
+| 2 | **Assess & Resolve** | Review readiness, verify links, and choose which reports to migrate |
+| 3 | **Visual Verify** | Playwright render validation, local viewer/designer, XML, visual and data diff |
+| 4 | **Publish & Cutover** | 4-stage dependency upload, readiness gates, delta sync and URL shim |
+
+Detail by capability:
 1. **Connect & Discover:** Auto-probes SSRS/PBIRS via REST API v2.0 with SOAP `ReportingService2010` fallback (`Windows Integrated`, `WindowsExplicit`, or HTTPS `Basic`), authenticates to Bold Reports Server (admin credentials or direct Bearer JWT token), discovers and stages `.rdl`/`.rsds`/`.rds`/`.rsd` items locally, and provides **Bulk Host / Database Remapping** plus live SQL Server credential validation (with `TrustServerCertificate` support).
 2. **Report Library:** Searchable, filterable catalog (`All`, `Compatible`, `Needs Review`) with multi-select scoping, compatibility findings, and run-scoped destination cleanup.
 3. **Assessment Dashboard:** Readiness score, compatibility breakdown against `data/compatibility-rules.json`, and **Subreport / Shared DataSet / Shared Data Source Link Verification** with cycle detection and one-click XML reference rebinding.

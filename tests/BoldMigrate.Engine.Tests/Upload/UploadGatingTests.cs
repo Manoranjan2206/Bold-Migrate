@@ -125,10 +125,11 @@ public class UploadGatingTests : IDisposable
         var uploadLayer = new UploadLayer(_store, _staging, _logger);
         var destClient = new DestinationClient("http://boldreports.local/site/site1", "fake-token");
 
-        var uploadedCount = await uploadLayer.UploadEstateAsync(runId, destClient, () => false, CancellationToken.None);
+        var uploadResult = await uploadLayer.UploadEstateAsync(runId, destClient, () => false, CancellationToken.None);
 
         // Both reports should be skipped by the validation gate
-        Assert.Equal(0, uploadedCount);
+        Assert.Equal(0, uploadResult.UploadedCount);
+        Assert.False(uploadResult.Paused);
 
         // Verify report states remain unchanged
         var rec1After = await _store.GetReportRecordAsync(item1.Id);
@@ -144,5 +145,62 @@ public class UploadGatingTests : IDisposable
 
         Assert.Contains(skipLogs, l => l.Message.Contains("UnvalidatedReport"));
         Assert.Contains(skipLogs, l => l.Message.Contains("ReviewReport"));
+    }
+
+    /// <summary>
+    /// Regression: a paused upload used to return normally, which made the orchestrator mark the
+    /// run Uploaded. A half-migrated estate then passed the cutover gates as if it were complete.
+    /// </summary>
+    [Fact]
+    public async Task UploadEstateAsync_WhenPaused_ReportsPausedInsteadOfCompleting()
+    {
+        var runId = Guid.NewGuid();
+        var run = new MigrationRun
+        {
+            Id = runId,
+            Status = RunStatus.Uploading,
+            SourceServerUrl = "http://ssrs.local/reportserver",
+            DestinationServerUrl = "http://boldreports.local"
+        };
+        await _store.CreateRunAsync(run);
+
+        var folder = new CatalogItem
+        {
+            Id = Guid.NewGuid(),
+            RunId = runId,
+            ItemType = ItemType.Folder,
+            Name = "Sales",
+            SourcePath = "/Sales"
+        };
+        var item = new CatalogItem
+        {
+            Id = Guid.NewGuid(),
+            RunId = runId,
+            ItemType = ItemType.Report,
+            Name = "ApprovedReport",
+            SourcePath = "/Sales/ApprovedReport"
+        };
+        var record = new ReportRecord
+        {
+            CatalogItemId = item.Id,
+            State = ReportState.Approved
+        };
+
+        await _store.AddCatalogItemsAsync(new[] { folder, item });
+        await _store.AddReportRecordAsync(record);
+
+        var uploadLayer = new UploadLayer(_store, _staging, _logger);
+        var destClient = new DestinationClient("http://boldreports.local/site/site1", "fake-token");
+
+        // Paused from the very first stage, as if the operator hit Pause immediately.
+        var result = await uploadLayer.UploadEstateAsync(runId, destClient, () => true, CancellationToken.None);
+
+        Assert.True(result.Paused);
+        Assert.Equal(0, result.UploadedCount);
+
+        // The approved report must NOT have been consumed by the gate while paused.
+        var after = await _store.GetReportRecordAsync(item.Id);
+        Assert.NotNull(after);
+        Assert.Equal(ReportState.Approved, after.State);
     }
 }

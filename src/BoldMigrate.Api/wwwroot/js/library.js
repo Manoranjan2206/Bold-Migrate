@@ -1,12 +1,25 @@
 // Bold Migrate — Step 2 & 3: Report Library & Assessment Dashboard
 
+// True once the report list has been fetched successfully at least once for this run. The empty
+// state must not claim "connect your SSRS server" before we actually know the list is empty.
+let libraryLoaded = false;
+let libraryLoadError = null;
+
+/// Single source of truth for Step 2. The KPI tiles used to come from Api.pollState() while the
+/// table came from Api.getReports(), so a failed getReports left the tiles reading "9 reports,
+/// 100% ready" above a table saying "No reports found. Connect your SSRS server in Step 1".
+/// Both now derive from one fetch, so they cannot disagree.
 async function refreshLibraryState() {
   if (!currentRun) return;
   try {
     reportsCache = await Api.getReports(currentRun.id);
+    libraryLoaded = true;
+    libraryLoadError = null;
 
-    // Default select all non-blocked reports if not yet initialized
-    if (selectedReportIds.size === 0 && reportsCache.length > 0) {
+    // Auto-select only on first load: re-selecting every visit silently undid the operator's
+    // curation. Blocked reports are never auto-selected — they cannot migrate.
+    if (!selectedReportsInitialized && reportsCache.length > 0) {
+      selectedReportsInitialized = true;
       reportsCache.forEach(r => {
         if (r.bucket !== "Blocked" && r.status !== "Excluded") {
           selectedReportIds.add(r.id);
@@ -15,10 +28,74 @@ async function refreshLibraryState() {
     }
 
     renderReportLibrary();
+    renderAssessmentTiles();
     updateSelectedCountUI();
   } catch (err) {
+    libraryLoadError = err?.message || "Unknown error";
     console.warn("Library refresh failed:", err);
+    renderReportLibrary();
+    renderAssessmentTiles();
   }
+}
+
+/// Derives the Step 2 KPI tiles from the same reportsCache the table renders, so the headline
+/// numbers and the list can never contradict each other.
+function renderAssessmentTiles() {
+  const total = reportsCache?.length || 0;
+  const compatible = (reportsCache || []).filter(r => r.bucket === "Clean" || r.bucket === "AutoFixed").length;
+  const review = (reportsCache || []).filter(r => r.bucket === "NeedsReview").length;
+  const blocked = (reportsCache || []).filter(r => r.bucket === "Blocked").length;
+
+  const known = libraryLoaded && !libraryLoadError;
+  const mainEl = document.getElementById("assess-summary-main");
+  const subEl = document.getElementById("assess-summary-sub");
+  const hostEl = document.getElementById("assess-summary");
+  if (!mainEl || !subEl || !hostEl) return;
+
+  if (!known) {
+    hostEl.className = "assess-summary";
+    mainEl.innerText = libraryLoadError ? "Assessment unavailable" : "Loading assessment…";
+    subEl.innerText = libraryLoadError ? "Could not read the report list from this run." : "";
+    renderFlaggedReportsList();
+    return;
+  }
+
+  if (total === 0) {
+    hostEl.className = "assess-summary";
+    mainEl.innerText = "No reports discovered yet";
+    subEl.innerText = "Run Discover & Assess Catalog in Step 1.";
+    renderFlaggedReportsList();
+    return;
+  }
+
+  const pct = Math.round((compatible / total) * 100);
+  hostEl.className = "assess-summary " + (blocked > 0 ? "is-fail" : review > 0 ? "is-warn" : "is-ok");
+  mainEl.innerText = `${compatible} of ${total} reports ready to migrate (${pct}%)`;
+
+  const parts = [];
+  if (review > 0) parts.push(`${review} need${review === 1 ? "s" : ""} review`);
+  if (blocked > 0) parts.push(`${blocked} blocked — cannot migrate`);
+  subEl.innerText = parts.length > 0 ? `· ${parts.join(" · ")}` : "· Nothing needs attention.";
+
+  renderFlaggedReportsList();
+}
+
+/// The reports currently visible under the active chip + search box. Shared by the table renderer
+/// and by select-all so the two can never disagree about what "all" means.
+function getFilteredReports() {
+  const search = (document.getElementById("library-search")?.value || "").toLowerCase().trim();
+  return (reportsCache || []).filter(r => {
+    const name = (r.name || "").toLowerCase();
+    const folder = (r.folder || "").toLowerCase();
+    if (search && !name.includes(search) && !folder.includes(search)) return false;
+
+    if (currentLibFilter === "clean") return r.bucket === "Clean" || r.bucket === "AutoFixed";
+    // Blocked is its own filter now: "will never migrate" and "take a look" are opposite
+    // outcomes and used to share one chip and one pill.
+    if (currentLibFilter === "review") return r.bucket === "NeedsReview";
+    if (currentLibFilter === "blocked") return r.bucket === "Blocked";
+    return true;
+  });
 }
 
 function renderReportLibrary() {
@@ -26,31 +103,36 @@ function renderReportLibrary() {
   if (!tbody) return;
 
   if (!reportsCache || reportsCache.length === 0) {
+    // Three different situations used to render as the same (often wrong) message. A failed
+    // fetch is not the same as "you never connected a server".
+    let body;
+    if (libraryLoadError) {
+      body = `
+        <div style="color:var(--br-danger-text);font-weight:600;">Couldn't load the report list.</div>
+        <div style="margin-top:4px;font-size:12px;">${escapeHtml(libraryLoadError)}</div>
+        <button type="button" class="btn2 btn-sm empty-state-cta" data-lib-empty-action="retry">↻ Retry</button>`;
+    } else if (!libraryLoaded) {
+      body = `<div>Loading discovered reports…</div>`;
+    } else {
+      body = `
+        <div>No reports discovered yet. Run <strong>Discover &amp; Assess Catalog</strong> in Step 1.</div>
+        <button type="button" class="btn2 btn-sm empty-state-cta" data-lib-empty-action="connect">Go to Step 1: Source &amp; Target →</button>`;
+    }
+
     tbody.innerHTML = `
       <tr>
-        <td colspan="6" style="text-align:center;color:var(--br-text-muted);padding:32px;">
-          <div>No reports found. Connect your SSRS server in Step 1 to discover catalog items.</div>
-          <button type="button" class="btn2 btn-sm empty-state-cta" onclick="switchTab('connections')">Go to Step 1: Source &amp; Target →</button>
-        </td>
+        <td colspan="6" style="text-align:center;color:var(--br-text-muted);padding:32px;">${body}</td>
       </tr>
     `;
     return;
   }
 
-  const search = (document.getElementById("library-search")?.value || "").toLowerCase().trim();
-  const filtered = reportsCache.filter(r => {
-    const matchSearch = r.name.toLowerCase().includes(search) || r.folder.toLowerCase().includes(search);
-    if (!matchSearch) return false;
-
-    if (currentLibFilter === "all") return true;
-    if (currentLibFilter === "clean") return r.bucket === "Clean" || r.bucket === "AutoFixed";
-    if (currentLibFilter === "review") return r.bucket === "NeedsReview" || r.bucket === "Blocked";
-    return true;
-  });
+  const filtered = getFilteredReports();
 
   // Update counts
   const cleanCount = reportsCache.filter(r => r.bucket === "Clean" || r.bucket === "AutoFixed").length;
-  const reviewCount = reportsCache.filter(r => r.bucket === "NeedsReview" || r.bucket === "Blocked").length;
+  const reviewCount = reportsCache.filter(r => r.bucket === "NeedsReview").length;
+  const blockedCount = reportsCache.filter(r => r.bucket === "Blocked").length;
 
   const elAll = document.getElementById("lib-count-all");
   if (elAll) elAll.innerText = reportsCache.length;
@@ -58,6 +140,8 @@ function renderReportLibrary() {
   if (elClean) elClean.innerText = cleanCount;
   const elReview = document.getElementById("lib-count-review");
   if (elReview) elReview.innerText = reviewCount;
+  const elBlocked = document.getElementById("lib-count-blocked");
+  if (elBlocked) elBlocked.innerText = blockedCount;
 
   const btnSelectReady = document.getElementById("btn-select-clean-text");
   if (btnSelectReady) btnSelectReady.innerText = `Select Compatible (${cleanCount})`;
@@ -71,9 +155,10 @@ function renderReportLibrary() {
   }
 
   tbody.innerHTML = filtered.map(r => {
-    const isReview = r.bucket === "NeedsReview" || r.bucket === "Blocked";
-    const bucketClass = isReview ? "pill warn" : "pill ok";
-    const bucketLabel = isReview ? "Needs Review" : "Compatible";
+    const isBlocked = r.bucket === "Blocked";
+    const isReview = r.bucket === "NeedsReview";
+    const bucketClass = isBlocked ? "pill fail" : isReview ? "pill warn" : "pill ok";
+    const bucketLabel = isBlocked ? "Blocked" : isReview ? "Needs Review" : "Compatible";
 
     const isSelected = selectedReportIds.has(r.id);
     const sizeFormatted = r.sizeBytes > 1024 ? `${(r.sizeBytes / 1024).toFixed(1)} KB` : `${r.sizeBytes} B`;
@@ -93,7 +178,10 @@ function renderReportLibrary() {
     return `
       <tr>
         <td class="check-cell">
-          <input type="checkbox" class="report-checkbox" data-id="${r.id}" ${isSelected ? "checked" : ""} onchange="handleReportCheckboxChange('${r.id}', this.checked)">
+          <input type="checkbox" class="report-checkbox" data-id="${escapeHtml(r.id)}" ${isSelected ? "checked" : ""} ${isBlocked ? "disabled" : ""}
+                 aria-label="Include ${escapeHtml(r.name)} in this migration"
+                 title="${isBlocked ? "Blocked reports cannot be migrated" : "Include in this migration"}"
+                 data-lib-action="toggle" data-report-id="${escapeHtml(r.id)}">
         </td>
         <td>
           <strong>${escapeHtml(r.name)}</strong>
@@ -103,10 +191,7 @@ function renderReportLibrary() {
         <td><span class="${bucketClass}">${bucketLabel}</span></td>
         <td style="font-size:12px;color:var(--br-text-secondary);">${blockReasonText}</td>
         <td style="text-align:right;white-space:nowrap;">
-          <button type="button" class="btn2 btn-sm" data-lib-action="validate" data-report-id="${r.id}">👁 Preview</button>
-          <button type="button" class="btn2 btn-danger btn-sm" data-lib-action="delete" data-report-id="${r.id}" title="Delete this report from Bold Reports destination" style="margin-left:4px;padding:4px 8px;">
-            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="vertical-align:-1px;"><path d="M3 6h18M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg>
-          </button>
+          <button type="button" class="btn2 btn-sm" data-lib-action="validate" data-report-id="${escapeHtml(r.id)}">👁 Preview</button>
         </td>
       </tr>
     `;
@@ -125,12 +210,15 @@ function handleReportCheckboxChange(reportId, checked) {
 }
 
 function toggleSelectAllReports(checked) {
+  // Select-all used to ignore the active filter and happily include Blocked reports, which then
+  // travelled into validation and upload only to be skipped there.
+  const visible = getFilteredReports().filter(r => r.bucket !== "Blocked");
   if (checked) {
-    reportsCache.forEach(r => selectedReportIds.add(r.id));
+    visible.forEach(r => selectedReportIds.add(r.id));
   } else {
-    selectedReportIds.clear();
+    visible.forEach(r => selectedReportIds.delete(r.id));
   }
-  document.querySelectorAll(".report-checkbox").forEach(cb => cb.checked = checked);
+  document.querySelectorAll(".report-checkbox:not([disabled])").forEach(cb => cb.checked = checked);
   const masterCb = document.getElementById("lib-select-all");
   if (masterCb) masterCb.checked = checked;
   updateSelectedCountUI();
@@ -161,14 +249,24 @@ function updateSelectedCountUI() {
   const totalEl = document.getElementById("lib-total-count");
   if (totalEl) totalEl.innerText = total;
 
+  // The master checkbox reflects the selectable rows actually on screen, not the whole cache.
+  const selectable = getFilteredReports().filter(r => r.bucket !== "Blocked");
   const masterCb = document.getElementById("lib-select-all");
-  if (masterCb) masterCb.checked = count === total && total > 0;
+  if (masterCb) {
+    const selectedVisible = selectable.filter(r => selectedReportIds.has(r.id)).length;
+    masterCb.checked = selectable.length > 0 && selectedVisible === selectable.length;
+    masterCb.indeterminate = selectedVisible > 0 && selectedVisible < selectable.length;
+  }
 
   const btnFooter = document.getElementById("btn-footer-migrate-text");
   if (btnFooter) btnFooter.innerText = `Visual Verify (${count}) →`;
 
-  const delBarCount = document.getElementById("del-bar-count");
-  if (delBarCount) delBarCount.innerText = count;
+  // The primary CTA used to stay enabled at 0 selected, leading straight to an empty Step 3.
+  const btnFooterEl = btnFooter?.closest("button");
+  if (btnFooterEl) {
+    btnFooterEl.disabled = count === 0;
+    btnFooterEl.title = count === 0 ? "Select at least one report to continue" : "";
+  }
 
   const delModalCount = document.getElementById("del-modal-selected-count");
   if (delModalCount) delModalCount.innerText = count;
@@ -244,35 +342,22 @@ async function runAssessmentAndGoToDashboard() {
 // -----------------------------------------------------------------------------
 // Step 3: Assessment Dashboard
 // -----------------------------------------------------------------------------
+/// Kept as the public entry point used by the poller and by switchTab. It no longer reads its own
+/// counters from pollState: if the server reports more reports than the table holds, the table is
+/// stale (or its fetch failed), so we re-fetch rather than render two disagreeing numbers.
 async function refreshDashboardState(knownPoll) {
   if (!currentRun) return;
   try {
     const poll = knownPoll || await Api.pollState(currentRun.id);
-    if (!poll) return;
+    const serverTotal = poll?.reportsTotal || 0;
+    const localTotal = reportsCache?.length || 0;
 
-    const total = poll.reportsTotal || 0;
-    const clean = poll.reportsClean || 0;
-    const autofix = poll.reportsAutoFixed || 0;
-    const review = poll.reportsNeedsReview || 0;
-    const blocked = poll.reportsBlocked || 0;
+    if (!libraryLoaded || libraryLoadError || serverTotal !== localTotal) {
+      await refreshLibraryState();
+      return;
+    }
 
-    // Real metric tiles
-    const foundEl = document.getElementById("dash-tile-found");
-    if (foundEl) foundEl.innerText = total;
-
-    // Readiness score calculation: (Clean + AutoFixed) / Total
-    const compatibleCount = clean + autofix;
-    const reviewTotal = review + blocked;
-    const readinessPct = total > 0 ? Math.round((compatibleCount / total) * 100) : 0;
-    const readyEl = document.getElementById("dash-tile-readiness");
-    if (readyEl) readyEl.innerText = total > 0 ? `${readinessPct}%` : "—";
-    const revEl = document.getElementById("dash-tile-review");
-    if (revEl) revEl.innerText = reviewTotal;
-    const compEl = document.getElementById("dash-tile-blocked");
-    if (compEl) compEl.innerText = compatibleCount;
-
-    // Populate Flagged Reports Attention List
-    renderFlaggedReportsList();
+    renderAssessmentTiles();
   } catch (err) {
     console.warn("Dashboard refresh error:", err);
   }
@@ -304,8 +389,8 @@ function renderFlaggedReportsList() {
           <div style="font-size:12px;color:var(--br-text-secondary);margin-top:2px;">${escapeHtml(desc)}</div>
         </div>
         <div style="display:flex;align-items:center;gap:8px;">
-          <span class="pill warn">Needs Review</span>
-          <button class="btn2 btn-sm" onclick="selectReportForValidation('${r.id}')">Inspect</button>
+          <span class="pill ${r.bucket === "Blocked" ? "fail" : "warn"}">${r.bucket === "Blocked" ? "Blocked" : "Needs Review"}</span>
+          <button type="button" class="btn2 btn-sm" data-flagged-action="inspect" data-report-id="${escapeHtml(r.id)}">Inspect</button>
         </div>
       </div>
     `;
@@ -394,7 +479,7 @@ function renderDependencyVerificationResults(summary) {
         <span class="pill ${summary.brokenSubreports > 0 ? "fail" : ""}">Broken Subreports: ${summary.brokenSubreports}</span>
         ${summary.cyclesDetected > 0 ? `<span class="pill fail">Subreport Cycles: ${summary.cyclesDetected}</span>` : ""}
       </div>
-      <button type="button" class="btn-ghost btn-sm" onclick="document.getElementById('dep-verify-results').style.display='none'">✕ Hide</button>
+      <button type="button" class="btn-ghost btn-sm" data-dep-action="hide">✕ Hide</button>
     </div>
     ${brokenRows.length === 0
       ? `<div style="font-size:12.5px;color:var(--br-success-text);">All shared data sources, shared datasets, and subreport references resolve cleanly across staged items.</div>`
@@ -415,8 +500,8 @@ function renderDependencyVerificationResults(summary) {
                     <td style="font-size:12px;color:var(--br-danger-text);">${escapeHtml(row.link.issue || "Unresolved reference")}</td>
                     <td style="white-space:nowrap;">
                       ${row.candidates.length > 0
-            ? `<select id="${selectId}" style="height:28px;border:1px solid var(--br-border-strong);border-radius:4px;font-size:11.5px;max-width:210px;">${optionsHtml}</select>
-                           <button type="button" class="btn2 btn-sm" style="margin-left:4px;" onclick="rebindBrokenLink('${row.rep.reportId}', '${escapeHtml(row.link.linkType)}', '${escapeHtml(row.link.reference)}', '${selectId}')">Rebind</button>`
+            ? `<select id="${escapeHtml(selectId)}" style="height:28px;border:1px solid var(--br-border-strong);border-radius:4px;font-size:11.5px;max-width:210px;">${optionsHtml}</select>
+                           <button type="button" class="btn2 btn-sm" style="margin-left:4px;" data-dep-action="rebind" data-report-id="${escapeHtml(row.rep.reportId)}" data-link-type="${escapeHtml(row.link.linkType)}" data-reference="${escapeHtml(row.link.reference)}" data-select-id="${escapeHtml(selectId)}">Rebind</button>`
             : `<span style="font-size:11.5px;color:var(--br-text-muted);">No staged target</span>`}
                     </td>
                   </tr>`;

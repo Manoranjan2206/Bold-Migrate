@@ -8,6 +8,8 @@ let currentRun = null;
 let pollTimer = null;
 let reportsCache = [];
 let selectedReportIds = new Set();
+// Auto-select-all must happen once per run, not on every visit to Step 2.
+let selectedReportsInitialized = false;
 let rdlCache = {};
 let dataSourcesCache = [];
 let currentLibFilter = "all";
@@ -32,14 +34,57 @@ function bindDynamicActionDelegation() {
   const libBody = document.getElementById("library-table-body");
   if (libBody && !libBody.dataset.delegated) {
     libBody.dataset.delegated = "1";
+    libBody.addEventListener("change", (ev) => {
+      const box = ev.target.closest("[data-lib-action='toggle']");
+      if (!box) return;
+      handleReportCheckboxChange(box.dataset.reportId, box.checked);
+    });
     libBody.addEventListener("click", (ev) => {
+      const empty = ev.target.closest("[data-lib-empty-action]");
+      if (empty) {
+        if (empty.dataset.libEmptyAction === "retry") refreshLibraryState();
+        else switchTab("connections");
+        return;
+      }
       const btn = ev.target.closest("[data-lib-action]");
       if (!btn) return;
       const id = btn.dataset.reportId;
       const action = btn.dataset.libAction;
       const rep = (reportsCache || []).find(x => x.id === id);
       if (action === "validate") selectReportForValidation(id);
-      else if (action === "delete" && rep) deleteSingleBoldReport(rep.id, rep.name);
+    });
+  }
+
+  // Rebind buttons carry RDL-controlled text (reference names come from the source server).
+  // They MUST stay out of inline handlers: the browser HTML-decodes an attribute before the JS
+  // parser sees it, so escapeHtml does not protect a JS string literal built inside onclick.
+  const depHost = document.getElementById("dep-verify-results");
+  if (depHost && !depHost.dataset.delegated) {
+    depHost.dataset.delegated = "1";
+    depHost.addEventListener("click", (ev) => {
+      const hide = ev.target.closest("[data-dep-action='hide']");
+      if (hide) {
+        depHost.style.display = "none";
+        return;
+      }
+      const btn = ev.target.closest("[data-dep-action='rebind']");
+      if (!btn) return;
+      rebindBrokenLink(
+        btn.dataset.reportId,
+        btn.dataset.linkType,
+        btn.dataset.reference,
+        btn.dataset.selectId
+      );
+    });
+  }
+
+  const flaggedHost = document.getElementById("dash-flagged-list");
+  if (flaggedHost && !flaggedHost.dataset.delegated) {
+    flaggedHost.dataset.delegated = "1";
+    flaggedHost.addEventListener("click", (ev) => {
+      const btn = ev.target.closest("[data-flagged-action='inspect']");
+      if (!btn) return;
+      selectReportForValidation(btn.dataset.reportId);
     });
   }
 
@@ -303,6 +348,28 @@ function switchTab(tabName) {
     refreshMigrationState();
     refreshCutoverState();
   }
+
+  highlightNextAction(resolvedTab);
+}
+
+/// Marks the single control that moves the journey forward on the current step.
+/// Nothing previously distinguished "the button that continues" from the half-dozen other
+/// buttons on a pane, which is the reported "I wasn't sure which button to click next".
+const NEXT_ACTION_BY_STEP = {
+  connections: "btn-discover-primary",
+  assess: "btn-footer-migrate",
+  validation: "btn-validation-continue",
+  publish: "btn-start-migration-tab"
+};
+
+function highlightNextAction(tabName) {
+  document.querySelectorAll(".is-next-action").forEach(el => el.classList.remove("is-next-action"));
+
+  const id = NEXT_ACTION_BY_STEP[tabName];
+  if (!id) return;
+  const el = document.getElementById(id);
+  // Only cue a control the operator can actually use right now.
+  if (el && !el.disabled) el.classList.add("is-next-action");
 }
 
 function syncBulkDeleteFromActiveRun() {
@@ -512,21 +579,89 @@ function validateRequiredInput(inputOrId, message) {
   return false;
 }
 
-function showToast(msg) {
-  let toast = document.getElementById("app-toast");
-  if (!toast) {
-    toast = document.createElement("div");
-    toast.id = "app-toast";
-    toast.style.cssText = "position:fixed;bottom:24px;right:24px;background:var(--br-navy);color:var(--br-text-inverse);padding:12px 20px;border-radius:8px;font-size:13.5px;font-weight:500;box-shadow:0 10px 25px -3px rgba(0,0,0,0.25);z-index:9999;transition:opacity 0.2s ease;";
-    document.body.appendChild(toast);
+/// Toasts.
+///
+/// The previous implementation created ONE fixed div at z-index 9999 and only faded its opacity
+/// to 0 when done. It kept `pointer-events: auto` and stayed in the layout, so after the first
+/// toast ever fired there was a permanently invisible ~260x44 click-blocking rectangle pinned to
+/// the bottom-right of every screen — on top of modals (z 200), the drawer (z 181) and the Bold
+/// Reports designer. That is why buttons near the bottom of the window stopped responding.
+///
+/// The container is pointer-events: none so a toast can never eat a click, each toast is removed
+/// from the DOM when it expires, and messages stack instead of overwriting one another.
+function getToastContainer() {
+  let host = document.getElementById("app-toast-host");
+  if (!host) {
+    host = document.createElement("div");
+    host.id = "app-toast-host";
+    host.className = "bm-toast-host";
+    // Announced politely so async results reach screen readers, which the old toast never did.
+    host.setAttribute("role", "status");
+    host.setAttribute("aria-live", "polite");
+    document.body.appendChild(host);
   }
-  toast.innerText = msg;
-  toast.style.opacity = "1";
-  setTimeout(() => { if (toast) toast.style.opacity = "0"; }, 3500);
+  return host;
+}
+
+function showToast(msg, isError = false) {
+  if (!msg) return;
+  const host = getToastContainer();
+
+  const toast = document.createElement("div");
+  toast.className = "bm-toast" + (isError ? " is-error" : "");
+  toast.innerText = String(msg);
+  host.appendChild(toast);
+
+  // Let the element land before transitioning, so the entry animation actually runs.
+  requestAnimationFrame(() => toast.classList.add("is-visible"));
+
+  const life = isError ? 7000 : 3800;
+  const remove = () => {
+    toast.classList.remove("is-visible");
+    setTimeout(() => toast.remove(), 260);
+  };
+
+  // Each toast owns its own timer, so a second message no longer inherits the first one's
+  // countdown and vanish early.
+  setTimeout(remove, life);
+
+  while (host.childElementCount > 4) host.firstElementChild?.remove();
+}
+
+/// Polls run state until `isDone(poll)` is true, or the deadline passes.
+///
+/// The loops this replaces ran a fixed number of iterations and then fell through to a success
+/// toast, so on a large estate the UI announced "Catalog discovered and assessed!" while the
+/// server was still fetching. The caller now gets an explicit `timedOut` and can say so.
+async function pollUntil(isDone, { intervalMs = 600, timeoutMs = 120000, onTick = null } = {}) {
+  if (!currentRun) return { ok: false, timedOut: false, poll: null };
+
+  const deadline = Date.now() + timeoutMs;
+  let last = null;
+
+  while (Date.now() < deadline) {
+    await new Promise(r => setTimeout(r, intervalMs));
+
+    try {
+      last = await Api.pollState(currentRun.id);
+    } catch {
+      continue; // transient; keep trying until the deadline
+    }
+
+    if (!last) continue;
+    updateJourneyBadges(last);
+    if (onTick) {
+      try { onTick(last, Math.min(1, 1 - (deadline - Date.now()) / timeoutMs)); } catch { }
+    }
+    if (isDone(last)) return { ok: true, timedOut: false, poll: last };
+  }
+
+  return { ok: false, timedOut: true, poll: last };
 }
 
 function escapeHtml(str) {
-  if (!str) return "";
+  // Note: a plain `if (!str)` used to blank out the number 0 and the string "0".
+  if (str === null || str === undefined) return "";
   return String(str)
     .replace(/&/g, "&amp;")
     .replace(/</g, "&lt;")

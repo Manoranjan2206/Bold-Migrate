@@ -1319,8 +1319,32 @@ button[data-loading="true"] {
 }
 
 .modal-title-text { margin: 0; font-size: 16px; color: var(--br-text); }
-.modal-close-btn { background: none; border: none; font-size: 24px; line-height: 1; cursor: pointer; color: var(--br-text-subtle); }
-.modal-close-btn:hover { color: var(--br-text); }
+/* Close buttons were a bare glyph in --br-text-subtle (~2.6:1 on white, failing AA) with no
+   hit target, so operators had to hunt for the way out of a modal. Now a real 32px control. */
+.modal-close-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  flex: 0 0 auto;
+  padding: 0;
+  background: var(--br-surface-alt);
+  border: 1px solid var(--br-border);
+  border-radius: 50%;
+  font-size: 19px;
+  line-height: 1;
+  cursor: pointer;
+  color: var(--br-text-secondary);
+  transition: background 0.15s ease, color 0.15s ease, border-color 0.15s ease, transform 0.18s ease;
+}
+.modal-close-btn:hover {
+  background: var(--br-danger-bg);
+  border-color: var(--br-danger-border);
+  color: var(--br-danger-text);
+  transform: rotate(90deg);
+}
+.modal-close-btn:active { transform: rotate(90deg) scale(0.94); }
 .modal-body-pad { padding: 18px 20px; }
 .modal-body-msg { margin: 0; font-size: 13.5px; line-height: 1.55; color: var(--br-text-secondary); white-space: pre-line; }
 .modal-footer-end { border-top: 1px solid var(--br-border); padding: 12px 20px; display: flex; justify-content: flex-end; gap: 10px; background: var(--br-surface-alt); }
@@ -1494,4 +1518,165 @@ button[data-loading="true"] {
     transition: none !important;
     animation: none !important;
   }
+}
+
+/* -----------------------------------------------------------------------------
+   Step 2 readiness summary
+   Replaces the four KPI tiles that duplicated the filter-chip counts. One
+   sentence, one source of truth (the fetched report list), with a status accent
+   that reflects the real state instead of always reading green.
+   -------------------------------------------------------------------------- */
+.assess-summary {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 12px 14px;
+  margin-bottom: 14px;
+  border: 1px solid var(--br-border);
+  border-left: 3px solid var(--br-border-strong);
+  border-radius: 10px;
+  background: var(--br-surface-alt, #F8FAFC);
+}
+
+.assess-summary-main {
+  font-size: 15px;
+  font-weight: 650;
+  color: var(--br-text);
+}
+
+.assess-summary-sub {
+  font-size: 12.5px;
+  color: var(--br-text-secondary);
+}
+
+.assess-summary.is-ok   { border-left-color: var(--br-success); }
+.assess-summary.is-warn { border-left-color: var(--br-warning); }
+.assess-summary.is-fail { border-left-color: var(--br-danger); }
+
+.assess-summary.is-ok   .assess-summary-main { color: var(--br-success-text, var(--br-text)); }
+.assess-summary.is-warn .assess-summary-main { color: var(--br-warning-text, var(--br-text)); }
+.assess-summary.is-fail .assess-summary-main { color: var(--br-danger-text, var(--br-text)); }
+
+/* Blocked rows cannot be migrated: make that visible, not just a pill colour. */
+#library-table-body input.report-checkbox[disabled] {
+  opacity: .45;
+  cursor: not-allowed;
+}
+
+/* ==========================================================================
+   Toasts
+   The host NEVER takes pointer events. A hidden toast used to sit at z-index
+   9999 with pointer-events:auto over the bottom of the screen and silently
+   swallowed clicks on modal footers, the drawer and the Bold Reports designer.
+   ========================================================================== */
+.bm-toast-host {
+  position: fixed;
+  bottom: 24px;
+  right: 24px;
+  z-index: 9999;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 8px;
+  pointer-events: none; /* load-bearing: see comment above */
+  max-width: min(420px, calc(100vw - 48px));
+}
+
+.bm-toast {
+  /* Never auto: a visible toast sits over modal/drawer footer buttons (bottom-right is
+     where Done/Save live). Losing click-to-dismiss is far better than eating a click. */
+  pointer-events: none;
+  background: var(--br-navy);
+  color: var(--br-text-inverse);
+  padding: 11px 18px;
+  border-radius: 10px;
+  font-size: 13.5px;
+  font-weight: 500;
+  line-height: 1.45;
+  box-shadow: 0 10px 25px -3px rgba(0, 0, 0, 0.25);
+  opacity: 0;
+  transform: translateY(10px) scale(0.98);
+  transition: opacity 0.2s ease, transform 0.26s var(--br-ease-spring);
+  border-left: 3px solid transparent;
+}
+
+.bm-toast.is-visible {
+  opacity: 1;
+  transform: translateY(0) scale(1);
+}
+
+/* Several callers already passed an isError flag that the old toast ignored. */
+.bm-toast.is-error {
+  background: var(--br-danger);
+  border-left-color: #7F1D1D;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .bm-toast { transition: opacity 0.15s linear; transform: none; }
+  .bm-toast.is-visible { transform: none; }
+}
+
+/* ==========================================================================
+   Focus & next-action guidance
+   There was no global :focus-visible rule, so keyboard users could not see
+   where they were, and nothing on a step indicated which control moves the
+   journey forward — the reported "which button do I click next?".
+   ========================================================================== */
+:where(button, [href], input, select, textarea, [tabindex]):focus-visible {
+  outline: 2px solid var(--br-accent);
+  outline-offset: 2px;
+  border-radius: 6px;
+}
+
+/* The one control that advances the current step. Breathes gently so the eye
+   lands on it, and stops as soon as it is hovered, focused or disabled. */
+@keyframes bmNextPulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(255, 72, 0, 0.42); }
+  50%      { box-shadow: 0 0 0 7px rgba(255, 72, 0, 0); }
+}
+
+.btn.is-next-action:not(:disabled) {
+  animation: bmNextPulse 2.4s ease-out infinite;
+}
+
+.btn.is-next-action:hover,
+.btn.is-next-action:focus-visible {
+  animation: none;
+}
+
+/* A completed step was signalled by colour alone (green background), which is
+   invisible to colour-blind users and in a screenshot. Add an explicit mark. */
+.m-step.done .m-num {
+  position: relative;
+  color: transparent;
+}
+
+.m-step.done .m-num::after {
+  content: "✓";
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--br-success-text);
+  font-weight: 800;
+  font-size: 14px;
+}
+
+/* Panes slide in rather than snapping, so moving between steps reads as motion
+   along a journey instead of an unexplained repaint. */
+.tab-pane.is-active {
+  animation: bmPaneIn 0.26s var(--br-ease-spring);
+}
+
+@keyframes bmPaneIn {
+  from { opacity: 0; transform: translateY(8px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .btn.is-next-action:not(:disabled) { animation: none; }
+  .m-step.done .m-num::after { animation: none; }
+  .tab-pane.is-active { animation: none; }
 }

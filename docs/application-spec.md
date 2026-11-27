@@ -95,9 +95,9 @@ flowchart LR
 
 ---
 
-## 3. End-to-End 6-Step Migration Journey
+## 3. End-to-End 4-Step Migration Journey
 
-The primary console (`src/BoldMigrate.Api/wwwroot/index.html`) guides operators through a 6-step sequential journey alongside a persistent sidebar and global activity progress bar:
+The primary console (`src/BoldMigrate.Api/wwwroot/index.html`) guides operators through a 4-step sequential journey (the six capability groups below map onto those four milestones; discovery and assessment both complete in Step 1) alongside a persistent sidebar and global activity progress bar:
 
 ```mermaid
 flowchart TD
