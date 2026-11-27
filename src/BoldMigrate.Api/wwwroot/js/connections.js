@@ -72,6 +72,137 @@ function hydrateConnectionFields() {
   const destConnected = !!currentRun.destinationServerUrl;
   setConnectionIndicator("conn-dest-status-pill", "side-dest-dot", "side-dest-text",
     destConnected, destConnected ? "Connected" : "Not connected");
+
+  syncConnectionBridgeUI(ssrsConnected, destConnected);
+  syncAuthPillsFromSelects();
+
+  const discoveryBanner = document.getElementById("discovery-status-banner");
+  const discoveryTitle = document.getElementById("discovery-banner-title");
+  const discoveryDesc = document.getElementById("discovery-banner-desc");
+  const step1NextBtn = document.getElementById("btn-step1-next");
+  const hasCatalog = ["Analysed", "Uploading", "Uploaded", "Validating", "Validated", "CutOver"].includes(currentRun.status);
+  if (discoveryBanner) discoveryBanner.style.display = hasCatalog ? "flex" : "none";
+  if (step1NextBtn) step1NextBtn.style.display = hasCatalog ? "inline-flex" : "none";
+  if (hasCatalog && discoveryTitle && discoveryDesc) {
+    discoveryTitle.textContent = `Active Estate Discovered (${currentRun.status})`;
+    discoveryDesc.textContent = currentRun.sourceServerUrl
+      ? `Synced from ${currentRun.sourceServerUrl}`
+      : "Catalog staged and ready for assessment.";
+  }
+}
+
+function syncConnectionBridgeUI(ssrsConnected, destConnected) {
+  const ssrsPill = document.getElementById("bridge-ssrs-pill");
+  const ssrsLabel = document.getElementById("bridge-ssrs-label");
+  if (ssrsPill) {
+    ssrsPill.textContent = ssrsConnected ? `Connected · ${currentRun?.sourceVersion || "SSRS"}`.trim() : "Standby";
+    ssrsPill.className = ssrsConnected ? "pill ok" : "pill";
+  }
+  if (ssrsLabel) {
+    ssrsLabel.textContent = currentRun?.sourceServerUrl || "Read-only REST v2 / SOAP";
+  }
+
+  const destPill = document.getElementById("bridge-dest-pill");
+  const destLabel = document.getElementById("bridge-dest-label");
+  if (destPill) {
+    destPill.textContent = destConnected ? "Connected" : "Standby";
+    destPill.className = destConnected ? "pill ok" : "pill";
+  }
+  if (destLabel) {
+    destLabel.textContent = currentRun?.destinationServerUrl || "Target Server 15.1.17";
+  }
+
+  const engPill = document.getElementById("bridge-engine-pill");
+  if (engPill && currentRun?.status) {
+    engPill.textContent = currentRun.status;
+  }
+}
+
+function setSourceEntryMode(mode, cardEl) {
+  ["live", "folder", "scan"].forEach(m => {
+    const pane = document.getElementById(`src-mode-${m}`);
+    const card = document.getElementById(`choice-${m}`);
+    if (pane) pane.style.display = m === mode ? "block" : "none";
+    if (card) card.classList.toggle("selected", m === mode);
+  });
+  if (cardEl) cardEl.classList.add("selected");
+}
+
+function setSsrsAuthPill(authValue, btnEl) {
+  const sel = document.getElementById("conn-ssrs-auth");
+  if (sel) sel.value = authValue;
+  const wrap = document.getElementById("ssrs-auth-pills");
+  if (wrap) {
+    wrap.querySelectorAll(".seg-btn").forEach(b => {
+      b.classList.toggle("active", b === btnEl || b.dataset.auth === authValue);
+    });
+  }
+  toggleSsrsAuthFields();
+}
+
+function setDestAuthPill(modeValue, btnEl) {
+  const sel = document.getElementById("conn-dest-auth-mode");
+  if (sel) sel.value = modeValue;
+  const wrap = document.getElementById("dest-auth-pills");
+  if (wrap) {
+    wrap.querySelectorAll(".seg-btn").forEach(b => {
+      b.classList.toggle("active", b === btnEl || b.dataset.mode === modeValue);
+    });
+  }
+  toggleDestAuthFields();
+}
+
+function syncAuthPillsFromSelects() {
+  const ssrsSel = document.getElementById("conn-ssrs-auth");
+  const ssrsWrap = document.getElementById("ssrs-auth-pills");
+  if (ssrsSel && ssrsWrap) {
+    ssrsWrap.querySelectorAll(".seg-btn").forEach(b => b.classList.toggle("active", b.dataset.auth === ssrsSel.value));
+  }
+  const destSel = document.getElementById("conn-dest-auth-mode");
+  const destWrap = document.getElementById("dest-auth-pills");
+  if (destSel && destWrap) {
+    destWrap.querySelectorAll(".seg-btn").forEach(b => b.classList.toggle("active", b.dataset.mode === destSel.value));
+  }
+}
+
+function openDataSourcesDrawer() {
+  document.getElementById("drawer-ds-backdrop")?.classList.add("open");
+  document.getElementById("drawer-datasources")?.classList.add("open");
+}
+
+function closeDataSourcesDrawer() {
+  document.getElementById("drawer-ds-backdrop")?.classList.remove("open");
+  document.getElementById("drawer-datasources")?.classList.remove("open");
+}
+
+function updateDataSourceBannerSummary() {
+  const banner = document.getElementById("s1-ds-summary-banner");
+  const title = document.getElementById("s1-ds-summary-title");
+  const sub = document.getElementById("s1-ds-summary-sub");
+  const btn = document.getElementById("btn-open-ds-drawer");
+  const tbody = document.getElementById("conn-datasources-table");
+  if (!banner || !title || !sub) return;
+
+  banner.classList.remove("needs-action", "resolved");
+  if (!dataSourcesCache || dataSourcesCache.length === 0) {
+    banner.style.display = "none";
+    return;
+  }
+
+  banner.style.display = "flex";
+  const total = dataSourcesCache.length;
+  const unverified = tbody ? tbody.querySelectorAll(".pill.warn, .pill.fail").length : 0;
+  if (unverified > 0) {
+    banner.classList.add("needs-action");
+    title.textContent = `${unverified} of ${total} Data Source${total === 1 ? "" : "s"} Need Credential Verification`;
+    sub.textContent = "Some discovered sources require stored database credentials or TLS validation before Step 3 & Step 4.";
+    if (btn) btn.textContent = `Enter Credentials (${unverified}) →`;
+  } else {
+    banner.classList.add("resolved");
+    title.textContent = `All ${total} Data Source${total === 1 ? "" : "s"} Ready`;
+    sub.textContent = "Windows Integrated / validated credentials configured across discovered shared data sources.";
+    if (btn) btn.textContent = `Review Data Sources (${total}) →`;
+  }
 }
 
 function setConnectionIndicator(pillId, dotId, textId, ok, label) {
@@ -96,6 +227,7 @@ function setConnectionIndicator(pillId, dotId, textId, ok, label) {
 function renderDataSourcesTable() {
   const tbody = document.getElementById("conn-datasources-table");
   if (!tbody) return;
+  queueMicrotask(updateDataSourceBannerSummary);
 
   if (!dataSourcesCache || dataSourcesCache.length === 0) {
     tbody.innerHTML = `
@@ -471,7 +603,7 @@ async function saveAndDiscoverCatalog(forceRescan = false) {
   if (!currentRun) return;
   if (!validateRequiredInput("conn-ssrs-url", "Please enter your SSRS Report Server URL before discovering.")) return;
   const btn = document.getElementById("btn-discover-primary");
-  const btnFooter = document.getElementById("btn-discover-footer");
+  const btnFooter = null;
 
   try {
     const existingPoll = await Api.pollState(currentRun.id);
@@ -486,6 +618,11 @@ async function saveAndDiscoverCatalog(forceRescan = false) {
       currentRun = await Api.createOrGetRun("SSRS Live Migration", ssrsUrl, true);
       resetLocalRunState();
       await applyFormConnectionsToCurrentRun();
+    } else {
+      const formSsrsUrl = (document.getElementById("conn-ssrs-url")?.value || "").trim();
+      if (!currentRun.sourceServerUrl || currentRun.sourceServerUrl !== formSsrsUrl) {
+        await applyFormConnectionsToCurrentRun();
+      }
     }
 
     setButtonLoading(btn, true, "Discovering Catalog...");
@@ -529,12 +666,13 @@ async function saveAndDiscoverCatalog(forceRescan = false) {
     await refreshLibraryState();
     updateActivity("discover", "Catalog and data sources ready.", 100);
 
-    if (dataSourcesCache && dataSourcesCache.length > 0) {
-      showToast("Catalog discovered! Enter data source credentials below, then continue to Report Library.");
-      const dsTable = document.getElementById("conn-datasources-table");
-      if (dsTable) dsTable.scrollIntoView({ behavior: "smooth", block: "center" });
+    const dsBannerNeedsAction = document.getElementById("s1-ds-summary-banner")?.classList.contains("needs-action");
+    if (dataSourcesCache && dataSourcesCache.length > 0 && dsBannerNeedsAction) {
+      showToast("Catalog discovered! Enter SQL data source credentials in the slide-over drawer.");
+      openDataSourcesDrawer();
     } else {
-      showToast("Catalog discovery complete! Click 'Continue to Report Library →' when ready.");
+      showToast("Catalog discovered and assessed! Ready for Step 2.");
+      switchTab("assess");
     }
   } catch (err) {
     showToast("Discovery error: " + err.message);

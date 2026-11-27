@@ -32,7 +32,7 @@ async function loadValidationSummary(force = false) {
     const reports = summary.reports || [];
     const offlineCount = summary.dataSourceOffline || reports.filter(r => r.status === "DataSourceOffline").length || 0;
 
-    // Update 4 Metric Tiles
+    // Update Filter Status Counts (Unified Strip)
     const passEl = document.getElementById("val-stat-passed");
     const offEl = document.getElementById("val-stat-offline");
     const manEl = document.getElementById("val-stat-manual");
@@ -45,18 +45,7 @@ async function loadValidationSummary(force = false) {
     if (failEl) failEl.innerText = summary.failed || 0;
     if (totEl) totEl.innerText = summary.total || 0;
 
-    // Update Filter Pills
-    const pAll = document.getElementById("val-pill-all");
-    const pPass = document.getElementById("val-pill-passed");
-    const pOff = document.getElementById("val-pill-offline");
-    const pMan = document.getElementById("val-pill-manual");
-    const pFail = document.getElementById("val-pill-failed");
-
-    if (pAll) pAll.innerText = summary.total || 0;
-    if (pPass) pPass.innerText = summary.passed || 0;
-    if (pOff) pOff.innerText = offlineCount;
-    if (pMan) pMan.innerText = summary.needsManualCheck || 0;
-    if (pFail) pFail.innerText = summary.failed || 0;
+    updateValSelectedCountUI();
 
     const footStatus = document.getElementById("val-footer-status");
     if (footStatus) {
@@ -90,9 +79,26 @@ function setValidationViewMode(mode) {
   currentValViewMode = mode;
   const detBtn = document.getElementById("val-view-details-btn");
   const crdBtn = document.getElementById("val-view-cards-btn");
-  if (detBtn) detBtn.classList.toggle("filter-active", mode === "details");
-  if (crdBtn) crdBtn.classList.toggle("filter-active", mode === "cards");
+  if (detBtn) detBtn.classList.toggle("active", mode === "details");
+  if (crdBtn) crdBtn.classList.toggle("active", mode === "cards");
   renderValidationEvidenceGrid();
+}
+
+function toggleValActionMenu(btnEl, ev) {
+  if (ev) ev.stopPropagation();
+  const menu = btnEl?.nextElementSibling;
+  const wasOpen = menu?.classList.contains("open");
+  document.querySelectorAll(".bm-menu.open").forEach(m => m.classList.remove("open"));
+  if (menu && !wasOpen) menu.classList.add("open");
+}
+
+if (!window.__bmMenuCloserBound) {
+  window.__bmMenuCloserBound = true;
+  document.addEventListener("click", (ev) => {
+    if (!ev.target.closest(".bm-menu-wrap") || ev.target.closest(".bm-menu-item")) {
+      document.querySelectorAll(".bm-menu.open").forEach(m => m.classList.remove("open"));
+    }
+  });
 }
 
 function toggleValReportSelection(reportId, checked) {
@@ -113,18 +119,25 @@ function toggleAllValReports(checked) {
 }
 
 function updateValSelectedCountUI() {
-  const el = document.getElementById("val-selected-count");
-  if (el) el.innerText = selectedValReportIds.size;
+  const runTextEl = document.getElementById("btn-run-validation-text");
+  if (runTextEl) {
+    const sel = selectedValReportIds.size;
+    const total = validationSummaryCache?.total || 0;
+    runTextEl.innerText = sel > 0
+      ? `Validate Selected (${sel})`
+      : (total > 0 ? `Validate All (${total})` : "Validate All Reports");
+  }
+}
+
+function startSmartRenderValidation() {
+  return startAutomatedRenderValidation(selectedValReportIds.size > 0);
 }
 
 function filterValidationCards(filter) {
   currentValFilter = filter;
   ["all", "passed", "offline", "manual", "failed"].forEach(f => {
     const btn = document.getElementById(`val-btn-filter-${f}`);
-    if (btn) {
-      if (f === filter) btn.classList.add("filter-active");
-      else btn.classList.remove("filter-active");
-    }
+    if (btn) btn.classList.toggle("active", f === filter);
   });
   renderValidationEvidenceGrid();
 }
@@ -187,6 +200,25 @@ function renderValidationEvidenceGrid() {
     return;
   }
 
+  const buildValActionsHtml = (r) => {
+    const primaryBtn = r.screenshotUrl
+      ? `<button type="button" class="btn2 btn-sm" data-val-action="compare" data-report-id="${r.reportId}" title="Compare Source SSRS vs Bold Reports">◫ Compare</button>`
+      : `<button type="button" class="btn2 btn-sm" data-val-action="viewer" data-report-id="${r.reportId}" title="Preview in interactive local viewer">👁 Preview</button>`;
+    const showLogItem = r.status === "Failed" || r.status === "DataSourceOffline";
+    return `
+      ${primaryBtn}
+      <button type="button" class="btn2 btn-sm" data-val-action="designer" data-report-id="${r.reportId}" style="margin-left:4px;" title="Edit report layout">✏ Edit</button>
+      <div class="bm-menu-wrap" style="margin-left:4px;">
+        <button type="button" class="btn-ghost btn-sm" style="padding:0 8px;height:32px;border:1px solid var(--br-border);" onclick="toggleValActionMenu(this, event)" aria-label="More report actions">···</button>
+        <div class="bm-menu" role="menu">
+          <button type="button" class="bm-menu-item" role="menuitem" data-val-action="validate" data-report-id="${r.reportId}">▶ Run Visual Check</button>
+          <button type="button" class="bm-menu-item" role="menuitem" data-val-action="diff" data-report-id="${r.reportId}">{ } View RDL XML Diff</button>
+          ${r.screenshotUrl ? `<button type="button" class="bm-menu-item" role="menuitem" data-val-action="viewer" data-report-id="${r.reportId}">👁 Interactive Viewer</button>` : ""}
+          ${showLogItem ? `<button type="button" class="bm-menu-item" role="menuitem" data-val-action="logs" data-report-id="${r.reportId}">📜 View Render Log</button>` : ""}
+        </div>
+      </div>`;
+  };
+
   if (currentValViewMode === "details") {
     grid.style.display = "block";
     const allChecked = filtered.length > 0 && filtered.every(r => selectedValReportIds.has(r.reportId));
@@ -197,39 +229,28 @@ function renderValidationEvidenceGrid() {
             <tr>
               <th class="check-cell"><input type="checkbox" ${allChecked ? "checked" : ""} onchange="toggleAllValReports(this.checked)" title="Select / Deselect All"></th>
               <th>Snapshot</th>
-              <th>Report Name</th>
+              <th>Report &amp; Path</th>
               <th>Status</th>
-              <th>Details / Features</th>
               <th style="text-align:right;">Actions</th>
             </tr>
           </thead>
           <tbody>
             ${filtered.map(r => {
               const isSel = selectedValReportIds.has(r.reportId);
-              const tagsHtml = (r.featureTags || []).map(t =>
-                `<span style="font-size:10.5px;font-weight:600;padding:1px 5px;border-radius:4px;background:var(--br-info-bg);color:var(--br-primary);border:1px solid var(--br-info-border);margin-right:3px;">${escapeHtml(t)}</span>`
-              ).join("");
               const thumbCell = r.screenshotUrl
-                ? `<img src="${escapeHtml(r.screenshotUrl)}?t=${valRenderVersion}" alt="${escapeHtml(r.name)}" data-val-action="zoom" data-report-id="${r.reportId}" style="width:68px;height:42px;object-fit:cover;object-position:top;border-radius:4px;border:1px solid var(--br-border);cursor:pointer;" title="Click to expand snapshot">`
+                ? `<img src="${escapeHtml(r.screenshotUrl)}?t=${valRenderVersion}" alt="${escapeHtml(r.name)}" data-val-action="zoom" data-report-id="${r.reportId}" style="width:68px;height:42px;object-fit:cover;object-position:top;border-radius:6px;border:1px solid var(--br-border);cursor:pointer;" title="Click to expand snapshot">`
                 : `<span style="font-size:11px;color:var(--br-text-subtle);">—</span>`;
-              const detailMsg = r.status === "DataSourceOffline"
-                ? `<span style="color:var(--br-info-text);">RDL valid (DB offline in local preview)</span>`
-                : (r.errorMessage ? `<span style="color:var(--br-warning-text);">${escapeHtml(r.errorMessage)}</span>` : `<span style="color:var(--br-text-muted);">Ready</span>`);
+              const subNote = r.status === "DataSourceOffline"
+                ? `<div style="font-size:11.5px;color:var(--br-info-text);margin-top:3px;">RDL valid (DB offline locally)</div>`
+                : (r.errorMessage ? `<div style="font-size:11.5px;color:var(--br-warning-text);margin-top:3px;max-width:260px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${escapeHtml(r.errorMessage)}</div>` : "");
 
               return `
                 <tr>
                   <td class="check-cell"><input type="checkbox" ${isSel ? "checked" : ""} onchange="toggleValReportSelection('${r.reportId}', this.checked)"></td>
                   <td>${thumbCell}</td>
-                  <td><strong>${escapeHtml(r.name)}</strong><br><small style="color:var(--br-text-muted);font-family:var(--br-font-mono);">${escapeHtml(r.path)}</small></td>
-                  <td>${getValidationStatusBadge(r)}</td>
-                  <td style="font-size:12px;max-width:340px;">${tagsHtml ? `<div style="margin-bottom:3px;">${tagsHtml}</div>` : ""}${detailMsg}</td>
-                  <td style="text-align:right;white-space:nowrap;">
-                    <button class="btn2 btn-sm" data-val-action="validate" data-report-id="${r.reportId}" title="Run Playwright validation on this report only">▶ Validate</button>
-                    <button class="btn2 btn-sm" data-val-action="diff" data-report-id="${r.reportId}" style="margin-left:4px;" title="Compare Original vs Transformed RDL">XML Diff</button>
-                    ${r.screenshotUrl ? `<button class="btn2 btn-sm" data-val-action="compare" data-report-id="${r.reportId}" style="margin-left:4px;" title="Visual Swipe Slider & Pixel Diff">◫ Compare</button>` : ""}
-                    <button class="btn2 btn-sm" data-val-action="viewer" data-report-id="${r.reportId}" style="margin-left:4px;">👁 View</button>
-                    <button class="btn2 btn-sm" data-val-action="designer" data-report-id="${r.reportId}" style="margin-left:4px;">✏ Edit</button>
-                  </td>
+                  <td><strong>${escapeHtml(r.name)}</strong><br><small class="mono" style="color:var(--br-text-muted);">${escapeHtml(r.path)}</small></td>
+                  <td>${getValidationStatusBadge(r)}${subNote}</td>
+                  <td style="text-align:right;white-space:nowrap;">${buildValActionsHtml(r)}</td>
                 </tr>
               `;
             }).join("")}
@@ -243,12 +264,6 @@ function renderValidationEvidenceGrid() {
   grid.style.display = "grid";
   grid.innerHTML = filtered.map(r => {
     const isSel = selectedValReportIds.has(r.reportId);
-    // Feature tags
-    const tagsHtml = (r.featureTags || []).map(t =>
-      `<span style="font-size:11px;font-weight:600;padding:2px 7px;border-radius:4px;background:var(--br-info-bg);color:var(--br-primary);border:1px solid var(--br-info-border);">${escapeHtml(t)}</span>`
-    ).join(" ");
-
-    // Status Badge & Border
     const statusBadge = getValidationStatusBadge(r);
     let borderStyle = "border: 1px solid var(--br-border);";
     if (r.status === "Passed" || r.status === "Approved") borderStyle = "border: 1px solid var(--br-success-border);";
@@ -256,49 +271,40 @@ function renderValidationEvidenceGrid() {
     else if (r.status === "NeedsManualCheck") borderStyle = "border: 1px solid var(--br-warning-border);";
     else if (r.status === "Failed") borderStyle = "border: 1px solid var(--br-danger-border);";
 
-    // Thumbnail Preview
     let thumbHtml = "";
     if (r.screenshotUrl) {
       thumbHtml = `
         <div style="height:150px;width:100%;background:var(--br-surface-alt);border-bottom:1px solid var(--br-border);position:relative;overflow:hidden;cursor:pointer;" data-val-action="zoom" data-report-id="${r.reportId}">
           <img src="${escapeHtml(r.screenshotUrl)}?t=${valRenderVersion}" alt="${escapeHtml(r.name)}" style="width:100%;height:100%;object-fit:cover;object-position:top;" loading="lazy">
-          <div style="position:absolute;bottom:6px;right:6px;background:rgba(15,23,42,0.7);color:var(--br-text-inverse);font-size:10.5px;padding:2px 6px;border-radius:4px;backdrop-filter:blur(2px);">
-            🔍 Click to expand
-          </div>
+          <div style="position:absolute;bottom:6px;right:6px;background:rgba(15,23,42,0.7);color:var(--br-text-inverse);font-size:10.5px;padding:2px 6px;border-radius:4px;">Expand</div>
         </div>`;
     } else if (r.status === "DataSourceOffline") {
       thumbHtml = `
-        <div style="height:140px;width:100%;background:var(--br-info-bg);border-bottom:1px solid var(--br-info-border);display:flex;flex-direction:column;align-items:center;justify-content:center;color:var(--br-info);padding:12px;text-align:center;">
-          <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" style="margin-bottom:6px;"><ellipse cx="12" cy="5" rx="9" ry="3"></ellipse><path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3"></path><path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5"></path></svg>
-          <span style="font-size:12.5px;font-weight:600;color:var(--br-info-text);">Data Source Offline</span>
-          <small style="font-size:11px;color:var(--br-info);margin-top:2px;">RDL syntax valid • Ready for Server upload</small>
+        <div style="height:125px;width:100%;background:var(--br-info-bg);border-bottom:1px solid var(--br-info-border);display:flex;flex-direction:column;align-items:center;justify-content:center;color:var(--br-info);padding:12px;text-align:center;">
+          <span style="font-size:12.5px;font-weight:600;color:var(--br-info-text);">⚡ DB Offline in Local Preview</span>
+          <small style="font-size:11px;color:var(--br-info);margin-top:3px;">RDL verified · Ready for server</small>
         </div>`;
     } else if (r.status === "NeedsManualCheck") {
       thumbHtml = `
-        <div style="height:140px;width:100%;background:var(--br-warning-bg);border-bottom:1px solid var(--br-warning-border);display:flex;flex-direction:column;align-items:center;justify-content:center;color:var(--br-warning);padding:12px;text-align:center;">
-          <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" style="margin-bottom:6px;"><path d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/></svg>
-          <span style="font-size:12.5px;font-weight:600;">Requires Parameters</span>
-          <small style="font-size:11px;color:var(--br-warning-text);margin-top:2px;">Open in Viewer to supply parameters</small>
+        <div style="height:125px;width:100%;background:var(--br-warning-bg);border-bottom:1px solid var(--br-warning-border);display:flex;flex-direction:column;align-items:center;justify-content:center;color:var(--br-warning);padding:12px;text-align:center;">
+          <span style="font-size:12.5px;font-weight:600;">⚠ Parameters Required</span>
+          <small style="font-size:11px;color:var(--br-warning-text);margin-top:3px;">Preview in Viewer to test inputs</small>
         </div>`;
     } else if (r.status === "Failed") {
       thumbHtml = `
-        <div style="height:140px;width:100%;background:var(--br-danger-bg);border-bottom:1px solid var(--br-danger-border);display:flex;flex-direction:column;align-items:center;justify-content:center;color:var(--br-danger);padding:12px;text-align:center;cursor:pointer;" data-val-action="logs" data-report-id="${r.reportId}">
-          <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" style="margin-bottom:6px;"><path d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/></svg>
-          <span style="font-size:12.5px;font-weight:600;">Render Error</span>
-          <small style="font-size:11px;color:var(--br-danger-text);margin-top:2px;max-width:90%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">
-            ${escapeHtml(r.errorMessage || "Click to inspect log")}
-          </small>
+        <div style="height:125px;width:100%;background:var(--br-danger-bg);border-bottom:1px solid var(--br-danger-border);display:flex;flex-direction:column;align-items:center;justify-content:center;color:var(--br-danger);padding:12px;text-align:center;cursor:pointer;" data-val-action="logs" data-report-id="${r.reportId}">
+          <span style="font-size:12.5px;font-weight:600;">⚠ Render Error</span>
+          <small style="font-size:11px;color:var(--br-danger-text);margin-top:3px;max-width:90%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${escapeHtml(r.errorMessage || "Click to inspect log")}</small>
         </div>`;
     } else {
       thumbHtml = `
-        <div style="height:120px;width:100%;background:var(--br-surface-alt);border-bottom:1px solid var(--br-border);display:flex;flex-direction:column;align-items:center;justify-content:center;color:var(--br-text-subtle);padding:12px;text-align:center;">
-          <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" style="margin-bottom:6px;"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="16" y1="13" x2="8" y2="13"></line><line x1="16" y1="17" x2="8" y2="17"></line><polyline points="10 9 9 9 8 9"></polyline></svg>
-          <span style="font-size:12px;font-weight:500;">Not validated yet</span>
+        <div style="height:110px;width:100%;background:var(--br-surface-alt);border-bottom:1px solid var(--br-border);display:flex;align-items:center;justify-content:center;color:var(--br-text-subtle);font-size:12px;">
+          Not checked yet
         </div>`;
     }
 
     return `
-      <div class="card" style="padding:0;overflow:hidden;display:flex;flex-direction:column;border-radius:10px;${borderStyle}">
+      <div class="card" style="padding:0;overflow:visible;display:flex;flex-direction:column;border-radius:12px;${borderStyle}">
         ${thumbHtml}
         <div style="padding:14px;flex:1;display:flex;flex-direction:column;">
           <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:6px;gap:8px;">
@@ -308,43 +314,9 @@ function renderValidationEvidenceGrid() {
             </label>
             ${statusBadge}
           </div>
-          <div style="font-size:12px;color:var(--br-text-muted);margin-bottom:8px;font-family:var(--br-font-mono);">${escapeHtml(r.path)}</div>
-
-          ${tagsHtml ? `<div style="display:flex;flex-wrap:wrap;gap:4px;margin-bottom:10px;">${tagsHtml}</div>` : ""}
-
-          ${r.status === "DataSourceOffline" ? `
-            <div style="font-size:11.5px;color:var(--br-info-text);background:var(--br-info-bg);border:1px solid var(--br-info-border);border-radius:6px;padding:6px 8px;margin-bottom:10px;">
-              RDL syntax verified. Database connection is offline in local preview; report is ready for Server upload.
-            </div>` : ""}
-
-          ${r.errorMessage && r.status === "Failed" ? `
-            <div style="font-size:11.5px;color:var(--br-danger-text);background:var(--br-danger-bg);border:1px solid var(--br-danger-border);border-radius:6px;padding:6px 8px;margin-bottom:10px;max-height:48px;overflow:hidden;text-overflow:ellipsis;">
-              ${escapeHtml(r.errorMessage)}
-            </div>` : ""}
-
-          <div style="margin-top:auto;display:flex;justify-content:space-between;align-items:center;padding-top:10px;border-top:1px solid var(--br-border-subtle);flex-wrap:wrap;gap:6px;">
-            <div style="display:flex;gap:6px;flex-wrap:wrap;">
-              <button class="btn2 btn-sm" data-val-action="validate" data-report-id="${r.reportId}" title="Run Playwright validation on this report only">
-                ▶ Validate
-              </button>
-              <button class="btn2 btn-sm" data-val-action="diff" data-report-id="${r.reportId}" title="Compare Original vs Transformed RDL">
-                Diff
-              </button>
-              ${r.screenshotUrl ? `
-              <button class="btn2 btn-sm" data-val-action="compare" data-report-id="${r.reportId}" title="Visual Swipe Slider & Pixel Diff">
-                ◫ Compare
-              </button>` : ""}
-              <button class="btn2 btn-sm" data-val-action="viewer" data-report-id="${r.reportId}" title="Open interactive local viewer">
-                👁 View
-              </button>
-              <button class="btn2 btn-sm" data-val-action="designer" data-report-id="${r.reportId}" title="Edit in Web Report Designer">
-                ✏ Edit
-              </button>
-            </div>
-            ${r.status === "Failed" || r.status === "DataSourceOffline" ? `
-              <button class="btn2 btn-sm" data-val-action="logs" data-report-id="${r.reportId}" style="padding:4px 8px;font-size:11px;color:var(--br-text-muted);">
-                📜 Log
-              </button>` : ""}
+          <div class="mono" style="font-size:11.5px;color:var(--br-text-muted);margin-bottom:10px;">${escapeHtml(r.path)}</div>
+          <div style="margin-top:auto;display:flex;justify-content:flex-end;align-items:center;padding-top:10px;border-top:1px solid var(--br-border-subtle);">
+            ${buildValActionsHtml(r)}
           </div>
         </div>
       </div>
@@ -413,10 +385,8 @@ async function startAutomatedRenderValidation(selectedOnly = true) {
     return;
   }
 
-  const btnSel = document.getElementById("btn-run-selected-validation");
   const btnAll = document.getElementById("btn-run-render-validation");
-  setButtonLoading(btnSel, true, selectedOnly ? `Validating (${targetIds.length})...` : "Validation Active...");
-  setButtonLoading(btnAll, true, selectedOnly ? "Busy..." : "Validating All...");
+  setButtonLoading(btnAll, true, selectedOnly ? `Validating (${targetIds.length})...` : "Validating All...");
 
   const targetCount = selectedOnly ? targetIds.length : (validationSummaryCache?.total || 0);
   beginActivity("val-batch", "Automated Render Validation", `Starting validation for ${targetCount || "all"} report(s)...`, 5);
@@ -452,8 +422,8 @@ async function startAutomatedRenderValidation(selectedOnly = true) {
           valPollInterval = null;
           endActivity("val-batch");
           setValidationProgressBanner(false);
-          setButtonLoading(btnSel, false);
           setButtonLoading(btnAll, false);
+          updateValSelectedCountUI();
           showToast(`Validation finished! Passed: ${summary.passed}, Render Errors: ${summary.failed}, Needs Params: ${summary.needsManualCheck}`);
         }
       }
@@ -461,8 +431,8 @@ async function startAutomatedRenderValidation(selectedOnly = true) {
   } catch (err) {
     endActivity("val-batch");
     setValidationProgressBanner(false);
-    setButtonLoading(btnSel, false);
     setButtonLoading(btnAll, false);
+    updateValSelectedCountUI();
     showToast("Validation failed to start: " + err.message, true);
   }
 }
@@ -470,17 +440,17 @@ async function startAutomatedRenderValidation(selectedOnly = true) {
 async function skipRenderValidationAndUpload() {
   if (!currentRun) return;
   const confirmed = await showConfirmDialog({
-    title: "Skip Local Validation?",
-    message: "Skip local automated validation and proceed directly to Step 5: Upload Pipeline?",
-    confirmText: "Proceed to Upload"
+    title: "Skip Visual Check?",
+    message: "Skip optional local Playwright rendering and proceed directly to Step 4: Publish & Cutover?",
+    confirmText: "Proceed to Publish"
   });
   if (!confirmed) return;
 
   await withButtonProgress("btn-skip-validation", "Skipping...", "Approving Reports for Upload", async () => {
     try {
       await Api.skipValidation(currentRun.id);
-      showToast("Validation skipped. Switching to Step 5: Upload Pipeline...");
-      switchTab("migration");
+      showToast("Validation skipped. Switching to Step 4: Publish & Cutover...");
+      switchTab("publish");
     } catch (err) {
       showToast("Error skipping validation: " + err.message);
     }
